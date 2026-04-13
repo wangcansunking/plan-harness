@@ -1,0 +1,12 @@
+{
+  "name": "plan-harness-server",
+  "version": "1.0.0",
+  "description": "Local MCP server for plan-harness plugin — manages plan files and serves dashboard",
+  "type": "module",
+  "scripts": {
+    "start": "node start.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.12.0"
+  }
+}

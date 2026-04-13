@@ -1,0 +1,25 @@
+{
+  "name": "canwa-claude-plugins",
+  "description": "Personal Claude Code plugin marketplace by canwa",
+  "owner": {
+    "name": "canwa",
+    "email": "canwa@microsoft.com"
+  },
+  "plugins": [
+    {
+      "name": "plan-harness",
+      "description": "Structured project planning with agent teams — generates interconnected design docs, test plans, state machines, test cases, and implementation plans as interactive HTML",
+      "version": "1.0.0",
+      "source": "./",
+      "category": "planning",
+      "tags": [
+        "planning",
+        "design-docs",
+        "test-plans",
+        "agent-team",
+        "interactive-html",
+        "code-review"
+      ]
+    }
+  ]
+}

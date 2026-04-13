@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "plan-harness": {
+      "command": "node",
+      "args": [
+        "${CLAUDE_PLUGIN_ROOT}/local-proxy/start.js"
+      ]
+    }
+  }
+}
