@@ -340,9 +340,12 @@ plan-harness/                            27 source files, ~9,000 lines
 
 ## Quick Start
 
-### 1. Register the plugin
+### 1. Install the plugin
 
-Add to your Claude Code settings or install from marketplace.
+```bash
+claude plugins marketplace add https://github.com/wangcansunking/sunky-claude-code-marketplace
+claude plugins install plan-harness@canwa-claude-plugins
+```
 
 ### 2. Create a project context (once per project)
 
