@@ -3,6 +3,7 @@
 // Uses only node:http, node:fs, node:path, node:url (no external deps).
 
 import { createServer } from 'node:http';
+import { createHash, randomBytes } from 'node:crypto';
 import { readdir, readFile, stat } from 'node:fs/promises';
 import { join, basename, extname, resolve } from 'node:path';
 import { URL } from 'node:url';
@@ -14,6 +15,10 @@ import {
 let server = null;
 let serverPort = null;
 let workspaceRootPath = null;
+
+// ---- Password protection state ----
+let authPassword = null;   // null = no protection, string = password required
+let authSessions = new Set(); // valid session tokens (cookie-based)
 
 /**
  * Start the dashboard server.
@@ -93,6 +98,36 @@ export function getDashboardUrl() {
   return `http://localhost:${serverPort}`;
 }
 
+// ---- Password protection API ----
+
+/**
+ * Enable password protection. All requests must provide the password
+ * via ?token= query param or a valid session cookie.
+ * @param {string} password - The password to require.
+ */
+export function enablePasswordProtection(password) {
+  authPassword = password;
+  authSessions.clear();
+  console.error(`[plan-harness] Password protection enabled.`);
+}
+
+/**
+ * Disable password protection. All requests are allowed.
+ */
+export function disablePasswordProtection() {
+  authPassword = null;
+  authSessions.clear();
+  console.error(`[plan-harness] Password protection disabled.`);
+}
+
+/**
+ * Check if password protection is currently enabled.
+ * @returns {boolean}
+ */
+export function isPasswordProtected() {
+  return authPassword !== null;
+}
+
 // ---- Internal request handling ----
 
 async function handleRequest(req, res) {
@@ -101,6 +136,36 @@ async function handleRequest(req, res) {
 
   // CORS headers for local development
   res.setHeader('Access-Control-Allow-Origin', '*');
+
+  // ---- Password protection gate ----
+  if (authPassword !== null) {
+    // Allow the login endpoint through
+    if (pathname === '/_auth/login' && req.method === 'POST') {
+      return handleLogin(req, res, parsedUrl);
+    }
+
+    // Check auth: ?token= param, or session cookie
+    const token = parsedUrl.searchParams.get('token');
+    const sessionCookie = parseCookie(req.headers.cookie || '', 'plan_session');
+
+    if (token === authPassword) {
+      // Token in URL — set a session cookie so subsequent requests don't need it
+      const session = randomBytes(16).toString('hex');
+      authSessions.add(session);
+      res.setHeader('Set-Cookie', `plan_session=${session}; Path=/; HttpOnly; SameSite=Lax`);
+      // Redirect to the same URL without the token param (clean URL)
+      const cleanUrl = new URL(parsedUrl.href);
+      cleanUrl.searchParams.delete('token');
+      res.writeHead(302, { Location: cleanUrl.pathname + cleanUrl.search });
+      res.end();
+      return;
+    }
+
+    if (!sessionCookie || !authSessions.has(sessionCookie)) {
+      // Not authenticated — serve login page
+      return serveLoginPage(req, res);
+    }
+  }
 
   // Route: GET / -> Dashboard
   if (pathname === '/' && req.method === 'GET') {
@@ -482,5 +547,79 @@ async function readScenarioDescription(dirPath) {
     return meta.description || null;
   } catch {
     return null;
+  }
+}
+
+// ---- Password protection helpers ----
+
+function parseCookie(cookieHeader, name) {
+  const match = cookieHeader.match(new RegExp(`(?:^|;\\s*)${name}=([^;]*)`));
+  return match ? match[1] : null;
+}
+
+function serveLoginPage(req, res) {
+  const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Plan Dashboard — Login</title>
+<style>
+  :root { --bg: #0d1117; --surface: #161b22; --border: #30363d; --text: #e6edf3; --accent: #58a6ff; --red: #f85149; }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: var(--bg); color: var(--text); display: flex; align-items: center; justify-content: center; min-height: 100vh; }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 2.5rem; width: 360px; box-shadow: 0 4px 24px rgba(0,0,0,0.4); }
+  h1 { font-size: 1.3rem; margin-bottom: 0.5rem; }
+  p { color: #8b949e; font-size: 0.85rem; margin-bottom: 1.5rem; }
+  input { width: 100%; padding: 0.7rem 1rem; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; color: var(--text); font-size: 1rem; margin-bottom: 1rem; outline: none; }
+  input:focus { border-color: var(--accent); }
+  button { width: 100%; padding: 0.7rem; background: var(--accent); color: #fff; border: none; border-radius: 6px; font-size: 1rem; font-weight: 600; cursor: pointer; }
+  button:hover { opacity: 0.9; }
+  .error { color: var(--red); font-size: 0.85rem; margin-bottom: 1rem; display: none; }
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>Plan Dashboard</h1>
+  <p>This dashboard is password-protected.</p>
+  <div class="error" id="error">Incorrect password. Try again.</div>
+  <form method="POST" action="/_auth/login">
+    <input type="password" name="password" placeholder="Enter password" autofocus required>
+    <button type="submit">Unlock</button>
+  </form>
+</div>
+<script>
+  if (location.search.includes('error=1')) document.getElementById('error').style.display = 'block';
+</script>
+</body>
+</html>`;
+
+  res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+  res.end(html);
+}
+
+async function handleLogin(req, res, parsedUrl) {
+  // Read POST body
+  const chunks = [];
+  for await (const chunk of req) chunks.push(chunk);
+  const body = Buffer.concat(chunks).toString();
+
+  // Parse form data (application/x-www-form-urlencoded)
+  const params = new URLSearchParams(body);
+  const password = params.get('password');
+
+  if (password === authPassword) {
+    // Correct — create session
+    const session = randomBytes(16).toString('hex');
+    authSessions.add(session);
+    res.writeHead(302, {
+      'Set-Cookie': `plan_session=${session}; Path=/; HttpOnly; SameSite=Lax`,
+      Location: '/'
+    });
+    res.end();
+  } else {
+    // Wrong password — redirect back with error
+    res.writeHead(302, { Location: '/_auth/login?error=1' });
+    res.end();
   }
 }

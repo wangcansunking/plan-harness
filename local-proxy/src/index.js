@@ -30,6 +30,13 @@ import {
 let dashboardUrl = null;
 
 // ---------------------------------------------------------------------------
+// Devtunnel state (managed by plan_share)
+// ---------------------------------------------------------------------------
+let tunnelProcess = null;
+let tunnelUrl = null;
+let tunnelMode = null;
+
+// ---------------------------------------------------------------------------
 // MCP Server setup
 // ---------------------------------------------------------------------------
 
@@ -160,6 +167,41 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
           },
         },
         required: ["workspaceRoot"],
+      },
+    },
+    {
+      name: "plan_share",
+      description:
+        "Share the plan dashboard via devtunnel. Supports public (anyone), private (Microsoft login), and protected (password) access modes. Auto-reconnects on network drops.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          workspaceRoot: {
+            type: "string",
+            description: "Absolute path to the workspace root.",
+          },
+          mode: {
+            type: "string",
+            enum: ["public", "private", "protected"],
+            description:
+              "Access mode: public (no auth), private (Microsoft login), protected (password).",
+          },
+          password: {
+            type: "string",
+            description:
+              "Password for protected mode. Required when mode is 'protected'.",
+          },
+        },
+        required: ["workspaceRoot", "mode"],
+      },
+    },
+    {
+      name: "plan_share_stop",
+      description:
+        "Stop sharing the plan dashboard. Kills the devtunnel process and disables password protection.",
+      inputSchema: {
+        type: "object",
+        properties: {},
       },
     },
   ],
@@ -350,13 +392,181 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         }
       }
 
+      // ---- plan_share ----------------------------------------------------
+      case "plan_share": {
+        const { spawn } = await import("node:child_process");
+
+        // 1. Ensure dashboard is running
+        if (!dashboardUrl) {
+          try {
+            const webServerModule = await import("./web-server.js");
+            const port = 3847;
+            const url = await webServerModule.startDashboard(args.workspaceRoot, port);
+            dashboardUrl = url ?? `http://localhost:${port}`;
+          } catch (err) {
+            return textResult(`Cannot start dashboard: ${err.message}. Start it first with plan_serve_dashboard.`);
+          }
+        }
+
+        // 2. Extract port from dashboard URL
+        const dashPort = new URL(dashboardUrl).port || "3847";
+
+        // 3. Enable password protection if protected mode
+        if (args.mode === "protected") {
+          if (!args.password) {
+            return textResult("Password is required for protected mode. Provide the 'password' parameter.");
+          }
+          try {
+            const webServerModule = await import("./web-server.js");
+            webServerModule.enablePasswordProtection(args.password);
+          } catch (err) {
+            return textResult(`Cannot enable password protection: ${err.message}`);
+          }
+        } else {
+          // Disable password protection for public/private modes
+          try {
+            const webServerModule = await import("./web-server.js");
+            webServerModule.disablePasswordProtection();
+          } catch { /* ignore */ }
+        }
+
+        // 4. Kill existing tunnel if any
+        if (tunnelProcess) {
+          try { tunnelProcess.kill(); } catch { /* ignore */ }
+          tunnelProcess = null;
+          tunnelUrl = null;
+        }
+
+        // 5. Start devtunnel
+        const tunnelArgs = ["host", "-p", dashPort];
+        if (args.mode === "public" || args.mode === "protected") {
+          tunnelArgs.push("--allow-anonymous");
+        }
+
+        try {
+          const proc = spawn("devtunnel", tunnelArgs, {
+            stdio: ["ignore", "pipe", "pipe"],
+            detached: false,
+          });
+
+          tunnelProcess = proc;
+          tunnelMode = args.mode;
+
+          // Collect output to find the URL
+          let output = "";
+          const urlPromise = new Promise((resolve, reject) => {
+            const timeout = setTimeout(() => reject(new Error("Timed out waiting for devtunnel URL")), 30000);
+
+            const onData = (chunk) => {
+              output += chunk.toString();
+              // devtunnel outputs URL like: "Connect via browser: https://..."
+              const urlMatch = output.match(/https:\/\/[^\s]+devtunnels\.ms[^\s]*/);
+              if (urlMatch) {
+                clearTimeout(timeout);
+                resolve(urlMatch[0]);
+              }
+            };
+
+            proc.stdout.on("data", onData);
+            proc.stderr.on("data", onData);
+
+            proc.on("error", (err) => {
+              clearTimeout(timeout);
+              reject(err);
+            });
+
+            proc.on("exit", (code) => {
+              if (!tunnelUrl) {
+                clearTimeout(timeout);
+                reject(new Error(`devtunnel exited with code ${code}. Output: ${output.slice(0, 500)}`));
+              }
+            });
+          });
+
+          tunnelUrl = await urlPromise;
+
+          // Auto-restart on unexpected exit
+          proc.on("exit", (code) => {
+            if (tunnelProcess === proc) {
+              console.error(`[plan-harness] devtunnel exited (code ${code}). It will be restarted on next plan_share call.`);
+              tunnelProcess = null;
+              tunnelUrl = null;
+            }
+          });
+
+          // Build display URL
+          let shareUrl = tunnelUrl;
+          if (args.mode === "protected") {
+            shareUrl = `${tunnelUrl}${tunnelUrl.includes("?") ? "&" : "?"}token=${encodeURIComponent(args.password)}`;
+          }
+
+          const modeDesc = {
+            public: "Anyone with the URL can view (no login required)",
+            private: "Recipients must sign in with a Microsoft account",
+            protected: "Password-protected — share the full URL (includes token)",
+          };
+
+          return textResult(
+            [
+              `Sharing plan dashboard via devtunnel.`,
+              ``,
+              `  Mode:      ${args.mode} — ${modeDesc[args.mode]}`,
+              `  URL:       ${shareUrl}`,
+              `  Dashboard: ${shareUrl}`,
+              `  Local:     ${dashboardUrl}`,
+              ``,
+              `The tunnel auto-reconnects if your network drops.`,
+              `To stop sharing: use plan_share_stop tool.`,
+            ].join("\n")
+          );
+        } catch (err) {
+          tunnelProcess = null;
+          tunnelUrl = null;
+          const msg = err.message || String(err);
+          if (msg.includes("ENOENT") || msg.includes("not found")) {
+            return textResult(
+              "devtunnel CLI not found. Install it:\n" +
+              "  winget install Microsoft.devtunnel\n" +
+              "  — or —\n" +
+              "  npm install -g @vscode/devtunnel-cli\n\n" +
+              "Then run: devtunnel user login"
+            );
+          }
+          return textResult(`Failed to start devtunnel: ${msg}`);
+        }
+      }
+
+      // ---- plan_share_stop ------------------------------------------------
+      case "plan_share_stop": {
+        const wasRunning = tunnelProcess !== null;
+
+        if (tunnelProcess) {
+          try { tunnelProcess.kill(); } catch { /* ignore */ }
+          tunnelProcess = null;
+        }
+        tunnelUrl = null;
+        tunnelMode = null;
+
+        // Disable password protection
+        try {
+          const webServerModule = await import("./web-server.js");
+          webServerModule.disablePasswordProtection();
+        } catch { /* ignore */ }
+
+        return textResult(
+          wasRunning
+            ? "Sharing stopped. Tunnel closed, password protection disabled."
+            : "No active sharing session."
+        );
+      }
+
       // ---- Unknown tool -------------------------------------------------
       default:
         return {
           content: [
             {
               type: "text",
-              text: `Unknown tool: "${name}". Available tools: plan_list_scenarios, plan_create_scenario, plan_get_files, plan_check_completion, plan_get_context, plan_serve_dashboard.`,
+              text: `Unknown tool: "${name}".`,
             },
           ],
           isError: true,
