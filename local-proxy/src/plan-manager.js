@@ -166,13 +166,28 @@ export async function listScenarios(workspaceRoot) {
  * @returns {Promise<{scenarioPath: string, manifest: object}>}
  */
 export async function createScenario(repoRoot, scenarioName, metadata = {}) {
-  // Sanitise the scenario name for use as a directory name
+  // Sanitise the scenario name for use as a directory name.
+  // Strip path-hostile chars, collapse whitespace, strip leading dots so that
+  // "../../outside" cannot escape plans/ via relative-path tricks.
   const safeName = scenarioName
     .replace(/[<>:"/\\|?*]/g, "-")
     .replace(/\s+/g, "-")
+    .replace(/\.+/g, "-")
+    .replace(/^-+|-+$/g, "")
     .toLowerCase();
 
-  const scenarioPath = norm(join(repoRoot, "plans", safeName));
+  if (!safeName) {
+    throw new Error(`Invalid scenario name: "${scenarioName}"`);
+  }
+
+  const plansRoot = join(repoRoot, "plans");
+  const scenarioPath = join(plansRoot, safeName);
+
+  // Defence in depth: assert final path stays under plans/
+  const rel = relative(plansRoot, scenarioPath);
+  if (rel.startsWith("..") || rel.includes(sep + "..") || rel === "") {
+    throw new Error(`Scenario path escapes plans/: "${scenarioName}" -> "${safeName}"`);
+  }
 
   await mkdir(scenarioPath, { recursive: true });
 
@@ -364,10 +379,11 @@ export async function checkCompletion(scenarioPath, repoRoot) {
             if (![".cs", ".ts", ".tsx", ".js", ".jsx", ".py"].includes(ext)) continue;
             try {
               const content = await readFile(join(srcDir, d.name, f.name), "utf-8");
+              // Only precise matches — a bare `.includes(tag)` on short tags like
+              // "auth"/"ui" produces false positives in nearly every source file.
               if (
                 content.includes(`TODO(${scenarioTag})`) ||
-                content.includes(`TODO: ${scenarioTag}`) ||
-                content.toLowerCase().includes(scenarioTag.toLowerCase())
+                content.includes(`TODO: ${scenarioTag}`)
               ) {
                 evidence.push(`Reference found in ${d.name}/${f.name}`);
               }

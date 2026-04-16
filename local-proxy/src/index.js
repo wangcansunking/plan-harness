@@ -172,7 +172,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
     {
       name: "plan_share",
       description:
-        "Share the plan dashboard via devtunnel. Supports public (anyone), private (Microsoft login), and protected (password) access modes. Auto-reconnects on network drops.",
+        "Share the plan dashboard via devtunnel. Supports public (anyone), private (Microsoft login), and protected (a temporary password the plugin generates, shared out-of-band with reviewers). In protected mode, reviewers land on a login page that asks for the password and a display name for comment attribution. Auto-reconnects on network drops.",
       inputSchema: {
         type: "object",
         properties: {
@@ -184,12 +184,12 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
             type: "string",
             enum: ["public", "private", "protected"],
             description:
-              "Access mode: public (no auth), private (Microsoft login), protected (password).",
+              "Access mode: public (no auth), private (Microsoft login via devtunnel), protected (plugin-managed temporary password).",
           },
           password: {
             type: "string",
             description:
-              "Password for protected mode. Required when mode is 'protected'.",
+              "Optional override for protected mode. If omitted, the plugin generates a secure random password and prints it in the response.",
           },
         },
         required: ["workspaceRoot", "mode"],
@@ -411,14 +411,14 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         // 2. Extract port from dashboard URL
         const dashPort = new URL(dashboardUrl).port || "3847";
 
-        // 3. Enable password protection if protected mode
+        // 3. Enable password protection for protected mode. If the caller did
+        //    not supply a password, the plugin generates one — this is the
+        //    default path and avoids the host needing to think one up.
+        let protectedPassword = null;
         if (args.mode === "protected") {
-          if (!args.password) {
-            return textResult("Password is required for protected mode. Provide the 'password' parameter.");
-          }
           try {
             const webServerModule = await import("./web-server.js");
-            webServerModule.enablePasswordProtection(args.password);
+            protectedPassword = webServerModule.enablePasswordProtection(args.password);
           } catch (err) {
             return textResult(`Cannot enable password protection: ${err.message}`);
           }
@@ -494,41 +494,53 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             }
           });
 
-          // Build display URL
-          let shareUrl = tunnelUrl;
-          if (args.mode === "protected") {
-            shareUrl = `${tunnelUrl}${tunnelUrl.includes("?") ? "&" : "?"}token=${encodeURIComponent(args.password)}`;
-          }
-
+          // Build display output. The URL is ALWAYS clean — no password, no
+          // token. In protected mode the password is printed alongside for the
+          // host to share out-of-band (Slack/DM/whatever); it never appears in
+          // the URL, nor in any HTTP header.
           const modeDesc = {
             public: "Anyone with the URL can view (no login required)",
-            private: "Recipients must sign in with a Microsoft account",
-            protected: "Password-protected — share the full URL (includes token)",
+            private: "Recipients must sign in with a Microsoft account via devtunnel",
+            protected: "Reviewer enters the password plus a display name on a login page",
           };
 
-          return textResult(
-            [
-              `Sharing plan dashboard via devtunnel.`,
+          const lines = [
+            `Sharing plan dashboard via devtunnel.`,
+            ``,
+            `  Mode:      ${args.mode} — ${modeDesc[args.mode]}`,
+            `  URL:       ${tunnelUrl}`,
+            `  Local:     ${dashboardUrl}`,
+          ];
+
+          if (args.mode === "protected") {
+            lines.push(
               ``,
-              `  Mode:      ${args.mode} — ${modeDesc[args.mode]}`,
-              `  URL:       ${shareUrl}`,
-              `  Dashboard: ${shareUrl}`,
-              `  Local:     ${dashboardUrl}`,
+              `  Password:  ${protectedPassword}`,
               ``,
-              `The tunnel auto-reconnects if your network drops.`,
-              `To stop sharing: use plan_share_stop tool.`,
-            ].join("\n")
+              `  Share the URL and the password separately with reviewers.`,
+              `  Do NOT paste the password into the URL — the login page will`,
+              `  prompt for it along with the reviewer's display name.`
+            );
+          }
+
+          lines.push(
+            ``,
+            `The tunnel auto-reconnects if your network drops.`,
+            `To stop sharing: use plan_share_stop tool.`
           );
+
+          return textResult(lines.join("\n"));
         } catch (err) {
           tunnelProcess = null;
           tunnelUrl = null;
           const msg = err.message || String(err);
           if (msg.includes("ENOENT") || msg.includes("not found")) {
             return textResult(
-              "devtunnel CLI not found. Install it:\n" +
-              "  winget install Microsoft.devtunnel\n" +
-              "  — or —\n" +
-              "  npm install -g @vscode/devtunnel-cli\n\n" +
+              "devtunnel CLI not found. Install for your platform:\n" +
+              "  Windows:  winget install Microsoft.devtunnel\n" +
+              "  macOS:    brew install --cask devtunnel\n" +
+              "  Linux:    curl -sL https://aka.ms/DevTunnelCliInstall | bash\n" +
+              "  Any OS:   download from https://aka.ms/devtunnels/download\n\n" +
               "Then run: devtunnel user login"
             );
           }

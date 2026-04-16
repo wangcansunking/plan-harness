@@ -3,22 +3,20 @@
 // Uses only node:http, node:fs, node:path, node:url (no external deps).
 
 import { createServer } from 'node:http';
-import { createHash, randomBytes } from 'node:crypto';
 import { readdir, readFile, stat } from 'node:fs/promises';
-import { join, basename, extname, resolve } from 'node:path';
+import { join, basename, extname, resolve, sep } from 'node:path';
 import { URL } from 'node:url';
 import {
   generateDashboard,
   generateScenarioDetail
 } from './templates/base.js';
+import * as auth from './auth.js';
 
 let server = null;
 let serverPort = null;
 let workspaceRootPath = null;
 
-// ---- Password protection state ----
-let authPassword = null;   // null = no protection, string = password required
-let authSessions = new Set(); // valid session tokens (cookie-based)
+const COOKIE_NAME = 'plan_session';
 
 /**
  * Start the dashboard server.
@@ -101,31 +99,29 @@ export function getDashboardUrl() {
 // ---- Password protection API ----
 
 /**
- * Enable password protection. All requests must provide the password
- * via ?token= query param or a valid session cookie.
- * @param {string} password - The password to require.
+ * Enable password protection. Non-loopback requests must authenticate via the
+ * login form (password + reviewer name). Loopback requests bypass auth — the
+ * host viewing their own machine does not need to log in.
+ *
+ * @param {string} [customPassword] - Optional explicit password; if omitted a
+ *   secure random one is generated.
+ * @returns {string} The active password (useful so the host can share it out-of-band).
  */
-export function enablePasswordProtection(password) {
-  authPassword = password;
-  authSessions.clear();
+export function enablePasswordProtection(customPassword) {
+  const pw = auth.enable(customPassword);
   console.error(`[plan-harness] Password protection enabled.`);
+  return pw;
 }
 
-/**
- * Disable password protection. All requests are allowed.
- */
+/** Disable password protection. All requests are allowed. */
 export function disablePasswordProtection() {
-  authPassword = null;
-  authSessions.clear();
+  auth.disable();
   console.error(`[plan-harness] Password protection disabled.`);
 }
 
-/**
- * Check if password protection is currently enabled.
- * @returns {boolean}
- */
+/** @returns {boolean} */
 export function isPasswordProtected() {
-  return authPassword !== null;
+  return auth.isEnabled();
 }
 
 // ---- Internal request handling ----
@@ -134,37 +130,30 @@ async function handleRequest(req, res) {
   const parsedUrl = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
   const pathname = parsedUrl.pathname;
 
-  // CORS headers for local development
-  res.setHeader('Access-Control-Allow-Origin', '*');
-
   // ---- Password protection gate ----
-  if (authPassword !== null) {
-    // Allow the login endpoint through
-    if (pathname === '/_auth/login' && req.method === 'POST') {
-      return handleLogin(req, res, parsedUrl);
-    }
+  // Loopback bypass: if the request came from the host machine itself, no auth
+  // is needed — the protection is only meaningful when the dashboard is shared
+  // externally via a tunnel. This keeps the local UX frictionless.
+  const fromLoopback = auth.isLoopback(req.socket?.remoteAddress);
 
-    // Check auth: ?token= param, or session cookie
-    const token = parsedUrl.searchParams.get('token');
-    const sessionCookie = parseCookie(req.headers.cookie || '', 'plan_session');
+  // The login POST is the sole entry point into authentication and must be
+  // reachable regardless of loopback status so the form on the login page
+  // can always submit successfully.
+  if (auth.isEnabled() && pathname === '/_auth/login' && req.method === 'POST') {
+    return handleLogin(req, res);
+  }
 
-    if (token === authPassword) {
-      // Token in URL — set a session cookie so subsequent requests don't need it
-      const session = randomBytes(16).toString('hex');
-      authSessions.add(session);
-      res.setHeader('Set-Cookie', `plan_session=${session}; Path=/; HttpOnly; SameSite=Lax`);
-      // Redirect to the same URL without the token param (clean URL)
-      const cleanUrl = new URL(parsedUrl.href);
-      cleanUrl.searchParams.delete('token');
-      res.writeHead(302, { Location: cleanUrl.pathname + cleanUrl.search });
-      res.end();
-      return;
-    }
+  if (auth.isEnabled() && !fromLoopback) {
+    const cookieValue = parseCookie(req.headers.cookie || '', COOKIE_NAME);
+    const session = auth.verifyCookie(cookieValue);
 
-    if (!sessionCookie || !authSessions.has(sessionCookie)) {
-      // Not authenticated — serve login page
+    if (!session) {
+      // Not authenticated — serve login page.
       return serveLoginPage(req, res);
     }
+
+    // Attach the authenticated reviewer to the request for downstream handlers.
+    req.user = session;
   }
 
   // Route: GET / -> Dashboard
@@ -195,6 +184,15 @@ async function handleRequest(req, res) {
   if (statusMatch && req.method === 'GET') {
     const scenarioName = decodeURIComponent(statusMatch[1]);
     return serveApiScenarioStatus(req, res, scenarioName);
+  }
+
+  // Route: GET /api/me -> JSON { name } for the authenticated reviewer
+  // Used by future comment UI to display/attribute the current viewer.
+  if (pathname === '/api/me' && req.method === 'GET') {
+    const name = req.user?.name || (fromLoopback ? 'Host (local)' : 'Anonymous');
+    res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+    res.end(JSON.stringify({ name, authenticated: !!req.user || fromLoopback }));
+    return;
   }
 
   // 404
@@ -249,9 +247,10 @@ async function serveHtmlFile(req, res, filePath) {
     return;
   }
 
-  // Resolve and validate path: must be an absolute path under the workspace root
+  // Resolve and validate path: must be an absolute path under the workspace root.
+  // Use path-separator suffix so that /foo/barEvil does not pass when root is /foo/bar.
   const resolved = resolve(filePath);
-  if (!resolved.startsWith(workspaceRootPath)) {
+  if (resolved !== workspaceRootPath && !resolved.startsWith(workspaceRootPath + sep)) {
     res.writeHead(403, { 'Content-Type': 'text/plain' });
     res.end('Access denied: path is outside workspace root');
     return;
@@ -557,69 +556,130 @@ function parseCookie(cookieHeader, name) {
   return match ? match[1] : null;
 }
 
+function escapeHtml(s) {
+  return String(s ?? '').replace(/[&<>"']/g, (c) => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+  }[c]));
+}
+
 function serveLoginPage(req, res) {
+  const parsedUrl = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
+  const errorCode = parsedUrl.searchParams.get('error'); // 'bad' | 'rate' | null
+  const retryAfter = parsedUrl.searchParams.get('retry'); // seconds
+  // Convenience: ?reviewer=alice pre-fills the name field so a host can
+  // personalize share links, e.g. https://…/?reviewer=Alice
+  const suggestedName = parsedUrl.searchParams.get('reviewer') || '';
+
+  let errorHtml = '';
+  if (errorCode === 'bad') {
+    errorHtml = `<div class="error">Incorrect password. Try again.</div>`;
+  } else if (errorCode === 'rate') {
+    const secs = Math.max(1, parseInt(retryAfter || '0', 10));
+    errorHtml = `<div class="error">Too many attempts. Try again in ~${secs}s.</div>`;
+  }
+
   const html = `<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Plan Dashboard — Login</title>
+<title>Plan Dashboard — Sign in</title>
 <style>
-  :root { --bg: #0d1117; --surface: #161b22; --border: #30363d; --text: #e6edf3; --accent: #58a6ff; --red: #f85149; }
+  :root { --bg: #0d1117; --surface: #161b22; --border: #30363d; --text: #e6edf3; --muted: #8b949e; --accent: #58a6ff; --red: #f85149; }
   * { margin: 0; padding: 0; box-sizing: border-box; }
-  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: var(--bg); color: var(--text); display: flex; align-items: center; justify-content: center; min-height: 100vh; }
-  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 2.5rem; width: 360px; box-shadow: 0 4px 24px rgba(0,0,0,0.4); }
-  h1 { font-size: 1.3rem; margin-bottom: 0.5rem; }
-  p { color: #8b949e; font-size: 0.85rem; margin-bottom: 1.5rem; }
-  input { width: 100%; padding: 0.7rem 1rem; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; color: var(--text); font-size: 1rem; margin-bottom: 1rem; outline: none; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: var(--bg); color: var(--text); display: flex; align-items: center; justify-content: center; min-height: 100vh; padding: 1rem; }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 2.25rem; width: 100%; max-width: 380px; box-shadow: 0 4px 24px rgba(0,0,0,0.4); }
+  h1 { font-size: 1.25rem; margin-bottom: 0.35rem; }
+  .lede { color: var(--muted); font-size: 0.85rem; margin-bottom: 1.25rem; line-height: 1.5; }
+  label { display: block; font-size: 0.8rem; color: var(--muted); margin-bottom: 0.35rem; }
+  input { width: 100%; padding: 0.65rem 0.85rem; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; color: var(--text); font-size: 0.95rem; margin-bottom: 0.9rem; outline: none; font-family: inherit; }
   input:focus { border-color: var(--accent); }
-  button { width: 100%; padding: 0.7rem; background: var(--accent); color: #fff; border: none; border-radius: 6px; font-size: 1rem; font-weight: 600; cursor: pointer; }
-  button:hover { opacity: 0.9; }
-  .error { color: var(--red); font-size: 0.85rem; margin-bottom: 1rem; display: none; }
+  button { width: 100%; padding: 0.7rem; background: var(--accent); color: #fff; border: none; border-radius: 6px; font-size: 0.95rem; font-weight: 600; cursor: pointer; margin-top: 0.35rem; }
+  button:hover { opacity: 0.92; }
+  .error { color: var(--red); font-size: 0.82rem; margin-bottom: 0.9rem; background: rgba(248,81,73,0.12); border: 1px solid rgba(248,81,73,0.3); padding: 0.5rem 0.7rem; border-radius: 6px; }
+  .note { color: var(--muted); font-size: 0.75rem; margin-top: 0.9rem; text-align: center; }
 </style>
 </head>
 <body>
 <div class="card">
   <h1>Plan Dashboard</h1>
-  <p>This dashboard is password-protected.</p>
-  <div class="error" id="error">Incorrect password. Try again.</div>
-  <form method="POST" action="/_auth/login">
-    <input type="password" name="password" placeholder="Enter password" autofocus required>
-    <button type="submit">Unlock</button>
+  <p class="lede">Enter the password shared with you, and a name to display on your comments.</p>
+  ${errorHtml}
+  <form method="POST" action="/_auth/login" autocomplete="off">
+    <label for="name">Your name</label>
+    <input id="name" type="text" name="name" placeholder="e.g. Alice" value="${escapeHtml(suggestedName)}" maxlength="80" autofocus required>
+    <label for="password">Password</label>
+    <input id="password" type="password" name="password" placeholder="Password from host" required>
+    <button type="submit">Continue</button>
   </form>
+  <p class="note">Your name is used only to attribute your comments.</p>
 </div>
-<script>
-  if (location.search.includes('error=1')) document.getElementById('error').style.display = 'block';
-</script>
 </body>
 </html>`;
 
-  res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+  res.writeHead(200, {
+    'Content-Type': 'text/html; charset=utf-8',
+    'Cache-Control': 'no-store',
+    'X-Content-Type-Options': 'nosniff',
+    'Referrer-Policy': 'no-referrer',
+  });
   res.end(html);
 }
 
-async function handleLogin(req, res, parsedUrl) {
-  // Read POST body
-  const chunks = [];
-  for await (const chunk of req) chunks.push(chunk);
-  const body = Buffer.concat(chunks).toString();
+async function handleLogin(req, res) {
+  const clientIp = req.socket?.remoteAddress || 'unknown';
 
-  // Parse form data (application/x-www-form-urlencoded)
-  const params = new URLSearchParams(body);
-  const password = params.get('password');
-
-  if (password === authPassword) {
-    // Correct — create session
-    const session = randomBytes(16).toString('hex');
-    authSessions.add(session);
+  // Rate-limit before reading body so attackers pay an earlier cost.
+  const rate = auth.checkRate(clientIp);
+  if (!rate.allowed) {
+    const secs = Math.ceil(rate.retryAfterMs / 1000);
     res.writeHead(302, {
-      'Set-Cookie': `plan_session=${session}; Path=/; HttpOnly; SameSite=Lax`,
-      Location: '/'
+      Location: `/_auth/login?error=rate&retry=${secs}`,
+      'Retry-After': String(secs),
     });
     res.end();
-  } else {
-    // Wrong password — redirect back with error
-    res.writeHead(302, { Location: '/_auth/login?error=1' });
-    res.end();
+    return;
   }
+
+  // Read the body with a hard cap to avoid memory abuse.
+  const MAX_BODY = 4096;
+  const chunks = [];
+  let total = 0;
+  for await (const chunk of req) {
+    total += chunk.length;
+    if (total > MAX_BODY) {
+      res.writeHead(413, { 'Content-Type': 'text/plain' });
+      res.end('Payload too large');
+      return;
+    }
+    chunks.push(chunk);
+  }
+  const body = Buffer.concat(chunks).toString('utf8');
+  const params = new URLSearchParams(body);
+  const submittedPassword = params.get('password') || '';
+  const submittedName = params.get('name') || '';
+
+  if (!auth.verifyPassword(submittedPassword)) {
+    auth.recordAttempt(clientIp, false);
+    res.writeHead(302, { Location: '/_auth/login?error=bad' });
+    res.end();
+    return;
+  }
+
+  auth.recordAttempt(clientIp, true);
+  const { cookieValue } = auth.createSession(submittedName);
+
+  // Cookie is sent only to same site, only to the server, only over https.
+  // Max-Age is a browser hint — true expiry is enforced server-side in auth.js.
+  const cookie = [
+    `${COOKIE_NAME}=${cookieValue}`,
+    'Path=/',
+    'HttpOnly',
+    'SameSite=Strict',
+    'Secure',
+    'Max-Age=7200',
+  ].join('; ');
+
+  res.writeHead(302, { 'Set-Cookie': cookie, Location: '/' });
+  res.end();
 }

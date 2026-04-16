@@ -163,7 +163,7 @@ The `devtunnel host` process handles reconnection automatically. If the user rep
 
 | Error | Resolution |
 |-------|-----------|
-| `devtunnel` not installed | "Install devtunnel: `winget install Microsoft.devtunnel` or `npm install -g @vscode/devtunnel-cli`" |
+| `devtunnel` not installed | Print platform-specific install options: Windows → `winget install Microsoft.devtunnel`; macOS → `brew install --cask devtunnel`; Linux → `curl -sL https://aka.ms/DevTunnelCliInstall \| bash`; any OS → download from `https://aka.ms/devtunnels/download` |
 | `devtunnel` not logged in | "Run `devtunnel user login` first to authenticate" |
 | Dashboard not running | Auto-start it via `plan_serve_dashboard` MCP tool |
 | Tunnel process dies | Restart automatically. Inform user if URL changed. |
