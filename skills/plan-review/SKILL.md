@@ -44,7 +44,7 @@ Parse the argument (if provided) using this priority:
 
 The scenario directory is determined in this order:
 1. If the argument is an absolute path, the scenario is the parent directory of that file
-2. If `.plan-context.json` exists in cwd or a nearby `plans/*/` directory, use it
+2. If `manifest.json` exists in cwd or a nearby `plans/*/` directory, use it
 3. Call `plan_list_scenarios` MCP tool to discover scenarios, then ask user to pick one
 4. If only one scenario exists, auto-select it
 
@@ -64,8 +64,8 @@ The scenario directory is determined in this order:
 ## Prerequisites
 
 - The target document must exist (either specified by path or within a scenario)
-- `.plan-context.json` is optional but recommended (provides codebase context to reviewers)
-- If no `.plan-context.json` exists, reviewers will work with the document content alone
+- `manifest.json` is optional but recommended (provides codebase context to reviewers)
+- If no `manifest.json` exists, reviewers will work with the document content alone
 
 ## Document-to-Reviewer Mapping
 

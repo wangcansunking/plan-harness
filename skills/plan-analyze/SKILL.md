@@ -5,21 +5,21 @@ description: Deep codebase analysis — generates an interactive HTML document c
 
 # plan-analyze
 
-Generate a comprehensive codebase analysis document as an interactive HTML file. This goes far deeper than `/plan-init` (which creates a lightweight `.plan-context.json`). The analysis document is a full reference that the team uses throughout planning and implementation.
+Generate a comprehensive codebase analysis document as an interactive HTML file. This goes far deeper than `/plan-init` (which creates a lightweight `manifest.json`). The analysis document is a full reference that the team uses throughout planning and implementation.
 
 ## Input
 
 | Invocation | Behavior |
 |------------|----------|
-| `/plan-analyze` | Use current scenario from `.plan-context.json` |
+| `/plan-analyze` | Use current scenario from `manifest.json` |
 | `/plan-analyze C:\MCDC\DevXApps` | Analyze a specific repo root |
 | `/plan-analyze permission-risk-survey` | Analyze for a specific scenario by name |
 
 ### Argument Resolution
 
 1. **Absolute path to a repo** — if the path exists and contains source code (has `.git/`, `package.json`, `*.csproj`, or `CLAUDE.md`), use it as `repoRoot`. Look for a scenario in `{repoRoot}/plans/` or use cwd scenario.
-2. **Scenario name** — search `plans/` directories for a matching subdirectory, read its `.plan-context.json` for the repo root.
-3. **No argument** — read `.plan-context.json` from current scenario. If not found, prompt for repo path.
+2. **Scenario name** — search `plans/` directories for a matching subdirectory, read its `manifest.json` for the repo root.
+3. **No argument** — read `manifest.json` from current scenario. If not found, prompt for repo path.
 
 ## When to Use
 
@@ -32,11 +32,11 @@ Generate a comprehensive codebase analysis document as an interactive HTML file.
 
 - `{scenario-path}/analysis.html` — Self-contained interactive HTML document
 - Updated `manifest.json` with the analysis file entry
-- Updated `.plan-context.json` with enriched context from deep analysis
+- Updated `manifest.json` with enriched context from deep analysis
 
 ## Prerequisites
 
-- `.plan-context.json` should exist (run `/plan-init` first), but if a repo path argument is provided, the skill can work without it
+- `manifest.json` should exist (run `/plan-init` first), but if a repo path argument is provided, the skill can work without it
 - If no scenario exists yet, the skill will create one via `plan_create_scenario` MCP tool
 - The target repo must be accessible on disk
 
@@ -55,11 +55,11 @@ Generate a comprehensive codebase analysis document as an interactive HTML file.
 ### Step 1: Load Context
 
 ```
-Read .plan-context.json from the scenario directory.
+Read manifest.json from the scenario directory.
 Extract: repoRoot, projectType, techStack, scenarioName
 ```
 
-If `.plan-context.json` does not exist:
+If `manifest.json` does not exist:
 > "Run `/plan-init` first to establish the planning context."
 
 ### Step 2: Deep Codebase Exploration
@@ -379,7 +379,7 @@ Include fixed left sidebar navigation, theme toggle, responsive layout, print st
    ```json
    { "analysisGenerated": true, "analysisDate": "2026-04-13" }
    ```
-3. Update `.plan-context.json` with enriched findings:
+3. Update `manifest.json` with enriched findings:
    - Add `architectureLayers`, `codePatterns`, `testFrameworks` fields from the analysis
 
 ### Step 5: Present Summary
@@ -404,7 +404,7 @@ Next step: Run /plan-review to review the analysis section by section, or /plan-
 
 | Document | Relationship |
 |----------|-------------|
-| `.plan-context.json` | **Reads** basic context, **enriches** with deep analysis |
+| `manifest.json` | **Reads** basic context, **enriches** with deep analysis |
 | `design.html` | Analysis informs design decisions — design should reference patterns found here |
 | `implementation-plan.html` | Implementation steps should follow conventions documented in analysis |
 | `test-plan.html` | Test plan should use the test infrastructure documented here |
@@ -413,8 +413,8 @@ Next step: Run /plan-review to review the analysis section by section, or /plan-
 
 | Error | Resolution |
 |-------|-----------|
-| `.plan-context.json` missing | "Run `/plan-init` first to establish the planning context." |
-| Repository not accessible | "Cannot access repository at {repoRoot}. Check the path in .plan-context.json." |
+| `manifest.json` missing | "Run `/plan-init` first to establish the planning context." |
+| Repository not accessible | "Cannot access repository at {repoRoot}. Check the path in manifest.json." |
 | No source code found | Generate a minimal analysis noting the empty repo |
 | Agent returns empty analysis | Include a placeholder section: "No {frontend/backend} code detected in this repository." |
 | `analysis.html` already exists | Ask: "Analysis document already exists. Regenerate? (This will overwrite the existing document.)" |

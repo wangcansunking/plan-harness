@@ -13,7 +13,7 @@ The user can specify which scenario to review:
 
 | Invocation | Behavior |
 |------------|----------|
-| `/plan-review-cycle` | Auto-detect scenario from cwd or `.plan-context.json` |
+| `/plan-review-cycle` | Auto-detect scenario from cwd or `manifest.json` |
 | `/plan-review-cycle permission-risk-survey` | Review the named scenario |
 | `/plan-review-cycle C:\MCDC\plans\my-scenario` | Review by absolute scenario path |
 | `/plan-review-cycle --fast` | Fast mode — only pause on CRITICAL/WARNING findings |
@@ -23,7 +23,7 @@ The user can specify which scenario to review:
 1. **Absolute path** — if it contains `/` or `\` and the directory exists, use it as scenario path
 2. **Scenario name** — search `plans/` directories for a matching subdirectory name
 3. **Flags** — `--fast` or `fast` enables fast review mode (see "Fast Review Mode" section below)
-4. **No argument** — locate scenario from `.plan-context.json` in cwd, or call `plan_list_scenarios` and prompt
+4. **No argument** — locate scenario from `manifest.json` in cwd, or call `plan_list_scenarios` and prompt
 
 ## When to Use
 
@@ -42,7 +42,7 @@ The user can specify which scenario to review:
 ## Prerequisites
 
 - At least one plan document must exist in the scenario
-- `.plan-context.json` is recommended but not required — if missing, reviewers work with document content only
+- `manifest.json` is recommended but not required — if missing, reviewers work with document content only
 
 ## Review Order
 

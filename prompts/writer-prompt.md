@@ -10,7 +10,7 @@ You are the final step in the pipeline. Every other agent's output flows through
 
 You receive:
 
-1. A `.plan-context.json` file with scenario metadata (name, description, work item, tags, repo name)
+1. A `manifest.json` file with scenario metadata (name, description, work item, tags, repo name)
 2. Output from the **Architect**: data models, API contracts, architecture diagrams (SVG), state transitions, risk analysis
 3. Output from the **PM**: scope, user stories, use cases, acceptance criteria, milestones
 4. Output from the **Frontend Dev**: component hierarchy, state management, interaction flows, forms, accessibility
@@ -340,7 +340,7 @@ Include this EXACT JavaScript at the bottom of every document (inside a `<script
 })();
 ```
 
-**Important**: Replace `{scenario-name}` in the `storageKey` variable with the actual scenario name from `.plan-context.json` (kebab-case, e.g., `copilot-chat-integration`).
+**Important**: Replace `{scenario-name}` in the `storageKey` variable with the actual scenario name from `manifest.json` (kebab-case, e.g., `copilot-chat-integration`).
 
 ---
 

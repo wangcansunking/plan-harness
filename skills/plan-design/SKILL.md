@@ -9,7 +9,7 @@ Generate a comprehensive design document as an interactive HTML file. This skill
 
 ## When to Use
 
-- After `/plan-init` has been run and `.plan-context.json` exists
+- After `/plan-init` has been run and `manifest.json` exists
 - When the user says "create design doc", "design document", "write the design", or "plan-design"
 - When starting a new feature that needs architectural planning
 
@@ -20,7 +20,7 @@ Generate a comprehensive design document as an interactive HTML file. This skill
 
 ## Prerequisites
 
-- `.plan-context.json` must exist in the scenario directory (created by `/plan-init`)
+- `manifest.json` must exist in the scenario directory (created by `/plan-init`)
 - If not found, instruct the user: "Run /plan-init first to set up the planning context."
 
 ## Agent Team
@@ -35,13 +35,13 @@ Generate a comprehensive design document as an interactive HTML file. This skill
 
 ### Step 1: Load Context
 
-1. Read `.plan-context.json` from the scenario directory using the Read tool.
+1. Read `manifest.json` from the scenario directory using the Read tool.
 2. Extract: `repoRoot`, `scenarioPath`, `scenarioName`, `description`, `codebaseContext`.
 3. If the file does not exist or is invalid, stop and tell the user to run `/plan-init` first.
 
 ### Step 2: Gather Feature Description
 
-1. Check if `description` in `.plan-context.json` adequately describes what to build.
+1. Check if `description` in `manifest.json` adequately describes what to build.
 2. If the description is vague (fewer than 20 words) or missing, ask the user:
    > "Please describe the feature or change you want to design. Include: what it does, who it's for, and any constraints."
 3. Store the full description for use by agents.
@@ -282,8 +282,8 @@ Next steps:
 
 | Error | Resolution |
 |-------|------------|
-| `.plan-context.json` not found | Tell user to run `/plan-init` first |
-| `.plan-context.json` is malformed | Re-run `/plan-init` to regenerate it |
+| `manifest.json` not found | Tell user to run `/plan-init` first |
+| `manifest.json` is malformed | Re-run `/plan-init` to regenerate it |
 | Architect agent fails | Retry once; if it fails again, ask user to provide architecture notes manually |
 | PM agent fails | Retry once; if it fails again, ask user to provide requirements manually |
 | Writer agent produces invalid HTML | Validate the output; fix obvious issues (unclosed tags, missing sections) before writing |
@@ -294,7 +294,7 @@ Next steps:
 
 | Document | Relationship |
 |----------|-------------|
-| `.plan-context.json` | **Input** -- provides repo context and scenario metadata |
+| `manifest.json` | **Input** -- provides repo context and scenario metadata |
 | `manifest.json` | **Updated** -- records design file and generation timestamp |
 | `test-plan.html` | **Downstream** -- reads design.html to extract testable requirements |
 | `state-machine.html` | **Downstream** -- reads design.html to extract entities and state transitions |

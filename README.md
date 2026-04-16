@@ -1,393 +1,213 @@
 # plan-harness
 
-A Claude Code plugin for structured project planning. Generates interconnected, interactive HTML documents — codebase analysis, design docs, state machines, test plans, test cases, and implementation plans — through specialized agent teams. Includes persistent project contexts, a local dashboard, and section-by-section review workflows.
+A Claude Code plugin for structured project planning. Generates interactive HTML documents through specialized agent teams — with composable markdown contexts that adapt the output to your project, scenario, and style.
 
-## Overview
+## Guiding Principles
 
-plan-harness turns the spec/plan phase of a project into a repeatable, high-quality process:
+### 1. Context is Everything
 
-1. **Capture project knowledge once** — dev setup, project relationships, worktree customizations, team conventions
-2. **Generate rich plan documents** — each produced by a 6-agent team (Architect, PM, Frontend Dev, Backend Dev, Tester, Writer)
-3. **Review iteratively** — section-by-section critique with role-specific reviewers and cross-document consistency checks
-4. **Track completion** — check implementation progress against the plan from code evidence
+Context files (`.md`) are the single most important input to plan quality. They are like `CLAUDE.md` but for specific scenarios — the LLM reads them and follows the instructions directly.
 
-Every generated document is a self-contained HTML file with dark/light theme, sidebar navigation, interactive elements (checkboxes, filters, expand/collapse), SVG diagrams, and print styles.
+**The more specific the context, the better the output.** A context that says "these 5 admin pages, these API endpoints, these current load times" produces dramatically better plans than "this is a React + .NET project."
 
----
+Contexts are composable (multi-select) and can be at any granularity:
+- Whole project → specific feature area → specific pages/APIs
+- Dev environment → build setup → team conventions
+- Generation rules: which docs, what charts, what theme
 
-## Architecture
+### 2. Three-Tier Loading (Learned from Claude Code)
 
-```
-                          ┌─────────────────────────────────┐
-                          │        plan-harness plugin       │
-                          ├─────────┬───────────┬───────────┤
-                          │ MCP     │ 11 Skills │ 6 Agent   │
-                          │ Server  │           │ Prompts   │
-                          │ (6 tools│           │           │
-                          │ + web   │           │           │
-                          │ dashboard)          │           │
-                          └────┬────┴─────┬─────┴─────┬─────┘
-                               │          │           │
-                    ┌──────────┘    ┌─────┘     ┌─────┘
-                    ▼               ▼           ▼
-             plan-manager.js   SKILL.md    {role}-prompt.md
-             web-server.js     workflows   agent instructions
-             templates/base.js
-```
+Claude Code's prompt architecture uses lazy loading — skill descriptions are always in context (~450 tokens), full bodies load only when invoked. We apply the same pattern:
 
-### Two-Level Context System
+| Tier | What | When loaded | Token cost |
+|------|------|-------------|-----------|
+| **Tier 1** | Context name + description (from frontmatter) | Always — names stored in `manifest.json`, descriptions read from frontmatter | ~50 per context |
+| **Tier 2** | Summary + details sections | When dispatching agents — filtered by `agents` frontmatter | Variable |
+| **Tier 3** | Reference data (API tables, baselines, etc.) | On demand — agents read when needed | Only when relevant |
 
-```
-Project Context (persistent, shared across scenarios)
-│
-│  Created once via /plan-context create
-│  Captures: dev setup, relationships, worktree steps, conventions, known issues
-│  Stored at: [workspace]/plans/.contexts/{name}/
-│
-├── Scenario A (.plan-context.json inherits from project context)
-│   ├── analysis.html
-│   ├── design.html
-│   ├── state-machine.html
-│   ├── test-plan.html
-│   ├── test-cases.html
-│   ├── implementation-plan.html
-│   └── review-report.html
-│
-├── Scenario B (.plan-context.json inherits from project context)
-│   └── ...
-│
-└── Scenario C ...
-```
+### 3. Agent Routing
+
+Not every agent needs every context. The `agents` field in frontmatter controls who sees what:
+- Writer gets generation rules (chart types, theme, anti-patterns)
+- Architect gets project architecture and API maps
+- Tester gets test conventions and coverage requirements
+- Everyone gets the summary section
+
+### 4. Markdown, Not Config
+
+Contexts, prompts, and skills are all markdown. The LLM reads them directly — no JSON schemas, no parsing layers, no rigid structures. This means:
+- Users can read and edit contexts in any text editor
+- The LLM follows natural language instructions, not configuration flags
+- New rules are just paragraphs, not schema migrations
+
+### 5. Self-Contained Output
+
+Every generated HTML file embeds all CSS and JS inline. No CDN, no external dependencies. Open in any browser, share with teammates, print to PDF.
 
 ---
 
-## Directory Structure
+## Quick Start
 
-### Project Contexts (persistent, per-project)
+```bash
+# Install
+claude plugins marketplace add https://github.com/wangcansunking/sunky-claude-code-marketplace
+claude plugins install plan-harness@canwa-claude-plugins
 
-```
-[workspace-root]/plans/.contexts/
-├── index.json                          # Context registry
-├── DevXApps-MicroPortal/
-│   ├── context.json                    # Machine-readable: dev setup, relationships,
-│   │                                   #   worktree steps, build commands, architecture,
-│   │                                   #   team conventions, external deps, known issues
-│   └── context.html                    # Interactive HTML reference document
-└── Metagraph-API/
-    ├── context.json
-    └── context.html
-```
+# Import built-in context templates
+/plan-context init
 
-### Scenario Plans (per-task/feature)
+# Create a project-specific context (guided conversation)
+/plan-context create
 
-```
-[repo-root]/plans/{scenario-name}/
-├── manifest.json               # Scenario metadata + review status
-├── .plan-context.json          # Scenario context (references parent project context)
-├── analysis.html               # Deep codebase analysis with health scores
-├── design.html                 # Architecture, data models, API contracts, UX
-├── state-machine.html          # Entity states, transitions, SVG diagrams
-├── test-plan.html              # E2E scenarios with interactive checkboxes
-├── test-cases.html             # Detailed test cases with P0/P1/P2 filtering
-├── implementation-plan.html    # File-level steps with dependency graph
-├── review-report.html          # Consolidated review findings
-└── dashboard.html              # Navigation hub linking all documents
+# Start planning — select contexts, create scenario
+/plan-init
+
+# Generate all documents
+/plan-full
 ```
 
 ---
 
-## Workflow
+## How It Works
 
 ```
-/plan-context create ──── Guided conversation (once per project)
+/plan-context create ──── Create markdown context files (.md)
+         │                (project knowledge, generation rules, or both)
          │
-         │  Captures: dev environment, project relationships, worktree setup,
-         │  build commands, architecture decisions, team conventions,
-         │  external dependencies, known issues
+/plan-init ──────────── Multi-select contexts + create/select scenario
+         │              → updates manifest.json with contexts
          │
-/plan-init ──────────── Select context + create/select scenario
-         │
-/plan-analyze ────────── Deep codebase analysis → analysis.html
-         │
-/plan-review analysis ── Section-by-section review
-         │
-/plan-design ─────────── Architecture & design → design.html
-         │
-    ┌────┴────┐
-    │         │
-/plan-state   /plan-test-plan ── state-machine.html, test-plan.html
-    │         │
-    │    /plan-test-cases ────── test-cases.html
-    │         │
-    └────┬────┘
-         │
-/plan-implementation ──── File-level steps → implementation-plan.html
-         │
-/plan-review-cycle ────── Review all docs + cross-document consistency
-         │                → review-report.html
-         │
-/plan-full ────────────── Orchestrates entire workflow with checkpoints
+         ├── /plan-analyze ────── analysis.html
+         ├── /plan-design ─────── design.html
+         ├── /plan-test-plan ──── test-plan.html     (if enabled by context)
+         ├── /plan-test-cases ─── test-cases.html    (if enabled by context)
+         ├── /plan-state-machine  state-machine.html  (if enabled by context)
+         └── /plan-implementation  implementation-plan.html
+                    │
+         /plan-review ─────────── Section-by-section review
+         /plan-review-cycle ───── Full review with consistency checks
 ```
+
+Which documents get generated depends on the selected generation rules context:
+- **feature-planning**: 7 docs (full suite with tests and state machines)
+- **performance-audit**: 4 docs (index, analysis, design, implementation)
+- **lean**: 2 docs (design + implementation)
 
 ---
 
-## Skills Reference
+## Context System
 
-### Context & Setup
+### What is a Context?
 
-| Skill | Description | Input |
-|-------|-------------|-------|
-| `/plan-context` | Create, list, select, or edit persistent project contexts | `create`, `select`, `edit {name}`, `view {name}`, `list` |
-| `/plan-context create` | Guided 9-phase conversation: projects, dev environment, worktree setup, build/test, architecture, conventions, dependencies, known issues | Context name |
-| `/plan-init` | Select project context, analyze codebase, create or select a scenario | Context name or repo path |
+A markdown file in `plans/.contexts/` that provides instructions to the planning pipeline. Two typical kinds:
 
-### Document Generation
+| Kind | Example | Contains |
+|------|---------|----------|
+| **Project knowledge** | `devxapps-project.md` | Paths, build commands, architecture, conventions, known issues |
+| **Generation rules** | `performance-audit.md` | Which docs to generate, content style, chart types, theme, anti-patterns |
 
-Each generation skill dispatches a specialized agent team:
+A single context can contain both. Contexts compose — select multiple during `/plan-init`.
 
-| Skill | Agents | Output | Depends On |
-|-------|--------|--------|-----------|
-| `/plan-analyze` | Architect + Frontend + Backend + Tester + Writer | `analysis.html` | `.plan-context.json` |
-| `/plan-design` | Architect + PM + Writer | `design.html` | `.plan-context.json` |
-| `/plan-state-machine` | Architect + Writer | `state-machine.html` | `design.html` |
-| `/plan-test-plan` | PM + Tester + Writer | `test-plan.html` | `design.html` |
-| `/plan-test-cases` | Tester + Frontend Dev + Writer | `test-cases.html` | `design.html` + `test-plan.html` |
-| `/plan-implementation` | All 6 agents | `implementation-plan.html` | `design.html` |
-| `/plan-full` | All (orchestrated) | All documents + `dashboard.html` | Runs `/plan-init` first |
+### Context File Format
 
-### Review
+```markdown
+---
+name: my-context
+description: One-line description (always visible in Tier 1)
+tags: [project, generation-rules]
+agents: [architect, writer]
+---
 
-| Skill | Description | Input |
-|-------|-------------|-------|
-| `/plan-review` | Interactive section-by-section review of one document | File path, filename, or fuzzy name (`design`, `test-plan`, `impl`, etc.) |
-| `/plan-review-cycle` | Full review across all documents in dependency order with cross-document consistency checks | Scenario name or path, `--fast` flag |
+# Title
+
+## Summary
+<!-- Always injected. Keep under 200 words. -->
+
+## Details
+<!-- Injected for matching agents only. -->
+
+## Reference
+<!-- Read on demand by agents that need it. -->
+```
+
+### Composition Example
+
+```
+devxapps-project.md          (project: build, conventions, architecture)
+  + portal-admin-pages.md    (scenario: specific pages, APIs, baselines)
+  + performance-audit.md     (rules: 4 docs, Tokyo Night, anti-patterns)
+  = effective context for this plan
+```
+
+Later contexts override earlier ones where they conflict. Order matters.
 
 ---
 
 ## Agent Team
 
-Every document is produced (or reviewed) by a team of specialized agents, each operating from a role-specific prompt template:
-
 | Role | Prompt | Focus |
 |------|--------|-------|
-| **Architect** | `prompts/architect-prompt.md` | Data models, API contracts, SVG architecture diagrams, dependency graphs, state transitions, security |
-| **PM** | `prompts/pm-prompt.md` | Requirements, user stories, acceptance criteria (Given/When/Then), scope, milestones, priorities |
-| **Frontend Dev** | `prompts/frontend-dev-prompt.md` | Components, state management, routing, accessibility, i18n, interaction flows |
-| **Backend Dev** | `prompts/backend-dev-prompt.md` | API implementation, data access, service integration, error handling, deployment |
-| **Tester** | `prompts/tester-prompt.md` | E2E scenarios, test cases (TC-{CAT}-{NUM}), P0/P1/P2 priorities, coverage matrices |
-| **Writer** | `prompts/writer-prompt.md` | HTML assembly, CSS theme system, sidebar navigation, cross-references, print styles |
+| **Architect** | `prompts/architect-prompt.md` | Data models, API contracts, SVG diagrams, dependency graphs |
+| **PM** | `prompts/pm-prompt.md` | Requirements, user stories, acceptance criteria, scope |
+| **Frontend Dev** | `prompts/frontend-dev-prompt.md` | Components, state management, routing, accessibility |
+| **Backend Dev** | `prompts/backend-dev-prompt.md` | API implementation, data access, services, deployment |
+| **Tester** | `prompts/tester-prompt.md` | E2E scenarios, test cases, coverage matrices |
+| **Writer** | `prompts/writer-prompt.md` | HTML assembly, CSS themes, sidebar nav, cross-references |
 
 ---
 
 ## MCP Tools
 
-The plugin exposes 6 MCP tools via a local stdio server:
+6 tools via local stdio server:
 
-| Tool | Input | Description |
-|------|-------|-------------|
-| `plan_list_scenarios` | `workspaceRoot` | Scan workspace for all `plans/` directories, list scenarios with file inventory and completion flags |
-| `plan_create_scenario` | `repoRoot`, `name`, `description?`, `workItem?`, `tags?` | Create scenario directory with `manifest.json` |
-| `plan_get_files` | `scenarioPath` | List plan files with metadata (name, path, type, size, modified) |
-| `plan_check_completion` | `scenarioPath`, `repoRoot` | Parse `implementation-plan.html` for steps, check code for evidence of completion |
-| `plan_get_context` | `repoRoot` | Analyze codebase: read CLAUDE.md, package.json, .csproj to determine project type, tech stack, patterns, conventions |
-| `plan_serve_dashboard` | `workspaceRoot`, `port?` | Start local HTTP server at `http://localhost:3847` for browsing plans |
+| Tool | Description |
+|------|-------------|
+| `plan_list_scenarios` | Scan workspace for all scenarios with file inventory |
+| `plan_create_scenario` | Create scenario directory with manifest |
+| `plan_get_files` | List plan files with metadata |
+| `plan_check_completion` | Check implementation progress from code evidence |
+| `plan_get_context` | Analyze codebase: tech stack, patterns, conventions |
+| `plan_serve_dashboard` | Start local HTTP dashboard at `localhost:3847` |
 
-### Dashboard Routes
+---
 
-| Route | Description |
+## Skills Reference
+
+| Skill | Description |
 |-------|-------------|
-| `GET /` | Dashboard overview — scenario cards with completion bars |
-| `GET /scenario/:name` | Scenario detail — all plan files with status indicators |
-| `GET /view?path=<abs-path>` | Serve any HTML plan file directly |
-| `GET /api/scenarios` | JSON: all scenarios |
-| `GET /api/scenario/:name/status` | JSON: completion status |
-
----
-
-## HTML Document Features
-
-All generated HTML files share a consistent design system:
-
-### Theme System
-- **Dark theme** (default): `--bg: #0d1117`, `--accent: #58a6ff`, `--surface: #161b22`
-- **Light theme**: `--bg: #ffffff`, `--accent: #0969da`, `--surface: #f6f8fa`
-- Toggle persisted in localStorage
-
-### Navigation
-- Fixed left sidebar (260px) with section links and active state tracking (IntersectionObserver)
-- Top navigation bar linking to sibling plan files (Analysis, Design, State Machines, Test Plan, Test Cases, Implementation, Review)
-- Responsive: sidebar collapses to hamburger on mobile (<900px)
-
-### Interactive Elements
-- Checkboxes with progress tracking (test plans, test cases)
-- Expand/collapse sections with rotation arrow animation
-- Filter by priority (P0/P1/P2), category, and search text
-- Bulk operations: Expand All, Collapse All, Check All, Uncheck All
-- Export/Import progress state (JSON via localStorage)
-- Print-friendly styles hiding nav and expanding collapsed sections
-
-### Visual Components
-- **Badges**: `.badge-green`, `.badge-yellow`, `.badge-red`, `.badge-blue`, `.badge-purple`
-- **Callouts**: `.callout`, `.callout-warn`, `.callout-important` with left border accent
-- **Node cards**: `.node-card` for entity definitions with state badges
-- **Diagram boxes**: `.diagram-box` for inline SVG diagrams
-- **Scenario cards**: `.scenario` with numbered header, step checkboxes, state transitions
-- **Progress bars**: Track + fill with transition animation
-- **Tables**: Full-width, alternating row backgrounds, sticky headers
-- **Code blocks**: Monospace with border, rounded corners, syntax-colored
-
----
-
-## Project Context Details
-
-A project context captures 8 dimensions of project knowledge that code analysis alone cannot discover:
-
-| Dimension | What It Captures | Example |
-|-----------|-----------------|---------|
-| **Projects & Relationships** | Repos involved, how they connect | "MicroPortalApp calls Metagraph API via REST" |
-| **Dev Environment** | Prerequisites, setup steps, env vars, local services, VPN | "Node 18+, init.cmd, npm install --legacy-peer-deps" |
-| **Worktree Setup** | Post-worktree-add steps, shared vs isolated state, issues | "Re-run init.cmd, npm install per-worktree, copy .env.local" |
-| **Build & Test** | Commands, timing, quirks | "Jest needs 10GB memory, first NuGet restore after VPN may fail" |
-| **Architecture** | Key decisions with rationale and dates, data flow | "Zustand over Redux since 2025-06, team agreement" |
-| **Team Conventions** | Branching, PR process, i18n, testing, deployment | "u/{alias}/ branch prefix, 2 approvers, squash merge" |
-| **External Dependencies** | Services, databases, auth, rate limits | "Metagraph PPE API, S2S via MSI, 100 req/s" |
-| **Known Issues** | Gotchas and workarounds with severity | "CredScan false positives on test certs — add to suppressions" |
-
-### Context Enrichment
-
-Contexts grow organically. After `/plan-analyze` discovers new patterns, it offers to add them. When you mention workarounds during conversation, the skill offers to save them. The context becomes the team's living knowledge base.
-
----
-
-## Review Workflow
-
-### `/plan-review {file}`
-
-Section-by-section interactive review:
-
-1. **Parse**: Extract `<h2>` sections from the HTML document
-2. **Dispatch**: Send each section to role-specific reviewer agents in parallel
-3. **Present**: Show findings per section with severity (CRITICAL / WARNING / INFO)
-4. **Interact**: User chooses per section:
-   - `[f]` Fix — auto-apply suggested fixes, re-review
-   - `[s]` Skip — mark reviewed, move on
-   - `[d]` Discuss — ask questions about the findings
-   - `[e]` Edit — make manual changes
-   - `[r]` Re-review — re-run after changes
-5. **Track**: Progress saved to `.review-state.json` (resumable if interrupted)
-
-Accepts arguments: filename (`design.html`), absolute path, or fuzzy name (`design`, `impl`, `states`).
-
-### `/plan-review-cycle`
-
-Full review across all documents:
-
-1. Reviews in dependency order: analysis -> design -> state-machine -> test-plan -> test-cases -> implementation-plan
-2. Auto-approves sections with no issues (only pauses on CRITICAL/WARNING)
-3. Runs **cross-document consistency checks** between each document:
-   - Terminology alignment
-   - Data model consistency
-   - Acceptance criteria traceability
-   - Flow coverage (design flows -> test scenarios -> implementation steps)
-4. Generates `review-report.html` with consolidated findings
-5. Supports `--fast` flag for quick reviews (skip INFO findings entirely)
+| `/plan-context` | Create, list, edit, import context files |
+| `/plan-init` | Multi-select contexts + create/select scenario |
+| `/plan-analyze` | Deep codebase analysis → `analysis.html` |
+| `/plan-design` | Architecture & design → `design.html` |
+| `/plan-state-machine` | State diagrams → `state-machine.html` |
+| `/plan-test-plan` | E2E test scenarios → `test-plan.html` |
+| `/plan-test-cases` | Test case catalog → `test-cases.html` |
+| `/plan-implementation` | Implementation steps → `implementation-plan.html` |
+| `/plan-review` | Section-by-section review of one document |
+| `/plan-review-cycle` | Full review with cross-document consistency |
+| `/plan-full` | Orchestrate entire workflow with checkpoints |
 
 ---
 
 ## Plugin Structure
 
 ```
-plan-harness/                            27 source files, ~9,000 lines
-├── .claude-plugin/
-│   └── plugin.json                      Plugin metadata
-├── .mcp.json                            MCP server configuration
-├── README.md                            This file
-│
-├── local-proxy/                         MCP server + web dashboard
-│   ├── package.json                     Dependencies: @modelcontextprotocol/sdk
-│   ├── start.js                         Bootstrap (auto-installs on first run)
+plan-harness/
+├── contexts/                    Built-in context templates
+│   ├── feature-planning.md      Full 7-doc suite
+│   ├── performance-audit.md     4-doc data-driven audit
+│   ├── lean.md                  Minimal 2-doc planning
+│   └── _example-project.md     Project context template
+├── skills/                      11 skill definitions (SKILL.md)
+├── prompts/                     6 agent role templates
+├── local-proxy/                 MCP server + web dashboard
+│   ├── start.js                 Bootstrap (auto-installs deps)
 │   └── src/
-│       ├── index.js                     MCP server: 6 tools via stdio transport
-│       ├── plan-manager.js              Plan file operations (list, create, check completion)
-│       ├── web-server.js                Local HTTP dashboard (node:http, no external deps)
-│       └── templates/
-│           └── base.js                  HTML template system: shared CSS, sidebar, theme,
-│                                        and generators for all 7 document types
-│
-├── skills/                              11 skill definitions
-│   ├── plan-context/SKILL.md            Persistent project context management
-│   ├── plan-init/SKILL.md               Select context + create/select scenario
-│   ├── plan-analyze/SKILL.md            Deep codebase analysis document
-│   ├── plan-design/SKILL.md             Architecture & design document
-│   ├── plan-state-machine/SKILL.md      State machine diagrams & transitions
-│   ├── plan-test-plan/SKILL.md          E2E test plan with interactive scenarios
-│   ├── plan-test-cases/SKILL.md         Test cases with priority filtering
-│   ├── plan-implementation/SKILL.md     File-level implementation steps
-│   ├── plan-review/SKILL.md             Section-by-section interactive review
-│   ├── plan-review-cycle/SKILL.md       Full review cycle with consistency checks
-│   └── plan-full/SKILL.md              Complete workflow orchestrator
-│
-└── prompts/                             6 agent role templates
-    ├── architect-prompt.md              Architecture, data models, SVG diagrams
-    ├── pm-prompt.md                     Requirements, user stories, acceptance criteria
-    ├── frontend-dev-prompt.md           Components, state, routing, accessibility
-    ├── backend-dev-prompt.md            API, data access, services, deployment
-    ├── tester-prompt.md                 Test scenarios, test cases, coverage
-    └── writer-prompt.md                 HTML assembly, CSS themes, cross-references
+│       ├── index.js             MCP server (6 tools, stdio)
+│       ├── plan-manager.js      Plan file operations
+│       ├── web-server.js        HTTP dashboard (node:http)
+│       └── templates/base.js    HTML template system
+└── docs/
+    ├── overview.html            Static overview
+    └── context-design.md        Context system design document
 ```
-
----
-
-## Quick Start
-
-### 1. Install the plugin
-
-```bash
-claude plugins marketplace add https://github.com/wangcansunking/sunky-claude-code-marketplace
-claude plugins install plan-harness@canwa-claude-plugins
-```
-
-### 2. Create a project context (once per project)
-
-```
-/plan-context create
-```
-
-Guided conversation captures dev setup, project relationships, worktree customizations, and team conventions. This is done **once** and reused for all future scenarios.
-
-### 3. Initialize a scenario
-
-```
-/plan-init
-```
-
-Selects your project context, analyzes the codebase, and creates a scenario directory for your feature/task.
-
-### 4. Generate plans
-
-```
-/plan-full                              # Full workflow with review checkpoints
-```
-
-Or use individual skills:
-
-```
-/plan-analyze                           # Codebase analysis
-/plan-design                            # Design document
-/plan-state-machine                     # State machine diagrams
-/plan-test-plan                         # E2E test plan
-/plan-test-cases                        # Detailed test cases
-/plan-implementation                    # Implementation steps
-```
-
-### 5. Review
-
-```
-/plan-review design.html                # Review one document
-/plan-review-cycle                      # Review all documents
-/plan-review-cycle --fast               # Quick review (critical/warning only)
-```
-
-### 6. Browse
-
-Use the MCP tool `plan_serve_dashboard` to start a local web server, or open the HTML files directly in a browser.

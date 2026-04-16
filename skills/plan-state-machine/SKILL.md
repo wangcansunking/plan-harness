@@ -20,7 +20,7 @@ Generate state machine documentation as an interactive HTML file with entity car
 
 ## Prerequisites
 
-- `.plan-context.json` must exist (from `/plan-init`)
+- `manifest.json` must exist (from `/plan-init`)
 - `design.html` must exist (from `/plan-design`)
 - If either is missing, stop and tell the user which skill to run first
 
@@ -35,14 +35,14 @@ Generate state machine documentation as an interactive HTML file with entity car
 
 ### Step 1: Load Context and Design
 
-1. Read `.plan-context.json` from the scenario directory.
+1. Read `manifest.json` from the scenario directory.
 2. Read `design.html` from the scenario directory.
 3. Extract key information:
    - Data model entities, their fields, and relationships
    - Use cases that imply state changes
    - API endpoints that mutate state
    - Workflow descriptions
-4. If `.plan-context.json` is missing, stop: "Run /plan-init first to set up the planning context."
+4. If `manifest.json` is missing, stop: "Run /plan-init first to set up the planning context."
 5. If `design.html` is missing, stop: "Run /plan-design first to generate the design document."
 
 ### Step 2: Dispatch Architect Agent
@@ -265,7 +265,7 @@ Next steps:
 
 | Error | Resolution |
 |-------|------------|
-| `.plan-context.json` not found | "Run /plan-init first to set up the planning context." |
+| `manifest.json` not found | "Run /plan-init first to set up the planning context." |
 | `design.html` not found | "Run /plan-design first to generate the design document." |
 | Design has no entities with states | Generate a simplified document showing entity relationships only; note that state machines are not applicable |
 | Architect agent fails | Retry once; if it fails again, extract entities directly from design.html data model section |
@@ -277,7 +277,7 @@ Next steps:
 
 | Document | Relationship |
 |----------|-------------|
-| `.plan-context.json` | **Input** -- provides repo context and scenario metadata |
+| `manifest.json` | **Input** -- provides repo context and scenario metadata |
 | `design.html` | **Input** -- source of entity definitions, data model, and workflows |
 | `manifest.json` | **Updated** -- records state machine file and generation timestamp |
 | `test-plan.html` | **Related** -- test scenarios should cover state transitions documented here |

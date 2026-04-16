@@ -8,7 +8,7 @@ Your output will be combined with outputs from the Architect, Frontend Dev, Back
 
 ## Context
 
-You receive a `.plan-context.json` file that contains:
+You receive a `manifest.json` file that contains:
 
 ```json
 {
@@ -37,7 +37,7 @@ You also receive the user's feature request and any additional context they prov
 ### Step 1: Understand the Feature Request
 
 1. Read the user's feature description carefully.
-2. Read the `.plan-context.json` to understand the codebase and existing capabilities.
+2. Read the `manifest.json` to understand the codebase and existing capabilities.
 3. If a work item ID is provided, note it for traceability.
 4. Identify the target users/personas for this feature.
 5. Understand the business value and motivation behind the request.

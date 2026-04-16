@@ -1,19 +1,19 @@
 ---
 name: plan-init
-description: Initialize planning context — select a project context, analyze codebase, select or create a scenario, and prepare for plan generation. Accepts a context name or repo path as argument.
+description: Initialize planning session — multi-select contexts, analyze codebase, select or create a scenario. Accepts a context name or repo path as argument.
 ---
 
 # plan-init
 
-Initialize the planning context for a new planning session. This skill connects to a **project context** (persistent cross-scenario knowledge), analyzes the codebase, then lets the user select or create a scenario. The output is a `.plan-context.json` state file that all other `plan-*` skills depend on.
+Initialize a planning session. This skill lets the user **select one or more contexts** (markdown files with project knowledge and generation rules), then select or create a scenario. The selected contexts are recorded in `manifest.json` so all other `plan-*` skills know what to load.
 
 ## Input
 
 | Invocation | Behavior |
 |------------|----------|
-| `/plan-init` | Auto-detect context and repo, or prompt |
-| `/plan-init DevXApps-MicroPortal` | Use the named project context |
-| `/plan-init C:\MCDC\DevXApps` | Use this repo path, auto-find or create context |
+| `/plan-init` | Show context multi-selector, then scenario selector |
+| `/plan-init devxapps-project` | Pre-select the named context, still show full selector for additional picks |
+| `/plan-init C:\MCDC\DevXApps` | Use this repo path, show context selector |
 
 ## When to Use
 
@@ -23,8 +23,8 @@ Initialize the planning context for a new planning session. This skill connects 
 
 ## What It Produces
 
-- A `.plan-context.json` file in the selected scenario directory (references the parent project context)
-- A formatted summary of codebase context and scenario metadata printed to the user
+- A `manifest.json` in the scenario directory (with `contexts` array and scenario metadata)
+- A formatted summary of the combined context printed to the user
 
 ## Agent Team
 
@@ -32,50 +32,80 @@ This skill does NOT dispatch sub-agents. It runs interactively in the current se
 
 ## Workflow
 
-### Step 0: Resolve Project Context
+### Step 0: Select Contexts (multi-select)
 
-Before anything else, check for a reusable **project context** (created by `/plan-context create`).
+**Always present a context selector.** Contexts are markdown files that provide project knowledge, generation rules, conventions, or any combination. The user can select multiple — they compose in order.
 
-1. Check for `.plan-active-context.json` in cwd — if found, load that context
-2. If argument matches a context name in `[workspace-root]/plans/.contexts/index.json`, load it
-3. If `[workspace-root]/plans/.contexts/` has contexts, show a picker:
-   ```
-   Found project contexts:
-    1. DevXApps-MicroPortal    — MicroPortalApp + Metagraph API (updated 2026-04-13)
-    2. Metagraph-API           — Metagraph standalone (updated 2026-04-10)
-   
-    [1-2] Select a context
-    [c]   Create new context (runs /plan-context create)
-    [s]   Skip — use basic code analysis only
-   ```
-4. If no contexts exist, inform the user and proceed without one:
-   ```
-   No project contexts found. Proceeding with code analysis only.
-   Tip: Run /plan-context create to capture dev setup, project relationships,
-   and team conventions for richer planning.
-   ```
+1. Scan `[workspace-root]/plans/.contexts/` for `.md` files (excluding `index.md`)
+2. Read frontmatter from each (name, description, tags)
+3. If an argument was provided matching a context name, pre-select it
 
-If a context is selected, extract: `repoRoot` from the context's projects, `techStack`, `conventions`, `devEnvironment`, etc. This replaces or enriches Step 1 and Step 2.
+**If contexts exist — show multi-select:**
 
-### Step 1: Detect the Repository
+```
+=== Select Contexts ===
 
-Determine which repository/project the user is working in.
+Select one or more contexts for this plan.
+Contexts compose in order — later ones override earlier ones where they conflict.
 
-**If project context is loaded and has project entries:**
-- If the context has exactly one project, use its `repoRoot` automatically
-- If the context has multiple projects, ask which repo this scenario targets:
+ [x] 1. devxapps-project         [project]            DevXApps — paths, build, architecture
+ [ ] 2. metagraph-api            [project]            Metagraph API — Neo4j, T4, OData
+ [x] 3. performance-audit        [generation-rules]   4 docs, data-driven, Tokyo Night
+ [ ] 4. feature-planning         [generation-rules]   Full 7-doc suite, GitHub Dark
+ [ ] 5. lean                     [generation-rules]   Minimal 2-doc planning
+ [ ] 6. mcdc-portal-pages        [scenario]           Portal page inventory, API map, perf baselines
+
+─────────────────────────────────
+ [c] Create new context (runs /plan-context create)
+ [i] Import built-in templates
+
+(Space to toggle, Enter to confirm)
+```
+
+**Contexts can be at any granularity:**
+- Broad: `devxapps-project` — covers the whole project
+- Narrow: `mcdc-portal-pages` — specific pages, specific APIs, specific perf baselines
+- Rules: `performance-audit` — how to generate docs
+- Mixed: a single context can contain both project knowledge and generation rules
+
+The more specific the context, the better the LLM's output. Encourage users to create focused contexts for specific scenarios (e.g., a context per page group, per API domain, per feature area).
+
+**If no contexts exist:**
+
+```
+=== Select Contexts ===
+
+No contexts found in plans/.contexts/
+
+ [c] Create new context
+ [i] Import built-in templates (feature-planning, performance-audit, lean)
+
+A context is required — it tells the planning pipeline about your project
+and how documents should be generated.
+```
+
+At least one context must be selected. If the user wants minimal setup, they can import built-in templates and select `lean`.
+
+4. **After selection**: Read all selected `.md` files. Extract any project paths mentioned (for Step 1). Proceed.
+
+5. **If user chooses [c]**: Invoke `/plan-context create`. After creation, return to the selector with the new context pre-selected.
+
+### Step 1: Resolve Repository
+
+Determine which repository this scenario targets.
+
+- Scan the selected contexts for project paths (look for "Path:", "repoRoot:", or filesystem paths in the markdown)
+- If exactly one path is found, use it automatically
+- If multiple paths are found, ask:
   ```
-  This context has multiple projects:
+  Your contexts reference multiple projects:
    1. MicroPortalApp  (C:\MCDC\DevXApps)
    2. Metagraph API   (C:\MCDC\Metagraph_Coral)
   
   Which project is this scenario for? (or "both")
   ```
-
-**If no project context:**
-1. Check cwd. If inside a known repo, use that.
-2. If cwd is a workspace root, ask which repo.
-3. If the user specifies a path as argument, use it directly.
+- If no paths found, ask the user for the repo root path
+- If the user provided a repo path as argument, use it directly
 
 Store the resolved repo root path as `repoRoot`.
 
@@ -109,9 +139,9 @@ Display the results in a formatted table:
 ```
 Existing Scenarios in [repoName]:
 ---------------------------------------------------------------------------
- #  Scenario Name          Design  Test Plan  State Machine  Test Cases  Impl Plan
- 1  my-feature               Y        Y            N             N          N
- 2  api-refactor             Y        N            N             N          N
+ #  Scenario Name          Contexts                    Documents
+ 1  my-feature             devxapps, feature-planning   design, test-plan
+ 2  portal-perf-opt        devxapps, perf-audit         index, analysis, design
 ---------------------------------------------------------------------------
 ```
 
@@ -123,7 +153,8 @@ Existing Scenarios in [repoName]:
 **If selecting an existing scenario:**
 1. Use the scenario path from the list
 2. Read the existing `manifest.json` to get metadata
-3. Skip to Step 5
+3. Ask: "This scenario was created with contexts [X, Y]. Keep these or re-select?"
+4. If user wants to keep, proceed to Step 6. If re-select, update `manifest.json` with new contexts.
 
 **If creating a new scenario:**
 1. Ask the user for:
@@ -142,133 +173,103 @@ Use the plan_create_scenario MCP tool with:
 
 3. This creates `{repoRoot}/plans/{scenario-name}/manifest.json`
 
-### Step 5: Write the Context State File
+### Step 5: Update manifest.json with Contexts
 
-Create `.plan-context.json` in the scenario directory. If a project context was selected in Step 0, include a reference to it and inherit its data.
+Read `manifest.json`, add the `contexts` array, and write it back:
 
-**With project context:**
 ```json
 {
-  "version": 2,
-  "createdAt": "2026-04-13T12:00:00.000Z",
-  "parentContext": "DevXApps-MicroPortal",
-  "parentContextPath": "C:/MCDC/plans/.contexts/DevXApps-MicroPortal/context.json",
-  "repoRoot": "C:/MCDC/DevXApps",
-  "repoName": "DevXApps",
-  "scenarioPath": "C:/MCDC/DevXApps/plans/my-feature",
-  "scenarioName": "my-feature",
-  "description": "User-provided description of the feature",
+  "scenario": "portal-perf-opt",
+  "displayName": "Portal Performance Optimization",
+  "description": "Optimize portal page load performance",
   "workItem": "123456",
-  "tags": ["frontend", "copilot"],
-  "codebaseContext": {
-    "projectType": "mixed (.NET + Node)",
-    "techStack": ["React", "TypeScript", ".NET/C#", "Azure Functions"],
-    "patterns": ["MSBuild traversal", "NX", "Jest testing"],
-    "conventions": [
-      "New features use Zustand for state management",
-      "All user-facing text must use i18n"
-    ],
-    "structure": { }
-  },
-  "inherited": {
-    "devEnvironment": { },
-    "worktreeSetup": { },
-    "buildAndTest": { },
-    "architecture": { },
-    "teamConventions": { },
-    "externalDependencies": { },
-    "knownIssues": { }
-  }
+  "tags": ["performance", "portal"],
+  "status": "draft",
+  "createdAt": "2026-04-16T12:00:00Z",
+  "contexts": ["devxapps-project", "portal-admin-pages", "performance-audit"]
 }
 ```
 
-The `inherited` block is copied from the parent context's corresponding sections. This allows all `plan-*` skills to access project-level knowledge without re-reading the parent context file.
+The `contexts` array is an ordered list of context names. Skills resolve these to `.md` files by scanning `plans/.contexts/{name}.md`.
 
-**Without project context (version 1, backward compatible):**
-```json
-{
-  "version": 1,
-  "createdAt": "2026-04-13T12:00:00.000Z",
-  "repoRoot": "C:/MCDC/DevXApps",
-  "repoName": "DevXApps",
-  "scenarioPath": "C:/MCDC/DevXApps/plans/my-feature",
-  "scenarioName": "my-feature",
-  "description": "User-provided description of the feature",
-  "workItem": "123456",
-  "tags": ["frontend", "copilot"],
-  "codebaseContext": {
-    "projectType": "mixed (.NET + Node)",
-    "techStack": ["React", "TypeScript", ".NET/C#", "Azure Functions"],
-    "patterns": ["MSBuild traversal", "NX", "Jest testing"],
-    "conventions": [],
-    "structure": { }
-  }
-}
-```
-
-Write this file using the Write tool to `{scenarioPath}/.plan-context.json`.
+That's it. No separate state file. `manifest.json` is the single source of truth for the scenario.
 
 ### Step 6: Display the Context Summary
 
 Print a formatted summary to the user:
 
 ```
-=== Plan Context Initialized ===
+=== Plan Initialized ===
 
-Project Context: DevXApps-MicroPortal (or "none — basic analysis only")
-Repository:      DevXApps
-Scenario:        my-feature
-Path:            C:/MCDC/DevXApps/plans/my-feature
-Description:     Add copilot chat integration to the portal
-Work Item:       ADO#123456
-Tags:            frontend, copilot
+Contexts:     devxapps-project + performance-audit
+Repository:   DevXApps
+Scenario:     portal-perf-opt
+Path:         C:/MCDC/DevXApps/plans/portal-perf-opt
+Description:  Optimize portal page load performance
+Work Item:    ADO#123456
 
---- Codebase Context ---
-Project Type:  mixed (.NET + Node)
-Tech Stack:    React, TypeScript, .NET/C#, Azure Functions, Webpack, NX
-Patterns:      MSBuild traversal, Jest testing, EV2 deployment
-Conventions:
-  - New features use Zustand for state management
-  - All user-facing text must use i18n
-  - Fluent UI v9 for new components
+--- From devxapps-project.md ---
+Projects:    MicroPortalApp (React 18, TypeScript, NX)
+Build:       npm run build:dev (~2min)
+Conventions: Zustand, Fluent UI v9, i18n required
 
---- Inherited from Project Context ---
-Dev Setup:     3 prerequisites, 3 setup steps
-Worktree:      3 steps, 2 known issues
-Build:         3 build commands, 2 test commands
-Architecture:  2 key decisions
-Conventions:   6 team conventions
-Dependencies:  2 external services
+--- From performance-audit.md ---
+Documents:   index, analysis, design, implementation-plan (4 docs)
+Theme:       Tokyo Night
+Anti-patterns: 7 rules active
 
---- Ready for Planning ---
-Next steps:
-  /plan-analyze        Deep codebase analysis (enriches context)
-  /plan-design         Generate a design document
-  /plan-full           Run the full planning workflow
+--- Codebase Analysis ---
+Project Type: mixed (.NET + Node)
+Tech Stack:   React, TypeScript, .NET/C#, Azure Functions
+Patterns:     MSBuild traversal, Jest testing
+
+--- Next Steps ---
+  /plan-analyze        Collect performance data
+  /plan-design         Design optimization strategy
+  /plan-full           Run full planning workflow (4 documents)
 ```
+
+The "Next Steps" section only lists skills whose documents are enabled by the selected generation rules context. For example, with `performance-audit` selected, don't suggest `/plan-state-machine` or `/plan-test-cases`.
+
+## How Skills Load Contexts
+
+All `plan-*` skills follow this pattern:
+
+```
+1. Read manifest.json → get contexts array
+2. For each context name, read plans/.contexts/{name}.md
+3. Parse frontmatter (name, description, tags, agents)
+4. Filter by current agent role (agents field)
+5. Inject matching context content into agent prompt
+```
+
+Three-tier loading (see `docs/context-design.md`):
+- **Tier 1** (descriptions): read from frontmatter — minimal tokens, always available
+- **Tier 2** (summary + details): injected into agent prompts, filtered by `agents` field
+- **Tier 3** (reference): agents read specific sections on demand when needed
 
 ## Error Handling
 
 | Error | Resolution |
 |-------|------------|
-| Cannot detect repo from cwd | Ask user to provide the repo path explicitly |
-| `plan_get_context` MCP tool not available | Read CLAUDE.md manually from the repo root and extract context by hand |
-| `plan_list_scenarios` fails | Check that the MCP server is running; fall back to scanning `{repoRoot}/plans/` directory manually |
+| No contexts directory | Run `/plan-context init` to create it and import built-in templates |
+| No contexts selected | At least one context is required. Show the selector again. |
+| Context `.md` file not found for a name in manifest | Warn and skip. Suggest `/plan-context` to fix. |
+| Cannot detect repo from contexts | Ask user to provide the repo path explicitly |
+| `plan_get_context` MCP tool not available | Read CLAUDE.md manually from the repo root |
+| `plan_list_scenarios` fails | Fall back to scanning `{repoRoot}/plans/` directory manually |
 | `plan_create_scenario` fails | Create the directory and manifest.json manually using Write tool |
-| User provides invalid scenario name | Strip special characters, convert spaces to hyphens, lowercase |
 
 ## Cross-Links
 
-This skill produces the `.plan-context.json` file that is the prerequisite for ALL other plan skills:
-
 | Skill | Depends On |
 |-------|-----------|
-| `/plan-context` | **Upstream** — creates the project context that `/plan-init` references |
-| `/plan-analyze` | `.plan-context.json` (enriches both scenario context and parent project context) |
-| `/plan-design` | `.plan-context.json` |
-| `/plan-test-plan` | `.plan-context.json` + `design.html` |
-| `/plan-state-machine` | `.plan-context.json` + `design.html` |
-| `/plan-test-cases` | `.plan-context.json` + `design.html` + `test-plan.html` |
-| `/plan-implementation` | `.plan-context.json` + `design.html` |
+| `/plan-context` | **Upstream** — creates the context `.md` files |
+| `/plan-analyze` | `manifest.json` (reads contexts, enriches with discovered patterns) |
+| `/plan-design` | `manifest.json` |
+| `/plan-test-plan` | `manifest.json` + `design.html` |
+| `/plan-state-machine` | `manifest.json` + `design.html` |
+| `/plan-test-cases` | `manifest.json` + `design.html` + `test-plan.html` |
+| `/plan-implementation` | `manifest.json` + `design.html` |
 | `/plan-review` | Any generated plan document |
 | `/plan-full` | Calls `/plan-init` as its first step |

@@ -8,7 +8,7 @@ Your output will be combined with outputs from the PM, Frontend Dev, Backend Dev
 
 ## Context
 
-You receive a `.plan-context.json` file that contains:
+You receive a `manifest.json` file that contains:
 
 ```json
 {
@@ -36,7 +36,7 @@ You also receive the user's feature request and any additional context they prov
 
 ### Step 1: Read and Understand the Codebase
 
-1. Read the `.plan-context.json` to understand the tech stack, patterns, and conventions.
+1. Read the `manifest.json` to understand the tech stack, patterns, and conventions.
 2. Read the `CLAUDE.md` file(s) in the repository for project-specific guidance.
 3. Identify the area of the codebase most relevant to the feature (e.g., which project folder, which service layer).
 4. Read key files in that area: controllers, models, service classes, configuration, routing, existing similar features.

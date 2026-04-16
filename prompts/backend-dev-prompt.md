@@ -8,7 +8,7 @@ Your output will be combined with outputs from the Architect, PM, Frontend Dev, 
 
 ## Context
 
-You receive a `.plan-context.json` file that contains:
+You receive a `manifest.json` file that contains:
 
 ```json
 {

@@ -20,7 +20,7 @@ Generate a comprehensive end-to-end test plan as an interactive HTML file with c
 
 ## Prerequisites
 
-- `.plan-context.json` must exist (from `/plan-init`)
+- `manifest.json` must exist (from `/plan-init`)
 - `design.html` must exist (from `/plan-design`)
 - If either is missing, stop and tell the user which skill to run first
 
@@ -36,7 +36,7 @@ Generate a comprehensive end-to-end test plan as an interactive HTML file with c
 
 ### Step 1: Load Context and Design
 
-1. Read `.plan-context.json` from the scenario directory using the Read tool.
+1. Read `manifest.json` from the scenario directory using the Read tool.
 2. Read `design.html` from the scenario directory using the Read tool.
 3. Extract key information from the design:
    - Use cases and acceptance criteria
@@ -44,7 +44,7 @@ Generate a comprehensive end-to-end test plan as an interactive HTML file with c
    - Data model entities and state transitions
    - UX flows and interaction patterns
    - Security requirements
-4. If `.plan-context.json` is missing, stop: "Run /plan-init first to set up the planning context."
+4. If `manifest.json` is missing, stop: "Run /plan-init first to set up the planning context."
 5. If `design.html` is missing, stop: "Run /plan-design first to generate the design document."
 
 ### Step 2: Dispatch PM Agent
@@ -262,7 +262,7 @@ Next steps:
 
 | Error | Resolution |
 |-------|------------|
-| `.plan-context.json` not found | "Run /plan-init first to set up the planning context." |
+| `manifest.json` not found | "Run /plan-init first to set up the planning context." |
 | `design.html` not found | "Run /plan-design first to generate the design document." |
 | `design.html` is too large to pass to agents | Extract key sections (use cases, API design, data model) rather than the full file |
 | PM agent fails | Retry once; if it fails again, extract requirements directly from design.html |
@@ -275,7 +275,7 @@ Next steps:
 
 | Document | Relationship |
 |----------|-------------|
-| `.plan-context.json` | **Input** -- provides repo context and scenario metadata |
+| `manifest.json` | **Input** -- provides repo context and scenario metadata |
 | `design.html` | **Input** -- source of testable requirements, API contracts, use cases |
 | `manifest.json` | **Updated** -- records test plan file and generation timestamp |
 | `test-cases.html` | **Downstream** -- reads test-plan.html to generate detailed test cases |

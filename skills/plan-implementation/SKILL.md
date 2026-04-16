@@ -20,7 +20,7 @@ Generate a detailed, file-level implementation plan as an interactive HTML docum
 
 ## Prerequisites
 
-- `.plan-context.json` must exist (from `/plan-init`)
+- `manifest.json` must exist (from `/plan-init`)
 - `design.html` must exist (from `/plan-design`)
 - If either is missing, stop and tell the user which skill to run first
 
@@ -39,11 +39,11 @@ Generate a detailed, file-level implementation plan as an interactive HTML docum
 
 ### Step 1: Load Context and Design
 
-1. Read `.plan-context.json` from the scenario directory.
+1. Read `manifest.json` from the scenario directory.
 2. Read `design.html` from the scenario directory.
 3. Optionally read `state-machine.html` and `test-plan.html` if they exist (for cross-references).
 4. Extract: data model, API design, use cases, architecture, UX flows, security model.
-5. If `.plan-context.json` is missing, stop: "Run /plan-init first."
+5. If `manifest.json` is missing, stop: "Run /plan-init first."
 6. If `design.html` is missing, stop: "Run /plan-design first."
 
 ### Step 2: Dispatch Architect Agent
@@ -447,7 +447,7 @@ Open the file in a browser to use the interactive features.
 
 | Error | Resolution |
 |-------|------------|
-| `.plan-context.json` not found | "Run /plan-init first to set up the planning context." |
+| `manifest.json` not found | "Run /plan-init first to set up the planning context." |
 | `design.html` not found | "Run /plan-design first to generate the design document." |
 | One agent fails (e.g., Frontend Dev) | Retry once; if still failing, proceed with the other agents' output and note the gap |
 | All agents fail | Fall back to a simplified plan generated from design.html sections directly |
@@ -461,7 +461,7 @@ Open the file in a browser to use the interactive features.
 
 | Document | Relationship |
 |----------|-------------|
-| `.plan-context.json` | **Input** -- provides repo context and scenario metadata |
+| `manifest.json` | **Input** -- provides repo context and scenario metadata |
 | `design.html` | **Input** -- primary source for all implementation steps |
 | `test-plan.html` | **Input** (optional) -- E2E scenarios for test coverage matrix |
 | `test-cases.html` | **Referenced** -- cross-linked from per-step test requirements |

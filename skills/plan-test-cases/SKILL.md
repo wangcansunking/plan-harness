@@ -20,10 +20,10 @@ Generate a comprehensive set of detailed test cases as an interactive HTML file 
 
 ## Prerequisites
 
-- `.plan-context.json` must exist (from `/plan-init`)
+- `manifest.json` must exist (from `/plan-init`)
 - `design.html` must exist (from `/plan-design`)
 - `test-plan.html` should exist (from `/plan-test-plan`) -- not strictly required but strongly recommended
-- If `.plan-context.json` or `design.html` is missing, stop and tell the user which skill to run first
+- If `manifest.json` or `design.html` is missing, stop and tell the user which skill to run first
 - If `test-plan.html` is missing, warn: "Test plan not found. Test cases will be generated from the design document only. Consider running /plan-test-plan first for more comprehensive coverage."
 
 ## Agent Team
@@ -38,13 +38,13 @@ Generate a comprehensive set of detailed test cases as an interactive HTML file 
 
 ### Step 1: Load Context, Design, and Test Plan
 
-1. Read `.plan-context.json` from the scenario directory.
+1. Read `manifest.json` from the scenario directory.
 2. Read `design.html` from the scenario directory.
 3. Read `test-plan.html` from the scenario directory (if it exists).
 4. Extract:
    - From design: entities, API endpoints, use cases, acceptance criteria, security requirements
    - From test plan: E2E scenarios, testable requirements, test data requirements
-5. If `.plan-context.json` is missing, stop: "Run /plan-init first."
+5. If `manifest.json` is missing, stop: "Run /plan-init first."
 6. If `design.html` is missing, stop: "Run /plan-design first."
 
 ### Step 2: Dispatch Tester Agent
@@ -275,7 +275,7 @@ Next steps:
 
 | Error | Resolution |
 |-------|------------|
-| `.plan-context.json` not found | "Run /plan-init first to set up the planning context." |
+| `manifest.json` not found | "Run /plan-init first to set up the planning context." |
 | `design.html` not found | "Run /plan-design first to generate the design document." |
 | `test-plan.html` not found | Warn user but proceed with design-only input |
 | Tester agent produces too few test cases (< 10) | Re-prompt with explicit instruction to generate more, covering all categories |
@@ -289,7 +289,7 @@ Next steps:
 
 | Document | Relationship |
 |----------|-------------|
-| `.plan-context.json` | **Input** -- provides repo context and scenario metadata |
+| `manifest.json` | **Input** -- provides repo context and scenario metadata |
 | `design.html` | **Input** -- source of requirements, API contracts, entities |
 | `test-plan.html` | **Input** -- E2E scenarios that test cases should cover in detail |
 | `state-machine.html` | **Related** -- state transitions inform data integrity test cases |
