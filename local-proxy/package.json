@@ -6,6 +6,8 @@
   "scripts": {
     "start": "node start.js",
     "build": "esbuild src/index.js --bundle --platform=node --format=esm --target=node18 --outfile=dist/index.js",
+    "sync": "node scripts/sync-to-cache.mjs",
+    "dev": "npm run build && npm run sync",
     "prepare-release": "npm install --no-fund --no-audit && npm run build"
   },
   "devDependencies": {
