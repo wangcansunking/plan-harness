@@ -51,7 +51,12 @@ Before you write any HTML, read these two files and follow them exactly:
   ```
   Style (inline in `<style>`): horizontal flex with a `border-bottom: 1px solid var(--border)`; active tab has `color: var(--accent)` + `border-bottom: 2px solid var(--accent)` with `margin-bottom: -1px` to overlap; disabled tabs at `opacity: 0.5, cursor: default`; `.soon` pills use `var(--code-bg)` background with border.
 
-The sidebar (`<nav class="side-nav">`) contains ONLY the **"On this page"** section anchors — not the plan-documents list, not a breadcrumb.
+The sidebar (`<nav class="side-nav">`) contains ONLY the **"On this page"** section anchors — not the plan-documents list, not the scenario name / round header, not a breadcrumb. The scenario is already in the breadcrumb pill at top and the doc type is already active in the plan-tabs, so a sidebar header would just duplicate. Give the section-nav `padding-top: 4rem` so its first link clears the fixed pill breadcrumb.
+
+Navigation hierarchy (top to bottom of visual scan):
+1. **breadcrumb pill** (handled by `/view`) — "you are here": workspace › scenario › document
+2. **plan-tabs** (emit these in your HTML) — "switch doc": Design / Test Plan / State Machine / Test Cases / Implementation
+3. **sidebar section-nav** — "navigate within this doc": section anchors only
 
 ## Palette (summary — full spec in DESIGN.md)
 
