@@ -6900,22 +6900,20 @@ function getBaseCSS() {
   @media (min-width: 900px) { body { padding-left: 260px; } .container { max-width: 1100px; margin: 0 auto; } }
   @media (max-width: 899px) { .side-nav { transform: translateX(-100%); } .side-nav-toggle { display: block; } }
 
-  /* Sticky header bar \u2014 spans the top of every plan-harness page.
-     Contains the breadcrumb (left) and theme toggle (right). Blurred
-     translucent background over content so it reads as an overlay but
-     keeps the page feeling unified. Persists on scroll. */
-  .ph-header { position: sticky; top: 0; z-index: 1000; display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: 0.6rem 1.25rem; background: color-mix(in srgb, var(--bg) 80%, transparent); -webkit-backdrop-filter: blur(14px) saturate(180%); backdrop-filter: blur(14px) saturate(180%); border-bottom: 1px solid var(--border); }
-
-  .ph-breadcrumb { display: flex; align-items: center; gap: 0.4rem; font-size: 0.85rem; color: var(--muted); min-width: 0; flex: 1; overflow: hidden; }
-  .ph-breadcrumb a { color: var(--muted); text-decoration: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 16rem; transition: color 0.15s; }
+  /* Breadcrumb \u2014 fixed pill at top-centre, always visible on scroll.
+     Compact rounded badge with blurred surface; doesn't participate in
+     content flow so it never eats top whitespace. */
+  .ph-breadcrumb { position: fixed; top: 0.85rem; left: 50%; transform: translateX(-50%); z-index: 1000; display: flex; align-items: center; gap: 0.45rem; padding: 0.4rem 0.9rem; font-size: 0.82rem; color: var(--muted); background: color-mix(in srgb, var(--surface) 85%, transparent); border: 1px solid var(--border); border-radius: 999px; -webkit-backdrop-filter: blur(12px) saturate(180%); backdrop-filter: blur(12px) saturate(180%); box-shadow: var(--shadow); max-width: calc(100vw - 10rem); overflow: hidden; }
+  .ph-breadcrumb a { color: var(--muted); text-decoration: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 14rem; transition: color 0.15s; }
   .ph-breadcrumb a:hover { color: var(--accent); }
   .ph-breadcrumb .sep { color: var(--muted); opacity: 0.4; font-size: 0.9em; }
-  .ph-breadcrumb .current { color: var(--text); font-weight: 510; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 22rem; }
+  .ph-breadcrumb .current { color: var(--text); font-weight: 510; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 20rem; }
+  @media (max-width: 899px) { .ph-breadcrumb { left: 3.2rem; transform: none; max-width: calc(100vw - 7rem); } }
 
-  /* Theme toggle \u2014 sits inside .ph-header on the right. Three SVGs, one
-     visible per [data-theme-pref]. */
-  .theme-toggle { flex-shrink: 0; background: transparent; border: 1px solid var(--border); border-radius: 8px; padding: 0.4rem 0.5rem; cursor: pointer; color: var(--text); transition: background 0.15s, border-color 0.15s; display: flex; align-items: center; justify-content: center; width: 34px; height: 34px; }
-  .theme-toggle:hover { border-color: var(--accent); background: var(--surface); }
+  /* Theme toggle \u2014 fixed pill at top-right; three SVGs, one visible
+     per [data-theme-pref] attribute. */
+  .theme-toggle { position: fixed; top: 0.85rem; right: 1.25rem; z-index: 1000; background: color-mix(in srgb, var(--surface) 85%, transparent); border: 1px solid var(--border); border-radius: 999px; padding: 0.4rem 0.5rem; cursor: pointer; color: var(--text); -webkit-backdrop-filter: blur(12px) saturate(180%); backdrop-filter: blur(12px) saturate(180%); box-shadow: var(--shadow); transition: border-color 0.15s, color 0.15s; display: flex; align-items: center; justify-content: center; width: 34px; height: 34px; }
+  .theme-toggle:hover { border-color: var(--accent); color: var(--accent); }
   .theme-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   .theme-toggle svg { width: 16px; height: 16px; stroke: currentColor; fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
   .theme-toggle svg[data-theme-icon] { display: none; }
@@ -7236,9 +7234,11 @@ function wrapPage(content, options = {}) {
   const metaHTML = meta3 || tagBadges ? `<p class="meta">${meta3}${tagBadges ? "<br>" + tagBadges : ""}</p>` : "";
   const subtitleHTML = subtitle ? `<p class="meta" style="font-size:1rem;margin-bottom:0.5rem;">${escapeHTML(subtitle)}</p>` : "";
   const extraCSS = sections.length === 0 ? `
-  body { padding-left: 0 !important; }
+  body { padding-left: 0 !important; padding-top: 3rem; }
   .container { max-width: 1200px; }
-` : "";
+` : `
+  body { padding-top: 3rem; }
+`;
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -7253,11 +7253,8 @@ ${extraCSS}
 </head>
 <body>
 
-<header class="ph-header">
-  ${breadcrumb}
-  ${themeToggle}
-</header>
-
+${breadcrumb}
+${themeToggle}
 ${sidebarHTML}
 ${planNav}
 
@@ -7838,23 +7835,26 @@ function injectBreadcrumbIntoHtml(html, filePath) {
 </nav>
 <style>
 .ph-injected-breadcrumb {
-  position: sticky; top: 0; z-index: 10000;
-  background: rgba(15,16,17,0.82); color: #d0d6e0;
-  border-bottom: 1px solid rgba(255,255,255,0.08);
-  backdrop-filter: blur(14px) saturate(180%); -webkit-backdrop-filter: blur(14px) saturate(180%);
-  padding: 0.6rem 1.25rem;
-  font: 510 13px/1.4 'Inter Variable', Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  position: fixed; top: 0.85rem; left: 50%; transform: translateX(-50%); z-index: 10000;
+  display: flex; align-items: center; gap: 0.45rem;
+  padding: 0.4rem 0.9rem; border-radius: 999px;
+  font: 510 13px/1.2 'Inter Variable', Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   font-feature-settings: "cv01","ss03";
-  display: flex; align-items: center; gap: 0.4rem;
-  width: 100%;
+  background: rgba(15,16,17,0.85); color: #d0d6e0;
+  border: 1px solid rgba(255,255,255,0.08);
+  backdrop-filter: blur(12px) saturate(180%); -webkit-backdrop-filter: blur(12px) saturate(180%);
+  box-shadow: 0 4px 16px rgba(0,0,0,0.3);
+  max-width: calc(100vw - 10rem); overflow: hidden;
 }
 @media (prefers-color-scheme: light) {
-  .ph-injected-breadcrumb { background: rgba(247,248,248,0.82); color: #08090a; border-bottom-color: #d0d6e0; }
+  .ph-injected-breadcrumb { background: rgba(243,244,245,0.9); color: #62666d; border-color: #d0d6e0; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
 }
-.ph-injected-breadcrumb a { color: inherit; text-decoration: none; opacity: 0.7; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 16rem; transition: opacity 0.15s, color 0.15s; }
+.ph-injected-breadcrumb a { color: inherit; text-decoration: none; opacity: 0.75; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 14rem; transition: opacity 0.15s, color 0.15s; }
 .ph-injected-breadcrumb a:hover { opacity: 1; color: #7170ff; }
 .ph-injected-breadcrumb .sep { opacity: 0.4; }
-.ph-injected-breadcrumb .current { font-weight: 590; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 22rem; }
+.ph-injected-breadcrumb .current { color: #f7f8f8; font-weight: 590; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 20rem; }
+@media (prefers-color-scheme: light) { .ph-injected-breadcrumb .current { color: #08090a; } }
+@media (max-width: 899px) { .ph-injected-breadcrumb { left: 3.2rem; transform: none; max-width: calc(100vw - 7rem); } }
 @media print { .ph-injected-breadcrumb { display: none !important; } }
 </style>`;
   const bodyMatch = html.match(/<body[^>]*>/i);

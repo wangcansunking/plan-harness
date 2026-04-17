@@ -327,9 +327,9 @@ function injectBreadcrumbIntoHtml(html, filePath) {
   }[c]));
   const workspaceName = getWorkspaceName();
 
-  // Sticky header with workspace › scenario › doc breadcrumb. Uses inline
-  // styles (no CSS vars) so it renders correctly even on docs that don't
-  // define the plan-harness palette.
+  // Fixed pill at top-centre, mirroring the base.js .ph-breadcrumb design.
+  // Inline styles (no CSS vars) so it renders correctly on docs that don't
+  // define the plan-harness palette; uses prefers-color-scheme for theming.
   const bar = `
 <nav class="ph-injected-breadcrumb" aria-label="Breadcrumb">
   <a href="/">${esc(workspaceName)}</a>
@@ -339,23 +339,26 @@ function injectBreadcrumbIntoHtml(html, filePath) {
 </nav>
 <style>
 .ph-injected-breadcrumb {
-  position: sticky; top: 0; z-index: 10000;
-  background: rgba(15,16,17,0.82); color: #d0d6e0;
-  border-bottom: 1px solid rgba(255,255,255,0.08);
-  backdrop-filter: blur(14px) saturate(180%); -webkit-backdrop-filter: blur(14px) saturate(180%);
-  padding: 0.6rem 1.25rem;
-  font: 510 13px/1.4 'Inter Variable', Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  position: fixed; top: 0.85rem; left: 50%; transform: translateX(-50%); z-index: 10000;
+  display: flex; align-items: center; gap: 0.45rem;
+  padding: 0.4rem 0.9rem; border-radius: 999px;
+  font: 510 13px/1.2 'Inter Variable', Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   font-feature-settings: "cv01","ss03";
-  display: flex; align-items: center; gap: 0.4rem;
-  width: 100%;
+  background: rgba(15,16,17,0.85); color: #d0d6e0;
+  border: 1px solid rgba(255,255,255,0.08);
+  backdrop-filter: blur(12px) saturate(180%); -webkit-backdrop-filter: blur(12px) saturate(180%);
+  box-shadow: 0 4px 16px rgba(0,0,0,0.3);
+  max-width: calc(100vw - 10rem); overflow: hidden;
 }
 @media (prefers-color-scheme: light) {
-  .ph-injected-breadcrumb { background: rgba(247,248,248,0.82); color: #08090a; border-bottom-color: #d0d6e0; }
+  .ph-injected-breadcrumb { background: rgba(243,244,245,0.9); color: #62666d; border-color: #d0d6e0; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
 }
-.ph-injected-breadcrumb a { color: inherit; text-decoration: none; opacity: 0.7; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 16rem; transition: opacity 0.15s, color 0.15s; }
+.ph-injected-breadcrumb a { color: inherit; text-decoration: none; opacity: 0.75; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 14rem; transition: opacity 0.15s, color 0.15s; }
 .ph-injected-breadcrumb a:hover { opacity: 1; color: #7170ff; }
 .ph-injected-breadcrumb .sep { opacity: 0.4; }
-.ph-injected-breadcrumb .current { font-weight: 590; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 22rem; }
+.ph-injected-breadcrumb .current { color: #f7f8f8; font-weight: 590; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 20rem; }
+@media (prefers-color-scheme: light) { .ph-injected-breadcrumb .current { color: #08090a; } }
+@media (max-width: 899px) { .ph-injected-breadcrumb { left: 3.2rem; transform: none; max-width: calc(100vw - 7rem); } }
 @media print { .ph-injected-breadcrumb { display: none !important; } }
 </style>`;
 

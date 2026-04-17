@@ -37,7 +37,8 @@ Before you write any HTML, read these two files and follow them exactly:
 
 ## Plan-tabs + breadcrumb responsibility
 
-- **Breadcrumb**: do **NOT** emit a breadcrumb `<nav>` in your generated plan doc. The plan-harness dashboard's `/view` endpoint injects a fixed top-centre pill breadcrumb on every served HTML, so emitting one in the doc would double-render. (File serving a plan doc directly via `file://` intentionally shows no breadcrumb — that's an acceptable dev-only viewing mode.)
+- **Breadcrumb**: do **NOT** emit a breadcrumb `<nav>` in your generated plan doc. The plan-harness dashboard's `/view` endpoint injects a fixed top-centre **pill breadcrumb** (`workspace › scenario › document`, rounded badge, blurred surface, `position: fixed`) on every served HTML, so emitting one in the doc would double-render. (File serving a plan doc directly via `file://` intentionally shows no breadcrumb — that's an acceptable dev-only viewing mode.)
+- **Top padding**: set `body { padding-top: 3rem }` (in addition to any other body padding) so the first content line clears the fixed pills (breadcrumb top-centre + theme toggle top-right). Match `base.js` — don't use larger values like 3.5rem that leave a visible gap.
 - **Plan tabs** — you DO emit these. Horizontal tab row of sibling plan documents at the top of `<main>`, underline-active style. Do **not** put this in the sidebar.
   ```html
   <nav class="plan-tabs" aria-label="Plan documents">
