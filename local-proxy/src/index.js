@@ -624,5 +624,24 @@ const transport = new StdioServerTransport();
 await server.connect(transport);
 console.error("[plan-harness] MCP server running on stdio.");
 
+// Auto-start the local dashboard so `localhost:<port>` is available without an
+// explicit plan_serve_dashboard call. MCP init stays non-blocking: the dashboard
+// is scheduled for the next tick. Workspace root defaults to process.cwd()
+// (Claude Code sets this to the project root when it spawns MCP servers).
+// Opt out with PLAN_HARNESS_NO_AUTO_DASHBOARD=1.
+if (!process.env.PLAN_HARNESS_NO_AUTO_DASHBOARD) {
+  setImmediate(async () => {
+    try {
+      const { startDashboard } = await import("./web-server.js");
+      const port = Number(process.env.PLAN_HARNESS_DASHBOARD_PORT) || 3847;
+      const url = await startDashboard(process.cwd(), port);
+      dashboardUrl = url;
+      console.error(`[plan-harness] Dashboard auto-started at ${url}`);
+    } catch (err) {
+      console.error(`[plan-harness] Dashboard auto-start failed (non-fatal): ${err.message}`);
+    }
+  });
+}
+
 // Export for testing
 export { server };

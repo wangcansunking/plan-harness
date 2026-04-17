@@ -265,11 +265,12 @@ async function serveHtmlFile(req, res, filePath) {
 
   try {
     const content = await readFile(resolved, 'utf-8');
+    const injected = injectBreadcrumbIntoHtml(content, resolved);
     res.writeHead(200, {
       'Content-Type': 'text/html; charset=utf-8',
       'Cache-Control': 'no-cache'
     });
-    res.end(content);
+    res.end(injected);
   } catch (err) {
     if (err.code === 'ENOENT') {
       res.writeHead(404, { 'Content-Type': 'text/plain' });
@@ -278,6 +279,82 @@ async function serveHtmlFile(req, res, filePath) {
       throw err;
     }
   }
+}
+
+/**
+ * Parse scenario and document name out of an absolute path that lives under
+ * <workspaceRoot>/plans/<scenario>/<doc>. Returns { scenarioName, docLabel }
+ * with nulls if the path is not under plans/.
+ */
+function parseScenarioFromPath(absPath) {
+  const rel = absPath.startsWith(workspaceRootPath)
+    ? absPath.slice(workspaceRootPath.length).replace(/^[\\/]+/, '')
+    : absPath;
+  const parts = rel.split(/[\\/]/);
+  const plansIdx = parts.indexOf('plans');
+  if (plansIdx < 0 || plansIdx >= parts.length - 1) return { scenarioName: null, docLabel: null };
+  const scenarioName = parts[plansIdx + 1] || null;
+  const docFile = parts[parts.length - 1] || '';
+  const docLabel = docFile.replace(/\.html?$/i, '') || null;
+  return { scenarioName, docLabel };
+}
+
+/**
+ * Inject a fixed-position breadcrumb bar into HTML served via /view.
+ * Self-contained styles (no dependency on the doc's CSS vars). Works
+ * whether the doc is light, dark, or has no theme.
+ */
+function injectBreadcrumbIntoHtml(html, filePath) {
+  const { scenarioName, docLabel } = parseScenarioFromPath(filePath);
+  if (!scenarioName) return html;
+
+  // Skip injection if the doc already has a plan-harness breadcrumb (newer
+  // agent-generated HTML includes its own via the writer-prompt contract).
+  // Prevents duplicate bars stacked at the top.
+  if (/\bph-breadcrumb\b/.test(html)) return html;
+
+  const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+  }[c]));
+
+  const bar = `
+<nav class="ph-injected-breadcrumb" aria-label="Breadcrumb">
+  <a href="/">Dashboard</a>
+  <span class="sep">›</span>
+  <a href="/scenario/${encodeURIComponent(scenarioName)}">${esc(scenarioName)}</a>
+  ${docLabel ? `<span class="sep">›</span><span class="current">${esc(docLabel)}</span>` : ''}
+</nav>
+<style>
+.ph-injected-breadcrumb {
+  position: fixed; top: 10px; left: 50%; transform: translateX(-50%);
+  z-index: 10000;
+  background: rgba(15,16,17,0.92); color: #d0d6e0;
+  border: 1px solid rgba(255,255,255,0.08);
+  backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+  padding: 6px 14px; border-radius: 8px;
+  font: 510 13px/1 'Inter Variable', Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  font-feature-settings: "cv01","ss03";
+  display: flex; align-items: center; gap: 8px;
+  max-width: calc(100vw - 4rem); overflow: hidden;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.4);
+}
+@media (prefers-color-scheme: light) {
+  .ph-injected-breadcrumb { background: rgba(247,248,248,0.94); color: #08090a; border-color: #d0d6e0; box-shadow: 0 4px 16px rgba(0,0,0,0.08); }
+}
+.ph-injected-breadcrumb a { color: #7170ff; text-decoration: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 18rem; }
+.ph-injected-breadcrumb a:hover { text-decoration: underline; }
+.ph-injected-breadcrumb .sep { opacity: 0.5; }
+.ph-injected-breadcrumb .current { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 22rem; }
+@media print { .ph-injected-breadcrumb { display: none !important; } }
+</style>`;
+
+  // Insert right after the first <body ...> tag; if none, prepend.
+  const bodyMatch = html.match(/<body[^>]*>/i);
+  if (bodyMatch) {
+    const idx = bodyMatch.index + bodyMatch[0].length;
+    return html.slice(0, idx) + bar + html.slice(idx);
+  }
+  return bar + html;
 }
 
 async function serveApiScenarios(req, res) {
@@ -578,25 +655,49 @@ function serveLoginPage(req, res) {
     errorHtml = `<div class="error">Too many attempts. Try again in ~${secs}s.</div>`;
   }
 
+  // Login page uses the same Linear-inspired palette + shared theme key as the
+  // rest of plan-harness. The inline init script resolves system/light/dark
+  // from localStorage (shared across the whole plugin) before body paints.
   const html = `<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Plan Dashboard — Sign in</title>
+<script>
+(function(){
+  try {
+    var KEY='plan-harness-theme';
+    var pref=localStorage.getItem(KEY)||'system';
+    var dark=pref==='dark'||(pref==='system'&&matchMedia('(prefers-color-scheme: dark)').matches);
+    document.documentElement.setAttribute('data-theme', dark?'dark':'light');
+  } catch(e) {}
+})();
+</script>
 <style>
-  :root { --bg: #0d1117; --surface: #161b22; --border: #30363d; --text: #e6edf3; --muted: #8b949e; --accent: #58a6ff; --red: #f85149; }
+  :root {
+    --bg: #f7f8f8; --surface: #f3f4f5; --border: #d0d6e0;
+    --text: #08090a; --muted: #62666d; --accent: #5e6ad2; --red: #cf222e;
+    --shadow-lg: 0 4px 16px rgba(0,0,0,0.08);
+  }
+  [data-theme="dark"] {
+    --bg: #08090a; --surface: #0f1011; --border: rgba(255,255,255,0.08);
+    --text: #f7f8f8; --muted: #8a8f98; --accent: #7170ff; --red: #f85149;
+    --shadow-lg: 0 8px 32px rgba(0,0,0,0.6), inset 0 1px 0 rgba(255,255,255,0.05);
+  }
   * { margin: 0; padding: 0; box-sizing: border-box; }
-  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: var(--bg); color: var(--text); display: flex; align-items: center; justify-content: center; min-height: 100vh; padding: 1rem; }
-  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 2.25rem; width: 100%; max-width: 380px; box-shadow: 0 4px 24px rgba(0,0,0,0.4); }
-  h1 { font-size: 1.25rem; margin-bottom: 0.35rem; }
+  html { font-feature-settings: "cv01","ss03"; }
+  body { font-family: 'Inter Variable', Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: var(--bg); color: var(--text); display: flex; align-items: center; justify-content: center; min-height: 100vh; padding: 1rem; letter-spacing: -0.01em; }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 2.25rem; width: 100%; max-width: 380px; box-shadow: var(--shadow-lg); }
+  h1 { font-size: 1.25rem; font-weight: 510; letter-spacing: -0.02em; margin-bottom: 0.35rem; }
   .lede { color: var(--muted); font-size: 0.85rem; margin-bottom: 1.25rem; line-height: 1.5; }
   label { display: block; font-size: 0.8rem; color: var(--muted); margin-bottom: 0.35rem; }
-  input { width: 100%; padding: 0.65rem 0.85rem; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; color: var(--text); font-size: 0.95rem; margin-bottom: 0.9rem; outline: none; font-family: inherit; }
-  input:focus { border-color: var(--accent); }
-  button { width: 100%; padding: 0.7rem; background: var(--accent); color: #fff; border: none; border-radius: 6px; font-size: 0.95rem; font-weight: 600; cursor: pointer; margin-top: 0.35rem; }
-  button:hover { opacity: 0.92; }
-  .error { color: var(--red); font-size: 0.82rem; margin-bottom: 0.9rem; background: rgba(248,81,73,0.12); border: 1px solid rgba(248,81,73,0.3); padding: 0.5rem 0.7rem; border-radius: 6px; }
+  input { width: 100%; padding: 0.65rem 0.85rem; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; color: var(--text); font-size: 0.95rem; margin-bottom: 0.9rem; outline: none; font-family: inherit; transition: border-color 0.15s; }
+  input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(94,106,210,0.15); }
+  button { width: 100%; padding: 0.7rem; background: var(--accent); color: #ffffff; border: none; border-radius: 6px; font-size: 0.95rem; font-weight: 510; cursor: pointer; margin-top: 0.35rem; font-family: inherit; letter-spacing: -0.005em; transition: filter 0.15s; }
+  button:hover { filter: brightness(1.1); }
+  .error { color: var(--red); font-size: 0.82rem; margin-bottom: 0.9rem; background: rgba(207,34,46,0.08); border: 1px solid rgba(207,34,46,0.25); padding: 0.5rem 0.7rem; border-radius: 6px; }
+  [data-theme="dark"] .error { background: rgba(248,81,73,0.1); border-color: rgba(248,81,73,0.25); }
   .note { color: var(--muted); font-size: 0.75rem; margin-top: 0.9rem; text-align: center; }
 </style>
 </head>

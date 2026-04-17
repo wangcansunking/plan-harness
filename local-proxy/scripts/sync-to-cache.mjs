@@ -57,6 +57,7 @@ const toSync = [
   'README.md',
   'ROADMAP.md',
   'DEVELOPMENT.md',
+  'DESIGN.md',
 ];
 
 let synced = 0;

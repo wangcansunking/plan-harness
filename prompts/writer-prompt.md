@@ -6,6 +6,83 @@ You are the final step in the pipeline. Every other agent's output flows through
 
 ---
 
+## MANDATORY reads (spec for the visual system)
+
+Before you write any HTML, read these two files and follow them exactly:
+
+1. `plan-harness/DESIGN.md` — the visual design system (Linear-inspired palette, typography, border, shadow, component patterns). Every colour, font, radius, and spacing token you emit must line up with this file.
+2. `plan-harness/local-proxy/src/templates/base.js` — the canonical implementation of that system in JS-generated HTML. Skim `getBaseCSS`, `getThemeInitScript`, `getThemeToggleHTML`, `getBreadcrumbHTML`. **Your generated HTML must match the output of these helpers byte-for-byte where possible** so that plan documents, dashboard, and scenario pages share one look and one theme state.
+
+## Unified theme system (non-negotiable)
+
+- **Single localStorage key across the entire plugin**: `plan-harness-theme`. Never use per-scenario keys like `<scenario>-theme`. The pref is shared across dashboard, scenario detail, and every rendered plan document.
+- **Three prefs**: `"system"` (default), `"light"`, `"dark"`. The pref is stored; the concrete theme (`data-theme="light|dark"` on `<html>`) is resolved by the init script.
+- **Inline the init script in `<head>`** so `data-theme` is set before the body paints (prevents FOUC):
+  ```html
+  <script>
+  (function(){
+    try {
+      var KEY='plan-harness-theme';
+      var pref=localStorage.getItem(KEY)||'system';
+      var dark=pref==='dark'||(pref==='system'&&matchMedia('(prefers-color-scheme: dark)').matches);
+      document.documentElement.setAttribute('data-theme', dark?'dark':'light');
+      document.documentElement.setAttribute('data-theme-pref', pref);
+    } catch(e) {}
+  })();
+  </script>
+  ```
+- **Toggle button emits three SVG icons**; CSS hides all but the one matching `data-theme-pref` on the button. Click cycles `system → light → dark → system`. Copy the exact markup from `getThemeToggleHTML()` in `base.js`.
+- **Listen for `matchMedia('(prefers-color-scheme: dark)').change`** so users in system mode see live updates when their OS flips.
+- **Listen for `storage` events** so the theme stays in sync across tabs.
+
+## Breadcrumb + plan-tabs (non-negotiable layout)
+
+Every plan document you generate must have two navigation elements **inside `<main>` (or `.container`), above `<h1>`**:
+
+1. **Breadcrumb** — plain text, aligned with content's left edge, **NOT a pill / card / fixed bar**. Linear / Notion style.
+   ```html
+   <nav class="ph-breadcrumb" aria-label="Breadcrumb">
+     <a href="/">Dashboard</a>
+     <span class="sep">›</span>
+     <a href="/scenario/<scenario-slug>"><scenario-name></a>
+     <span class="sep">›</span>
+     <span class="current"><doc-name></span>
+   </nav>
+   ```
+   Match the CSS from `base.js` `.ph-breadcrumb` (inline flex, muted text, no background).
+
+2. **Plan tabs** — horizontal tab row of sibling plan documents, underline-active style. Do **not** put this in the sidebar.
+   ```html
+   <nav class="plan-tabs" aria-label="Plan documents">
+     <a href="design.html" class="active" aria-current="page">Design</a>
+     <a href="test-plan.html" aria-disabled="true">Test Plan <span class="soon">soon</span></a>
+     <a href="state-machine.html" aria-disabled="true">State Machine <span class="soon">soon</span></a>
+     <a href="test-cases.html" aria-disabled="true">Test Cases <span class="soon">soon</span></a>
+     <a href="implementation-plan.html" aria-disabled="true">Implementation <span class="soon">soon</span></a>
+   </nav>
+   ```
+   Style (inline in `<style>`): horizontal flex with a `border-bottom: 1px solid var(--border)`; active tab has `color: var(--accent)` + `border-bottom: 2px solid var(--accent)` with `margin-bottom: -1px` to overlap; disabled tabs at `opacity: 0.5, cursor: default`; `.soon` pills use `var(--code-bg)` background with border.
+
+The sidebar (`<nav class="side-nav">`) contains ONLY the **"On this page"** section anchors — not the plan-documents list.
+
+## Palette (summary — full spec in DESIGN.md)
+
+| Token | Light | Dark |
+|---|---|---|
+| `--bg` | `#f7f8f8` | `#08090a` |
+| `--surface` | `#f3f4f5` | `#0f1011` |
+| `--border` | `#d0d6e0` | `rgba(255,255,255,0.08)` |
+| `--text` | `#08090a` | `#f7f8f8` |
+| `--muted` | `#62666d` | `#8a8f98` |
+| `--accent` | `#5e6ad2` | `#7170ff` |
+| `--green` | `#1a7f37` | `#27a644` |
+
+Font stack: `'Inter Variable', Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif` with `font-feature-settings: "cv01","ss03"`. Monospace: `'Berkeley Mono', 'Cascadia Code', 'Fira Code', ui-monospace, 'SF Mono', Menlo, Consolas, monospace`. Use weight `510` for emphasis (between regular and medium — Linear's signature), negative letter-spacing at display sizes (`-0.02em` at headings).
+
+**Anything in the older sections of this prompt that contradicts the rules above is obsolete** (it reflected an earlier GitHub-palette theme system with per-scenario keys). Follow this section first.
+
+---
+
 ## Context
 
 You receive:

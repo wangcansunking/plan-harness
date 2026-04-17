@@ -8,39 +8,51 @@
  */
 export function getBaseCSS() {
   return `
-  :root, [data-theme="dark"] {
-    --bg: #0d1117; --surface: #161b22; --border: #30363d;
-    --text: #e6edf3; --muted: #8b949e; --accent: #58a6ff;
-    --green: #3fb950; --red: #f85149; --yellow: #d29922; --purple: #bc8cff;
-    --code-bg: #1c2128;
-    --svg-bg: #161b22; --svg-bg2: #0d1117; --svg-text: #e6edf3;
-    --svg-muted: #8b949e; --svg-border: #30363d;
-    --even-row-bg: rgba(22,27,34,0.5);
-    --badge-green-bg: rgba(63,185,80,0.2); --badge-yellow-bg: rgba(210,153,34,0.2);
-    --badge-red-bg: rgba(248,81,73,0.2); --badge-blue-bg: rgba(88,166,255,0.2);
-    --badge-purple-bg: rgba(188,140,255,0.2);
-    --shadow: 0 1px 3px rgba(0,0,0,0.3);
-    --shadow-lg: 0 4px 12px rgba(0,0,0,0.4);
+  /* Palette inspired by Linear (see plan-harness/DESIGN.md).
+     Light is the CSS default for no-JS fallback; the inline init script in
+     <head> sets data-theme="dark" when the resolved pref is dark. Theme pref
+     lives in localStorage under "plan-harness-theme" so every plan-harness
+     page shares it. */
+  :root {
+    /* Light surfaces */
+    --bg: #f7f8f8; --surface: #f3f4f5; --border: #d0d6e0;
+    --text: #08090a; --muted: #62666d; --accent: #5e6ad2;
+    /* Status */
+    --green: #1a7f37; --red: #cf222e; --yellow: #9a6700; --purple: #7170ff;
+    --code-bg: #eeeff1;
+    --svg-bg: #f3f4f5; --svg-bg2: #f7f8f8; --svg-text: #08090a;
+    --svg-muted: #62666d; --svg-border: #d0d6e0;
+    --even-row-bg: rgba(243,244,245,0.7);
+    --badge-green-bg: rgba(26,127,55,0.1); --badge-yellow-bg: rgba(154,103,0,0.1);
+    --badge-red-bg: rgba(207,34,46,0.1); --badge-blue-bg: rgba(94,106,210,0.1);
+    --badge-purple-bg: rgba(113,112,255,0.1);
+    --shadow: 0 1px 2px rgba(0,0,0,0.05);
+    --shadow-lg: 0 4px 16px rgba(0,0,0,0.08);
     --radius: 8px;
     --radius-sm: 4px;
+    --font-ui: 'Inter Variable', Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    --font-mono: 'Berkeley Mono', 'Cascadia Code', 'Fira Code', ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+    --font-features: "cv01", "ss03";
   }
-  [data-theme="light"] {
-    --bg: #ffffff; --surface: #f6f8fa; --border: #d0d7de;
-    --text: #1f2328; --muted: #656d76; --accent: #0969da;
-    --green: #1a7f37; --red: #cf222e; --yellow: #9a6700; --purple: #8250df;
-    --code-bg: #f0f3f6;
-    --svg-bg: #f6f8fa; --svg-bg2: #ffffff; --svg-text: #1f2328;
-    --svg-muted: #656d76; --svg-border: #d0d7de;
-    --even-row-bg: rgba(246,248,250,0.8);
-    --badge-green-bg: rgba(26,127,55,0.1); --badge-yellow-bg: rgba(154,103,0,0.1);
-    --badge-red-bg: rgba(207,34,46,0.1); --badge-blue-bg: rgba(9,105,218,0.1);
-    --badge-purple-bg: rgba(130,80,223,0.1);
-    --shadow: 0 1px 3px rgba(0,0,0,0.08);
-    --shadow-lg: 0 4px 12px rgba(0,0,0,0.1);
+  [data-theme="dark"] {
+    /* Linear marketing-black + panel-dark layered surfaces */
+    --bg: #08090a; --surface: #0f1011; --border: rgba(255,255,255,0.08);
+    --text: #f7f8f8; --muted: #8a8f98; --accent: #7170ff;
+    --green: #27a644; --red: #f85149; --yellow: #d29922; --purple: #828fff;
+    --code-bg: #141516;
+    --svg-bg: #0f1011; --svg-bg2: #08090a; --svg-text: #f7f8f8;
+    --svg-muted: #8a8f98; --svg-border: rgba(255,255,255,0.08);
+    --even-row-bg: rgba(25,26,27,0.5);
+    --badge-green-bg: rgba(39,166,68,0.15); --badge-yellow-bg: rgba(210,153,34,0.15);
+    --badge-red-bg: rgba(248,81,73,0.15); --badge-blue-bg: rgba(113,112,255,0.15);
+    --badge-purple-bg: rgba(130,143,255,0.15);
+    --shadow: 0 1px 2px rgba(0,0,0,0.4);
+    --shadow-lg: 0 8px 32px rgba(0,0,0,0.6), inset 0 1px 0 rgba(255,255,255,0.05);
   }
   * { margin: 0; padding: 0; box-sizing: border-box; }
-  html { scroll-behavior: smooth; }
-  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif; background: var(--bg); color: var(--text); line-height: 1.7; transition: background-color 0.2s, color 0.2s; }
+  html { scroll-behavior: smooth; font-feature-settings: var(--font-features); }
+  body { font-family: var(--font-ui); background: var(--bg); color: var(--text); line-height: 1.6; font-weight: 400; letter-spacing: -0.01em; transition: background-color 0.2s, color 0.2s; }
+  code, pre, kbd, samp { font-family: var(--font-mono); }
   .container { max-width: 1100px; margin: 0 auto; padding: 2rem 2.5rem; }
   h1 { font-size: 2rem; border-bottom: 2px solid var(--accent); padding-bottom: 0.5rem; margin-bottom: 1.5rem; }
   h2 { font-size: 1.5rem; color: var(--accent); margin-top: 3rem; margin-bottom: 1rem; border-bottom: 1px solid var(--border); padding-bottom: 0.3rem; }
@@ -93,10 +105,25 @@ export function getBaseCSS() {
   @media (min-width: 900px) { body { padding-left: 260px; } .container { max-width: 1100px; margin: 0 auto; } }
   @media (max-width: 899px) { .side-nav { transform: translateX(-100%); } .side-nav-toggle { display: block; } }
 
-  /* Theme toggle */
-  .theme-toggle { position: fixed; top: 1rem; right: 1.5rem; z-index: 999; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 0.4rem 0.8rem; cursor: pointer; font-size: 1.1rem; color: var(--text); transition: background 0.2s, border-color 0.2s; display: flex; align-items: center; gap: 0.4rem; }
+  /* Theme toggle — single button, cycles through system/light/dark.
+     One SVG visible at a time based on [data-theme-pref] attribute. */
+  .theme-toggle { position: fixed; top: 1rem; right: 1.5rem; z-index: 999; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 0.45rem 0.55rem; cursor: pointer; color: var(--text); transition: background 0.2s, border-color 0.2s; display: flex; align-items: center; justify-content: center; width: 36px; height: 36px; }
   .theme-toggle:hover { border-color: var(--accent); }
-  .theme-toggle .label { font-size: 0.75rem; color: var(--muted); }
+  .theme-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .theme-toggle svg { width: 18px; height: 18px; stroke: currentColor; fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+  .theme-toggle svg[data-theme-icon] { display: none; }
+  .theme-toggle[data-theme-pref="system"] svg[data-theme-icon="system"],
+  .theme-toggle[data-theme-pref="light"]  svg[data-theme-icon="light"],
+  .theme-toggle[data-theme-pref="dark"]   svg[data-theme-icon="dark"] { display: block; }
+
+  /* Breadcrumb — inline at the top of the content, above h1.
+     No pill, no card — plain text, aligned with the content's left edge.
+     Matches Linear / Notion / GitHub aesthetic: subtle path, not a widget. */
+  .ph-breadcrumb { display: flex; align-items: center; gap: 0.4rem; font-size: 0.82rem; color: var(--muted); margin-bottom: 1rem; flex-wrap: wrap; }
+  .ph-breadcrumb a { color: var(--muted); text-decoration: none; transition: color 0.15s; white-space: nowrap; }
+  .ph-breadcrumb a:hover { color: var(--accent); }
+  .ph-breadcrumb .sep { color: var(--muted); opacity: 0.4; font-size: 0.9em; }
+  .ph-breadcrumb .current { color: var(--text); font-weight: 510; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 24rem; }
 
   /* Flow steps */
   .flow-step { display: flex; align-items: flex-start; gap: 1rem; margin: 0.5rem 0; }
@@ -247,13 +274,73 @@ ${links}</nav>
 }
 
 /**
- * Theme toggle button HTML + JS.
- * @returns {string} HTML string with the toggle button and inline script.
+ * Theme toggle button — single button cycling system → light → dark → system.
+ * All three SVG icons are emitted; CSS shows only the one matching the current
+ * data-theme-pref attribute. Click handler is wired in getBaseScript.
+ * @returns {string}
  */
 export function getThemeToggleHTML() {
   return `
-<button class="theme-toggle" id="themeToggle" title="Toggle theme"><span id="themeIcon">&#9789;</span> <span class="label" id="themeLabel">Dark</span></button>
+<button class="theme-toggle" id="themeToggle" type="button" aria-label="Theme (click to cycle: system, light, dark)" title="Theme — click to cycle">
+  <svg data-theme-icon="system" viewBox="0 0 24 24" aria-hidden="true"><rect x="2" y="4" width="20" height="13" rx="2"/><path d="M8 21h8M12 17v4"/></svg>
+  <svg data-theme-icon="light" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>
+  <svg data-theme-icon="dark" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+</button>
 `;
+}
+
+/**
+ * Synchronous theme-init script for <head>. Must run before body render to
+ * prevent FOUC. Reads the shared pref (plan-harness-theme), resolves "system"
+ * against prefers-color-scheme, sets data-theme on <html>, and stashes the
+ * pref on the <html> element so the toggle button reflects the right icon
+ * as soon as it renders.
+ * @returns {string}
+ */
+export function getThemeInitScript() {
+  return `<script>
+(function(){
+  try {
+    var KEY = 'plan-harness-theme';
+    var pref = localStorage.getItem(KEY) || 'system';
+    var dark = pref === 'dark' || (pref === 'system' && matchMedia('(prefers-color-scheme: dark)').matches);
+    document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light');
+    document.documentElement.setAttribute('data-theme-pref', pref);
+  } catch(e) {}
+})();
+</script>`;
+}
+
+/**
+ * Breadcrumb shown at top-centre of every page: Dashboard › scenario › current.
+ * @param {object} [opts]
+ * @param {string} [opts.scenarioName] - if present, renders as a link to /scenario/:name
+ * @param {string} [opts.currentLabel] - label for the current page (non-link); omit on the dashboard itself
+ * @returns {string}
+ */
+export function getBreadcrumbHTML(opts = {}) {
+  const { scenarioName, currentLabel } = opts;
+  const parts = [];
+  const isDashboard = !scenarioName && !currentLabel;
+  parts.push(isDashboard
+    ? `<span class="current">Dashboard</span>`
+    : `<a href="/" title="All scenarios">Dashboard</a>`);
+  if (scenarioName) {
+    const scenarioLabel = escapeHTML(scenarioName);
+    const scenarioHref = `/scenario/${encodeURIComponent(scenarioName)}`;
+    if (currentLabel) {
+      parts.push(`<span class="sep">›</span>`);
+      parts.push(`<a href="${escapeAttr(scenarioHref)}" title="Scenario: ${scenarioLabel}">${scenarioLabel}</a>`);
+    } else {
+      parts.push(`<span class="sep">›</span>`);
+      parts.push(`<span class="current" title="Scenario: ${scenarioLabel}">${scenarioLabel}</span>`);
+    }
+  }
+  if (currentLabel) {
+    parts.push(`<span class="sep">›</span>`);
+    parts.push(`<span class="current">${escapeHTML(currentLabel)}</span>`);
+  }
+  return `<nav class="ph-breadcrumb" aria-label="Breadcrumb">${parts.join('')}</nav>`;
 }
 
 /**
@@ -261,37 +348,59 @@ export function getThemeToggleHTML() {
  * @param {string} storageKey - localStorage key for theme preference.
  * @returns {string} Script tag with interactivity code.
  */
-function getBaseScript(storageKey = 'plan-harness-theme') {
+function getBaseScript(_legacyStorageKey) {
+  // _legacyStorageKey is ignored — the key is now uniformly "plan-harness-theme"
+  // so a user's theme choice syncs across dashboard, scenario detail, and every
+  // rendered plan document.
   return `
 <script>
 (function() {
-  // Theme toggle
-  var toggle = document.getElementById('themeToggle');
-  var icon = document.getElementById('themeIcon');
-  var label = document.getElementById('themeLabel');
+  // Theme cycling: system -> light -> dark -> system ...
+  var KEY = 'plan-harness-theme';
+  var NEXT = { system: 'light', light: 'dark', dark: 'system' };
   var html = document.documentElement;
+  var toggle = document.getElementById('themeToggle');
 
-  function setTheme(theme) {
-    html.setAttribute('data-theme', theme);
-    localStorage.setItem('${storageKey}', theme);
-    if (theme === 'light') {
-      icon.innerHTML = '&#9788;';
-      label.textContent = 'Light';
-    } else {
-      icon.innerHTML = '&#9790;';
-      label.textContent = 'Dark';
+  function resolvePref(pref) {
+    if (pref === 'dark') return 'dark';
+    if (pref === 'light') return 'light';
+    return matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+  }
+
+  function applyPref(pref) {
+    try { localStorage.setItem(KEY, pref); } catch(e) {}
+    html.setAttribute('data-theme', resolvePref(pref));
+    html.setAttribute('data-theme-pref', pref);
+    if (toggle) {
+      toggle.setAttribute('data-theme-pref', pref);
+      toggle.setAttribute('aria-label', 'Theme: ' + pref + ' (click to cycle)');
+      toggle.setAttribute('title', 'Theme: ' + pref + ' — click to cycle');
     }
   }
 
-  var saved = localStorage.getItem('${storageKey}') || 'dark';
-  setTheme(saved);
+  var currentPref = (function() { try { return localStorage.getItem(KEY); } catch(e) { return null; } })() || 'system';
+  applyPref(currentPref);
 
   if (toggle) {
     toggle.addEventListener('click', function() {
-      var current = html.getAttribute('data-theme') || 'dark';
-      setTheme(current === 'dark' ? 'light' : 'dark');
+      var pref = (function() { try { return localStorage.getItem(KEY); } catch(e) { return null; } })() || 'system';
+      applyPref(NEXT[pref] || 'system');
     });
   }
+
+  // Follow the OS setting live while the user is in "system" mode.
+  try {
+    matchMedia('(prefers-color-scheme: dark)').addEventListener('change', function() {
+      var pref = (function() { try { return localStorage.getItem(KEY); } catch(e) { return null; } })() || 'system';
+      if (pref === 'system') applyPref('system');
+    });
+  } catch(e) {}
+
+  // Cross-tab / cross-document sync: any other plan-harness page that cycles
+  // the theme fires a "storage" event that lets us update without reloading.
+  window.addEventListener('storage', function(e) {
+    if (e.key === KEY && e.newValue) applyPref(e.newValue);
+  });
 
   // Side nav toggle & active section highlight
   var navToggle = document.getElementById('navToggle');
@@ -360,12 +469,14 @@ export function wrapPage(content, options = {}) {
     tags = [],
     sections = [],
     scripts = '',
-    storageKey = 'plan-harness-theme',
-    planLinks = []
+    planLinks = [],
+    scenarioName = null,
+    currentLabel = null,
   } = options;
 
   const sidebarHTML = sections.length > 0 ? getSidebarHTML(title, sections) : '';
   const themeToggle = getThemeToggleHTML();
+  const breadcrumb = getBreadcrumbHTML({ scenarioName, currentLabel });
 
   const tagBadges = tags.map(t =>
     `<span class="badge badge-${t.color || 'blue'}">${escapeHTML(t.label)}</span>`
@@ -381,11 +492,15 @@ export function wrapPage(content, options = {}) {
   const metaHTML = (meta || tagBadges) ? `<p class="meta">${meta}${tagBadges ? '<br>' + tagBadges : ''}</p>` : '';
   const subtitleHTML = subtitle ? `<p class="meta" style="font-size:1rem;margin-bottom:0.5rem;">${escapeHTML(subtitle)}</p>` : '';
 
-  // If no sidebar, remove padding-left from body
+  // Theme toggle is still fixed top-right, so leave a little headroom so the
+  // button doesn't sit over the h1 on narrow viewports. Breadcrumb now lives
+  // inside .container (above h1) so it doesn't need its own space.
   const extraCSS = sections.length === 0 ? `
   body { padding-left: 0 !important; }
-  .container { max-width: 1200px; }
-` : '';
+  .container { max-width: 1200px; padding-top: 2rem; }
+` : `
+  .container { padding-top: 2rem; }
+`;
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -393,6 +508,7 @@ export function wrapPage(content, options = {}) {
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>${escapeHTML(title)}</title>
+${getThemeInitScript()}
 <style>
 ${getBaseCSS()}
 ${extraCSS}
@@ -405,6 +521,7 @@ ${themeToggle}
 ${planNav}
 
 <div class="container">
+${breadcrumb}
 <h1>${escapeHTML(title)}</h1>
 ${subtitleHTML}
 ${metaHTML}
@@ -413,7 +530,7 @@ ${content}
 
 </div>
 
-${getBaseScript(storageKey)}
+${getBaseScript()}
 ${scripts}
 
 </body>
@@ -536,70 +653,131 @@ function filterScenarios() {
  * @returns {string} Full self-contained HTML page.
  */
 export function generateScenarioDetail(scenario, options = {}) {
-  const planTypeLabels = {
-    'design': 'Design Document',
-    'test-plan': 'E2E Test Plan',
-    'state-machines': 'State Machines',
-    'test-cases': 'Test Cases',
-    'impl-plan': 'Implementation Plan'
-  };
+  const PLAN_DEFS = [
+    { type: 'design', label: 'Design', blurb: 'Architecture, data model, API, UX, risks', skill: '/plan-design' },
+    { type: 'test-plan', label: 'Test Plan', blurb: 'E2E scenarios, entry criteria, ownership', skill: '/plan-test-plan' },
+    { type: 'state-machines', label: 'State Machines', blurb: 'Entity states, transitions, invariants', skill: '/plan-state-machine' },
+    { type: 'test-cases', label: 'Test Cases', blurb: 'Priority-ranked cases with expected outcomes', skill: '/plan-test-cases' },
+    { type: 'impl-plan', label: 'Implementation', blurb: 'File-level steps, phases, dependencies', skill: '/plan-implementation' },
+  ];
 
   const files = scenario.files || [];
+  const byType = Object.fromEntries(files.map(f => [f.type, f]));
 
-  let tabsHTML = files.map((f, i) => {
-    const label = planTypeLabels[f.type] || f.type;
-    const statusIcon = f.exists
-      ? (f.completion >= 100
-        ? '<span style="color:var(--green);">&#10003;</span>'
-        : '<span style="color:var(--yellow);">&#9679;</span>')
-      : '<span style="color:var(--muted);">&#9675;</span>';
-    const activeClass = i === 0 ? ' active' : '';
-    return `<a href="/view?path=${encodeURIComponent(f.path)}" class="badge badge-blue${f.exists ? '' : '" style="opacity:0.5;pointer-events:none;'}" style="font-size:0.85rem;margin:0.2rem;">${statusIcon} ${escapeHTML(label)}</a>`;
-  }).join('\n    ');
+  const existingFiles = files.filter(f => f.exists);
+  const doneFiles = existingFiles.filter(f => (f.completion || 0) >= 100).length;
+  const avgCompletion = scenario.completion ?? (existingFiles.length
+    ? Math.round(existingFiles.reduce((s, f) => s + (f.completion || 0), 0) / existingFiles.length)
+    : 0);
 
-  let fileDetails = files.map(f => {
-    const label = planTypeLabels[f.type] || f.type;
-    const statusBadge = f.exists
-      ? `<span class="badge badge-green">Exists</span>`
-      : `<span class="badge badge-red">Missing</span>`;
-    const pct = f.completion || 0;
+  const tags = Array.isArray(scenario.tags) ? scenario.tags : [];
+  const tagHTML = tags.map(t => `<span class="badge badge-blue" style="font-size:0.72rem;">${escapeHTML(t)}</span>`).join(' ');
+  const statusPill = (() => {
+    const s = scenario.status || 'draft';
+    const color = s === 'complete' ? 'green' : s === 'in-progress' ? 'yellow' : 'blue';
+    return `<span class="badge badge-${color}" style="font-size:0.72rem;text-transform:capitalize;">${escapeHTML(s)}</span>`;
+  })();
+
+  const summaryHTML = `
+<div class="scn-summary">
+  <div class="scn-stat"><div class="scn-stat-val">${existingFiles.length}<span class="scn-stat-total">/${PLAN_DEFS.length}</span></div><div class="scn-stat-label">Documents</div></div>
+  <div class="scn-stat"><div class="scn-stat-val" style="color:var(--green);">${doneFiles}</div><div class="scn-stat-label">Complete</div></div>
+  <div class="scn-stat"><div class="scn-stat-val" style="color:var(--yellow);">${existingFiles.length - doneFiles}</div><div class="scn-stat-label">In Progress</div></div>
+  <div class="scn-stat"><div class="scn-stat-val" style="color:var(--accent);">${avgCompletion}%</div><div class="scn-stat-label">Avg. Complete</div></div>
+</div>`;
+
+  const descHTML = scenario.description
+    ? `<p class="scn-description">${escapeHTML(scenario.description)}</p>`
+    : '';
+
+  const metaRowHTML = `
+<div class="scn-meta-row">
+  ${statusPill}
+  ${tagHTML}
+  ${scenario.workItem ? `<a href="${escapeAttr(scenario.workItem)}" class="scn-meta-link">Work item: ${escapeHTML(scenario.workItem)}</a>` : ''}
+</div>`;
+
+  const docsHTML = PLAN_DEFS.map(def => {
+    const f = byType[def.type];
+    const exists = !!(f && f.exists);
+    const pct = (f && f.completion) || 0;
+    const state = !exists ? 'missing' : pct >= 100 ? 'complete' : 'partial';
+    const stateBadge = state === 'complete'
+      ? `<span class="doc-state doc-state-complete">Complete</span>`
+      : state === 'partial'
+        ? `<span class="doc-state doc-state-partial">${pct}%</span>`
+        : `<span class="doc-state doc-state-missing">Not generated</span>`;
+
+    const primaryAction = exists
+      ? `<a href="/view?path=${encodeURIComponent(f.path)}" class="doc-primary-action">Open →</a>`
+      : `<code class="doc-skill">${escapeHTML(def.skill)} ${escapeHTML(scenario.name || '')}</code>`;
+
+    const progressBar = exists
+      ? `<div class="doc-progress"><div class="doc-progress-fill" style="width:${pct}%;"></div></div>`
+      : `<div class="doc-progress"><div class="doc-progress-fill doc-progress-empty"></div></div>`;
+
     return `
-<div class="node-card">
-  <h4>${escapeHTML(label)} ${statusBadge}</h4>
-  ${f.exists ? `
-  <div style="display:flex;align-items:center;gap:0.6rem;margin:0.5rem 0;">
-    <div style="flex:1;height:6px;background:var(--border);border-radius:3px;overflow:hidden;">
-      <div style="height:100%;width:${pct}%;background:var(--green);border-radius:3px;"></div>
-    </div>
-    <span style="font-size:0.85rem;color:var(--muted);">${pct}%</span>
-  </div>
-  <p style="font-size:0.85rem;"><a href="/view?path=${encodeURIComponent(f.path)}">View document</a></p>
-  ` : '<p style="font-size:0.85rem;color:var(--muted);">This plan file has not been generated yet.</p>'}
-  <p style="font-size:0.8rem;color:var(--muted);font-family:monospace;">${escapeHTML(f.path)}</p>
-</div>
-`;
-  }).join('\n');
+<article class="doc-card doc-card-${state}">
+  <header class="doc-card-header">
+    <h3 class="doc-card-title">${escapeHTML(def.label)}</h3>
+    ${stateBadge}
+  </header>
+  <p class="doc-card-blurb">${escapeHTML(def.blurb)}</p>
+  ${progressBar}
+  <footer class="doc-card-footer">${primaryAction}</footer>
+</article>`;
+  }).join('');
 
   const content = `
-<div style="margin-bottom:1.5rem;">
-  <div style="display:flex;flex-wrap:wrap;gap:0.5rem;align-items:center;">
-    ${tabsHTML}
-  </div>
+${descHTML}
+${metaRowHTML}
+${summaryHTML}
+
+<h2 id="documents" class="scn-section-header">Plan documents</h2>
+<div class="doc-grid">
+${docsHTML}
 </div>
-
-${scenario.description ? `<p style="margin-bottom:1rem;">${escapeHTML(scenario.description)}</p>` : ''}
-${scenario.workItem ? `<p style="margin-bottom:1rem;"><a href="${escapeAttr(scenario.workItem)}">Work Item: ${escapeHTML(scenario.workItem)}</a></p>` : ''}
-
-<h2 id="files">Plan Files</h2>
-${fileDetails}
 `;
+
+  const scenarioStyles = `
+<style>
+.scn-description { font-size: 1.05rem; color: var(--muted); margin: 0.5rem 0 1.25rem; max-width: 70ch; }
+.scn-meta-row { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; margin-bottom: 2rem; }
+.scn-meta-link { font-size: 0.85rem; color: var(--accent); }
+.scn-summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 1rem; margin: 0 0 2.5rem; padding: 1.5rem; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); }
+.scn-stat { text-align: left; }
+.scn-stat-val { font-size: 1.8rem; font-weight: 510; color: var(--text); letter-spacing: -0.02em; line-height: 1; }
+.scn-stat-total { font-size: 1rem; color: var(--muted); font-weight: 400; }
+.scn-stat-label { font-size: 0.75rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; margin-top: 0.4rem; }
+.scn-section-header { border-bottom: none; margin-top: 1rem; }
+.doc-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 1rem; }
+.doc-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 1.1rem 1.25rem 1.25rem; display: flex; flex-direction: column; gap: 0.7rem; transition: border-color 0.15s, box-shadow 0.15s, transform 0.15s; }
+.doc-card:hover { border-color: var(--accent); box-shadow: var(--shadow-lg); transform: translateY(-1px); }
+.doc-card-missing { opacity: 0.78; }
+.doc-card-missing:hover { opacity: 1; }
+.doc-card-header { display: flex; justify-content: space-between; align-items: center; gap: 0.6rem; }
+.doc-card-title { font-size: 1rem; font-weight: 510; margin: 0; color: var(--text); }
+.doc-card-blurb { font-size: 0.82rem; color: var(--muted); margin: 0; line-height: 1.5; min-height: 2.4em; }
+.doc-state { font-size: 0.7rem; font-weight: 600; padding: 0.15em 0.55em; border-radius: 12px; white-space: nowrap; }
+.doc-state-complete { background: var(--badge-green-bg); color: var(--green); border: 1px solid var(--green); }
+.doc-state-partial { background: var(--badge-yellow-bg); color: var(--yellow); border: 1px solid var(--yellow); }
+.doc-state-missing { background: transparent; color: var(--muted); border: 1px solid var(--border); }
+.doc-progress { height: 3px; background: var(--border); border-radius: 2px; overflow: hidden; }
+.doc-progress-fill { height: 100%; background: var(--accent); transition: width 0.3s; }
+.doc-progress-fill.doc-progress-empty { background: transparent; }
+.doc-card-footer { display: flex; align-items: center; justify-content: space-between; padding-top: 0.25rem; border-top: 1px solid var(--border); margin-top: 0.2rem; padding-top: 0.7rem; }
+.doc-primary-action { font-size: 0.85rem; font-weight: 510; color: var(--accent); text-decoration: none; }
+.doc-primary-action:hover { text-decoration: underline; }
+.doc-skill { font-size: 0.72rem; color: var(--muted); background: var(--code-bg); padding: 0.2em 0.5em; border-radius: var(--radius-sm); font-family: var(--font-mono); }
+</style>`;
 
   return wrapPage(content, {
     title: scenario.name,
-    subtitle: 'Scenario Detail',
-    meta: `<a href="/">Back to Dashboard</a>`,
+    subtitle: '',
+    meta: '',
     sections: [],
-    storageKey: 'plan-detail-theme',
+    scripts: scenarioStyles,
+    scenarioName: scenario.name,
     ...options
   });
 }
