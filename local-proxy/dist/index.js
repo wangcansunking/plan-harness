@@ -7820,7 +7820,7 @@ function parseScenarioFromPath(absPath) {
 function injectBreadcrumbIntoHtml(html, filePath) {
   const { scenarioName, docLabel } = parseScenarioFromPath(filePath);
   if (!scenarioName) return html;
-  if (/\bph-breadcrumb\b/.test(html)) return html;
+  if (/class\s*=\s*["'][^"']*\bph-breadcrumb\b/.test(html)) return html;
   const esc2 = (s) => String(s).replace(/[&<>"']/g, (c) => ({
     "&": "&amp;",
     "<": "&lt;",

@@ -316,9 +316,11 @@ function injectBreadcrumbIntoHtml(html, filePath) {
   const { scenarioName, docLabel } = parseScenarioFromPath(filePath);
   if (!scenarioName) return html;
 
-  // Skip injection if the doc already has a plan-harness breadcrumb (newer
-  // agent-generated HTML may include its own). Prevents duplicate bars.
-  if (/\bph-breadcrumb\b/.test(html)) return html;
+  // Skip injection only if the doc has an actual <nav class="ph-breadcrumb">
+  // element — match the class attribute, not CSS rules that merely reference
+  // the class. This prevents a stale .ph-breadcrumb CSS block (left behind
+  // after we removed the markup) from falsely suppressing injection.
+  if (/class\s*=\s*["'][^"']*\bph-breadcrumb\b/.test(html)) return html;
 
   const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
