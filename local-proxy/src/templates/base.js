@@ -105,25 +105,28 @@ export function getBaseCSS() {
   @media (min-width: 900px) { body { padding-left: 260px; } .container { max-width: 1100px; margin: 0 auto; } }
   @media (max-width: 899px) { .side-nav { transform: translateX(-100%); } .side-nav-toggle { display: block; } }
 
-  /* Theme toggle — single button, cycles through system/light/dark.
-     One SVG visible at a time based on [data-theme-pref] attribute. */
-  .theme-toggle { position: fixed; top: 1rem; right: 1.5rem; z-index: 999; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 0.45rem 0.55rem; cursor: pointer; color: var(--text); transition: background 0.2s, border-color 0.2s; display: flex; align-items: center; justify-content: center; width: 36px; height: 36px; }
-  .theme-toggle:hover { border-color: var(--accent); }
+  /* Sticky header bar — spans the top of every plan-harness page.
+     Contains the breadcrumb (left) and theme toggle (right). Blurred
+     translucent background over content so it reads as an overlay but
+     keeps the page feeling unified. Persists on scroll. */
+  .ph-header { position: sticky; top: 0; z-index: 1000; display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: 0.6rem 1.25rem; background: color-mix(in srgb, var(--bg) 80%, transparent); -webkit-backdrop-filter: blur(14px) saturate(180%); backdrop-filter: blur(14px) saturate(180%); border-bottom: 1px solid var(--border); }
+
+  .ph-breadcrumb { display: flex; align-items: center; gap: 0.4rem; font-size: 0.85rem; color: var(--muted); min-width: 0; flex: 1; overflow: hidden; }
+  .ph-breadcrumb a { color: var(--muted); text-decoration: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 16rem; transition: color 0.15s; }
+  .ph-breadcrumb a:hover { color: var(--accent); }
+  .ph-breadcrumb .sep { color: var(--muted); opacity: 0.4; font-size: 0.9em; }
+  .ph-breadcrumb .current { color: var(--text); font-weight: 510; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 22rem; }
+
+  /* Theme toggle — sits inside .ph-header on the right. Three SVGs, one
+     visible per [data-theme-pref]. */
+  .theme-toggle { flex-shrink: 0; background: transparent; border: 1px solid var(--border); border-radius: 8px; padding: 0.4rem 0.5rem; cursor: pointer; color: var(--text); transition: background 0.15s, border-color 0.15s; display: flex; align-items: center; justify-content: center; width: 34px; height: 34px; }
+  .theme-toggle:hover { border-color: var(--accent); background: var(--surface); }
   .theme-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-  .theme-toggle svg { width: 18px; height: 18px; stroke: currentColor; fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+  .theme-toggle svg { width: 16px; height: 16px; stroke: currentColor; fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
   .theme-toggle svg[data-theme-icon] { display: none; }
   .theme-toggle[data-theme-pref="system"] svg[data-theme-icon="system"],
   .theme-toggle[data-theme-pref="light"]  svg[data-theme-icon="light"],
   .theme-toggle[data-theme-pref="dark"]   svg[data-theme-icon="dark"] { display: block; }
-
-  /* Breadcrumb — inline at the top of the content, above h1.
-     No pill, no card — plain text, aligned with the content's left edge.
-     Matches Linear / Notion / GitHub aesthetic: subtle path, not a widget. */
-  .ph-breadcrumb { display: flex; align-items: center; gap: 0.4rem; font-size: 0.82rem; color: var(--muted); margin-bottom: 1rem; flex-wrap: wrap; }
-  .ph-breadcrumb a { color: var(--muted); text-decoration: none; transition: color 0.15s; white-space: nowrap; }
-  .ph-breadcrumb a:hover { color: var(--accent); }
-  .ph-breadcrumb .sep { color: var(--muted); opacity: 0.4; font-size: 0.9em; }
-  .ph-breadcrumb .current { color: var(--text); font-weight: 510; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 24rem; }
 
   /* Flow steps */
   .flow-step { display: flex; align-items: flex-start; gap: 1rem; margin: 0.5rem 0; }
@@ -312,34 +315,46 @@ export function getThemeInitScript() {
 }
 
 /**
- * Breadcrumb shown at top-centre of every page: Dashboard › scenario › current.
+ * Breadcrumb shown in the sticky header: workspace › scenario › document.
+ * Workspace is the basename of the repo being planned (eg. "canwa-claude-plugins").
+ * Every segment except the last is a link; the last is non-link current state.
+ *
  * @param {object} [opts]
- * @param {string} [opts.scenarioName] - if present, renders as a link to /scenario/:name
- * @param {string} [opts.currentLabel] - label for the current page (non-link); omit on the dashboard itself
+ * @param {string} [opts.workspaceName] - repo/workspace basename; defaults to "workspace"
+ * @param {string} [opts.scenarioName]  - scenario slug; omit on the dashboard
+ * @param {string} [opts.currentLabel]  - document label; omit on scenario detail
  * @returns {string}
  */
 export function getBreadcrumbHTML(opts = {}) {
-  const { scenarioName, currentLabel } = opts;
+  const { workspaceName = 'workspace', scenarioName, currentLabel } = opts;
   const parts = [];
-  const isDashboard = !scenarioName && !currentLabel;
-  parts.push(isDashboard
-    ? `<span class="current">Dashboard</span>`
-    : `<a href="/" title="All scenarios">Dashboard</a>`);
-  if (scenarioName) {
-    const scenarioLabel = escapeHTML(scenarioName);
-    const scenarioHref = `/scenario/${encodeURIComponent(scenarioName)}`;
-    if (currentLabel) {
-      parts.push(`<span class="sep">›</span>`);
-      parts.push(`<a href="${escapeAttr(scenarioHref)}" title="Scenario: ${scenarioLabel}">${scenarioLabel}</a>`);
+  const wsLabel = escapeHTML(workspaceName);
+  const hasScenario = !!scenarioName;
+  const hasDoc = !!currentLabel;
+
+  // Workspace — link unless it's the current page (dashboard root)
+  if (hasScenario || hasDoc) {
+    parts.push(`<a href="/" title="${wsLabel}">${wsLabel}</a>`);
+  } else {
+    parts.push(`<span class="current">${wsLabel}</span>`);
+  }
+
+  if (hasScenario) {
+    const sLabel = escapeHTML(scenarioName);
+    const sHref = `/scenario/${encodeURIComponent(scenarioName)}`;
+    parts.push(`<span class="sep">›</span>`);
+    if (hasDoc) {
+      parts.push(`<a href="${escapeAttr(sHref)}" title="Scenario: ${sLabel}">${sLabel}</a>`);
     } else {
-      parts.push(`<span class="sep">›</span>`);
-      parts.push(`<span class="current" title="Scenario: ${scenarioLabel}">${scenarioLabel}</span>`);
+      parts.push(`<span class="current" title="Scenario: ${sLabel}">${sLabel}</span>`);
     }
   }
-  if (currentLabel) {
+
+  if (hasDoc) {
     parts.push(`<span class="sep">›</span>`);
     parts.push(`<span class="current">${escapeHTML(currentLabel)}</span>`);
   }
+
   return `<nav class="ph-breadcrumb" aria-label="Breadcrumb">${parts.join('')}</nav>`;
 }
 
@@ -470,13 +485,14 @@ export function wrapPage(content, options = {}) {
     sections = [],
     scripts = '',
     planLinks = [],
+    workspaceName = 'workspace',
     scenarioName = null,
     currentLabel = null,
   } = options;
 
   const sidebarHTML = sections.length > 0 ? getSidebarHTML(title, sections) : '';
   const themeToggle = getThemeToggleHTML();
-  const breadcrumb = getBreadcrumbHTML({ scenarioName, currentLabel });
+  const breadcrumb = getBreadcrumbHTML({ workspaceName, scenarioName, currentLabel });
 
   const tagBadges = tags.map(t =>
     `<span class="badge badge-${t.color || 'blue'}">${escapeHTML(t.label)}</span>`
@@ -492,15 +508,13 @@ export function wrapPage(content, options = {}) {
   const metaHTML = (meta || tagBadges) ? `<p class="meta">${meta}${tagBadges ? '<br>' + tagBadges : ''}</p>` : '';
   const subtitleHTML = subtitle ? `<p class="meta" style="font-size:1rem;margin-bottom:0.5rem;">${escapeHTML(subtitle)}</p>` : '';
 
-  // Theme toggle is still fixed top-right, so leave a little headroom so the
-  // button doesn't sit over the h1 on narrow viewports. Breadcrumb now lives
-  // inside .container (above h1) so it doesn't need its own space.
+  // The sticky .ph-header occupies the top of every page; content flows
+  // below naturally (no manual top padding needed since sticky headers
+  // participate in normal layout flow).
   const extraCSS = sections.length === 0 ? `
   body { padding-left: 0 !important; }
-  .container { max-width: 1200px; padding-top: 2rem; }
-` : `
-  .container { padding-top: 2rem; }
-`;
+  .container { max-width: 1200px; }
+` : '';
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -516,12 +530,15 @@ ${extraCSS}
 </head>
 <body>
 
+<header class="ph-header">
+  ${breadcrumb}
+  ${themeToggle}
+</header>
+
 ${sidebarHTML}
-${themeToggle}
 ${planNav}
 
 <div class="container">
-${breadcrumb}
 <h1>${escapeHTML(title)}</h1>
 ${subtitleHTML}
 ${metaHTML}

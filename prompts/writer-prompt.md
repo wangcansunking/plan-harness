@@ -35,35 +35,22 @@ Before you write any HTML, read these two files and follow them exactly:
 - **Listen for `matchMedia('(prefers-color-scheme: dark)').change`** so users in system mode see live updates when their OS flips.
 - **Listen for `storage` events** so the theme stays in sync across tabs.
 
-## Breadcrumb + plan-tabs (non-negotiable layout)
+## Plan-tabs + breadcrumb responsibility
 
-Every plan document you generate must have two navigation elements **inside `<main>` (or `.container`), above `<h1>`**:
+- **Breadcrumb**: do **NOT** emit a breadcrumb `<nav>` in your generated plan doc. The plan-harness dashboard's `/view` endpoint injects a fixed top-centre pill breadcrumb on every served HTML, so emitting one in the doc would double-render. (File serving a plan doc directly via `file://` intentionally shows no breadcrumb — that's an acceptable dev-only viewing mode.)
+- **Plan tabs** — you DO emit these. Horizontal tab row of sibling plan documents at the top of `<main>`, underline-active style. Do **not** put this in the sidebar.
+  ```html
+  <nav class="plan-tabs" aria-label="Plan documents">
+    <a href="design.html" class="active" aria-current="page">Design</a>
+    <a href="test-plan.html" aria-disabled="true">Test Plan <span class="soon">soon</span></a>
+    <a href="state-machine.html" aria-disabled="true">State Machine <span class="soon">soon</span></a>
+    <a href="test-cases.html" aria-disabled="true">Test Cases <span class="soon">soon</span></a>
+    <a href="implementation-plan.html" aria-disabled="true">Implementation <span class="soon">soon</span></a>
+  </nav>
+  ```
+  Style (inline in `<style>`): horizontal flex with a `border-bottom: 1px solid var(--border)`; active tab has `color: var(--accent)` + `border-bottom: 2px solid var(--accent)` with `margin-bottom: -1px` to overlap; disabled tabs at `opacity: 0.5, cursor: default`; `.soon` pills use `var(--code-bg)` background with border.
 
-1. **Breadcrumb** — plain text, aligned with content's left edge, **NOT a pill / card / fixed bar**. Linear / Notion style.
-   ```html
-   <nav class="ph-breadcrumb" aria-label="Breadcrumb">
-     <a href="/">Dashboard</a>
-     <span class="sep">›</span>
-     <a href="/scenario/<scenario-slug>"><scenario-name></a>
-     <span class="sep">›</span>
-     <span class="current"><doc-name></span>
-   </nav>
-   ```
-   Match the CSS from `base.js` `.ph-breadcrumb` (inline flex, muted text, no background).
-
-2. **Plan tabs** — horizontal tab row of sibling plan documents, underline-active style. Do **not** put this in the sidebar.
-   ```html
-   <nav class="plan-tabs" aria-label="Plan documents">
-     <a href="design.html" class="active" aria-current="page">Design</a>
-     <a href="test-plan.html" aria-disabled="true">Test Plan <span class="soon">soon</span></a>
-     <a href="state-machine.html" aria-disabled="true">State Machine <span class="soon">soon</span></a>
-     <a href="test-cases.html" aria-disabled="true">Test Cases <span class="soon">soon</span></a>
-     <a href="implementation-plan.html" aria-disabled="true">Implementation <span class="soon">soon</span></a>
-   </nav>
-   ```
-   Style (inline in `<style>`): horizontal flex with a `border-bottom: 1px solid var(--border)`; active tab has `color: var(--accent)` + `border-bottom: 2px solid var(--accent)` with `margin-bottom: -1px` to overlap; disabled tabs at `opacity: 0.5, cursor: default`; `.soon` pills use `var(--code-bg)` background with border.
-
-The sidebar (`<nav class="side-nav">`) contains ONLY the **"On this page"** section anchors — not the plan-documents list.
+The sidebar (`<nav class="side-nav">`) contains ONLY the **"On this page"** section anchors — not the plan-documents list, not a breadcrumb.
 
 ## Palette (summary — full spec in DESIGN.md)
 

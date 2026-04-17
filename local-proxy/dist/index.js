@@ -6900,25 +6900,28 @@ function getBaseCSS() {
   @media (min-width: 900px) { body { padding-left: 260px; } .container { max-width: 1100px; margin: 0 auto; } }
   @media (max-width: 899px) { .side-nav { transform: translateX(-100%); } .side-nav-toggle { display: block; } }
 
-  /* Theme toggle \u2014 single button, cycles through system/light/dark.
-     One SVG visible at a time based on [data-theme-pref] attribute. */
-  .theme-toggle { position: fixed; top: 1rem; right: 1.5rem; z-index: 999; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 0.45rem 0.55rem; cursor: pointer; color: var(--text); transition: background 0.2s, border-color 0.2s; display: flex; align-items: center; justify-content: center; width: 36px; height: 36px; }
-  .theme-toggle:hover { border-color: var(--accent); }
+  /* Sticky header bar \u2014 spans the top of every plan-harness page.
+     Contains the breadcrumb (left) and theme toggle (right). Blurred
+     translucent background over content so it reads as an overlay but
+     keeps the page feeling unified. Persists on scroll. */
+  .ph-header { position: sticky; top: 0; z-index: 1000; display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: 0.6rem 1.25rem; background: color-mix(in srgb, var(--bg) 80%, transparent); -webkit-backdrop-filter: blur(14px) saturate(180%); backdrop-filter: blur(14px) saturate(180%); border-bottom: 1px solid var(--border); }
+
+  .ph-breadcrumb { display: flex; align-items: center; gap: 0.4rem; font-size: 0.85rem; color: var(--muted); min-width: 0; flex: 1; overflow: hidden; }
+  .ph-breadcrumb a { color: var(--muted); text-decoration: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 16rem; transition: color 0.15s; }
+  .ph-breadcrumb a:hover { color: var(--accent); }
+  .ph-breadcrumb .sep { color: var(--muted); opacity: 0.4; font-size: 0.9em; }
+  .ph-breadcrumb .current { color: var(--text); font-weight: 510; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 22rem; }
+
+  /* Theme toggle \u2014 sits inside .ph-header on the right. Three SVGs, one
+     visible per [data-theme-pref]. */
+  .theme-toggle { flex-shrink: 0; background: transparent; border: 1px solid var(--border); border-radius: 8px; padding: 0.4rem 0.5rem; cursor: pointer; color: var(--text); transition: background 0.15s, border-color 0.15s; display: flex; align-items: center; justify-content: center; width: 34px; height: 34px; }
+  .theme-toggle:hover { border-color: var(--accent); background: var(--surface); }
   .theme-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-  .theme-toggle svg { width: 18px; height: 18px; stroke: currentColor; fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+  .theme-toggle svg { width: 16px; height: 16px; stroke: currentColor; fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
   .theme-toggle svg[data-theme-icon] { display: none; }
   .theme-toggle[data-theme-pref="system"] svg[data-theme-icon="system"],
   .theme-toggle[data-theme-pref="light"]  svg[data-theme-icon="light"],
   .theme-toggle[data-theme-pref="dark"]   svg[data-theme-icon="dark"] { display: block; }
-
-  /* Breadcrumb \u2014 inline at the top of the content, above h1.
-     No pill, no card \u2014 plain text, aligned with the content's left edge.
-     Matches Linear / Notion / GitHub aesthetic: subtle path, not a widget. */
-  .ph-breadcrumb { display: flex; align-items: center; gap: 0.4rem; font-size: 0.82rem; color: var(--muted); margin-bottom: 1rem; flex-wrap: wrap; }
-  .ph-breadcrumb a { color: var(--muted); text-decoration: none; transition: color 0.15s; white-space: nowrap; }
-  .ph-breadcrumb a:hover { color: var(--accent); }
-  .ph-breadcrumb .sep { color: var(--muted); opacity: 0.4; font-size: 0.9em; }
-  .ph-breadcrumb .current { color: var(--text); font-weight: 510; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 24rem; }
 
   /* Flow steps */
   .flow-step { display: flex; align-items: flex-start; gap: 1rem; margin: 0.5rem 0; }
@@ -7084,22 +7087,27 @@ function getThemeInitScript() {
 </script>`;
 }
 function getBreadcrumbHTML(opts = {}) {
-  const { scenarioName, currentLabel } = opts;
+  const { workspaceName = "workspace", scenarioName, currentLabel } = opts;
   const parts = [];
-  const isDashboard = !scenarioName && !currentLabel;
-  parts.push(isDashboard ? `<span class="current">Dashboard</span>` : `<a href="/" title="All scenarios">Dashboard</a>`);
-  if (scenarioName) {
-    const scenarioLabel = escapeHTML(scenarioName);
-    const scenarioHref = `/scenario/${encodeURIComponent(scenarioName)}`;
-    if (currentLabel) {
-      parts.push(`<span class="sep">\u203A</span>`);
-      parts.push(`<a href="${escapeAttr(scenarioHref)}" title="Scenario: ${scenarioLabel}">${scenarioLabel}</a>`);
+  const wsLabel = escapeHTML(workspaceName);
+  const hasScenario = !!scenarioName;
+  const hasDoc = !!currentLabel;
+  if (hasScenario || hasDoc) {
+    parts.push(`<a href="/" title="${wsLabel}">${wsLabel}</a>`);
+  } else {
+    parts.push(`<span class="current">${wsLabel}</span>`);
+  }
+  if (hasScenario) {
+    const sLabel = escapeHTML(scenarioName);
+    const sHref = `/scenario/${encodeURIComponent(scenarioName)}`;
+    parts.push(`<span class="sep">\u203A</span>`);
+    if (hasDoc) {
+      parts.push(`<a href="${escapeAttr(sHref)}" title="Scenario: ${sLabel}">${sLabel}</a>`);
     } else {
-      parts.push(`<span class="sep">\u203A</span>`);
-      parts.push(`<span class="current" title="Scenario: ${scenarioLabel}">${scenarioLabel}</span>`);
+      parts.push(`<span class="current" title="Scenario: ${sLabel}">${sLabel}</span>`);
     }
   }
-  if (currentLabel) {
+  if (hasDoc) {
     parts.push(`<span class="sep">\u203A</span>`);
     parts.push(`<span class="current">${escapeHTML(currentLabel)}</span>`);
   }
@@ -7209,12 +7217,13 @@ function wrapPage(content, options = {}) {
     sections = [],
     scripts = "",
     planLinks = [],
+    workspaceName = "workspace",
     scenarioName = null,
     currentLabel = null
   } = options;
   const sidebarHTML = sections.length > 0 ? getSidebarHTML(title, sections) : "";
   const themeToggle = getThemeToggleHTML();
-  const breadcrumb = getBreadcrumbHTML({ scenarioName, currentLabel });
+  const breadcrumb = getBreadcrumbHTML({ workspaceName, scenarioName, currentLabel });
   const tagBadges = tags.map(
     (t) => `<span class="badge badge-${t.color || "blue"}">${escapeHTML(t.label)}</span>`
   ).join(" ");
@@ -7228,10 +7237,8 @@ function wrapPage(content, options = {}) {
   const subtitleHTML = subtitle ? `<p class="meta" style="font-size:1rem;margin-bottom:0.5rem;">${escapeHTML(subtitle)}</p>` : "";
   const extraCSS = sections.length === 0 ? `
   body { padding-left: 0 !important; }
-  .container { max-width: 1200px; padding-top: 2rem; }
-` : `
-  .container { padding-top: 2rem; }
-`;
+  .container { max-width: 1200px; }
+` : "";
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -7246,12 +7253,15 @@ ${extraCSS}
 </head>
 <body>
 
+<header class="ph-header">
+  ${breadcrumb}
+  ${themeToggle}
+</header>
+
 ${sidebarHTML}
-${themeToggle}
 ${planNav}
 
 <div class="container">
-${breadcrumb}
 <h1>${escapeHTML(title)}</h1>
 ${subtitleHTML}
 ${metaHTML}
@@ -7723,12 +7733,17 @@ async function handleRequest(req, res) {
   res.writeHead(404, { "Content-Type": "text/plain" });
   res.end("Not Found");
 }
+function getWorkspaceName() {
+  return workspaceRootPath ? basename2(workspaceRootPath) : "workspace";
+}
 async function serveDashboard(req, res) {
   const scenarios = await scanScenarios();
+  const workspaceName = getWorkspaceName();
   const html = generateDashboard(scenarios, {
     title: "Plan Dashboard",
     subtitle: `Workspace: ${workspaceRootPath}`,
-    meta: `Generated ${(/* @__PURE__ */ new Date()).toISOString().slice(0, 10)} | <a href="/api/scenarios">API</a>`
+    meta: `Generated ${(/* @__PURE__ */ new Date()).toISOString().slice(0, 10)} | <a href="/api/scenarios">API</a>`,
+    workspaceName
   });
   res.writeHead(200, {
     "Content-Type": "text/html; charset=utf-8",
@@ -7744,10 +7759,12 @@ async function serveScenarioDetail(req, res, scenarioName) {
     res.end(`Scenario "${scenarioName}" not found`);
     return;
   }
+  const workspaceName = getWorkspaceName();
   const html = generateScenarioDetail(scenario, {
     title: scenario.name,
     subtitle: "Scenario Detail",
-    meta: `<a href="/">Back to Dashboard</a> | Generated ${(/* @__PURE__ */ new Date()).toISOString().slice(0, 10)}`
+    meta: `Generated ${(/* @__PURE__ */ new Date()).toISOString().slice(0, 10)}`,
+    workspaceName
   });
   res.writeHead(200, {
     "Content-Type": "text/html; charset=utf-8",
@@ -7811,34 +7828,33 @@ function injectBreadcrumbIntoHtml(html, filePath) {
     '"': "&quot;",
     "'": "&#39;"
   })[c]);
+  const workspaceName = getWorkspaceName();
   const bar = `
 <nav class="ph-injected-breadcrumb" aria-label="Breadcrumb">
-  <a href="/">Dashboard</a>
+  <a href="/">${esc2(workspaceName)}</a>
   <span class="sep">\u203A</span>
   <a href="/scenario/${encodeURIComponent(scenarioName)}">${esc2(scenarioName)}</a>
   ${docLabel ? `<span class="sep">\u203A</span><span class="current">${esc2(docLabel)}</span>` : ""}
 </nav>
 <style>
 .ph-injected-breadcrumb {
-  position: fixed; top: 10px; left: 50%; transform: translateX(-50%);
-  z-index: 10000;
-  background: rgba(15,16,17,0.92); color: #d0d6e0;
-  border: 1px solid rgba(255,255,255,0.08);
-  backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
-  padding: 6px 14px; border-radius: 8px;
-  font: 510 13px/1 'Inter Variable', Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  position: sticky; top: 0; z-index: 10000;
+  background: rgba(15,16,17,0.82); color: #d0d6e0;
+  border-bottom: 1px solid rgba(255,255,255,0.08);
+  backdrop-filter: blur(14px) saturate(180%); -webkit-backdrop-filter: blur(14px) saturate(180%);
+  padding: 0.6rem 1.25rem;
+  font: 510 13px/1.4 'Inter Variable', Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   font-feature-settings: "cv01","ss03";
-  display: flex; align-items: center; gap: 8px;
-  max-width: calc(100vw - 4rem); overflow: hidden;
-  box-shadow: 0 8px 32px rgba(0,0,0,0.4);
+  display: flex; align-items: center; gap: 0.4rem;
+  width: 100%;
 }
 @media (prefers-color-scheme: light) {
-  .ph-injected-breadcrumb { background: rgba(247,248,248,0.94); color: #08090a; border-color: #d0d6e0; box-shadow: 0 4px 16px rgba(0,0,0,0.08); }
+  .ph-injected-breadcrumb { background: rgba(247,248,248,0.82); color: #08090a; border-bottom-color: #d0d6e0; }
 }
-.ph-injected-breadcrumb a { color: #7170ff; text-decoration: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 18rem; }
-.ph-injected-breadcrumb a:hover { text-decoration: underline; }
-.ph-injected-breadcrumb .sep { opacity: 0.5; }
-.ph-injected-breadcrumb .current { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 22rem; }
+.ph-injected-breadcrumb a { color: inherit; text-decoration: none; opacity: 0.7; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 16rem; transition: opacity 0.15s, color 0.15s; }
+.ph-injected-breadcrumb a:hover { opacity: 1; color: #7170ff; }
+.ph-injected-breadcrumb .sep { opacity: 0.4; }
+.ph-injected-breadcrumb .current { font-weight: 590; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 22rem; }
 @media print { .ph-injected-breadcrumb { display: none !important; } }
 </style>`;
   const bodyMatch = html.match(/<body[^>]*>/i);

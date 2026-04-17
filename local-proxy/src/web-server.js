@@ -202,12 +202,18 @@ async function handleRequest(req, res) {
 
 // ---- Route handlers ----
 
+function getWorkspaceName() {
+  return workspaceRootPath ? basename(workspaceRootPath) : 'workspace';
+}
+
 async function serveDashboard(req, res) {
   const scenarios = await scanScenarios();
+  const workspaceName = getWorkspaceName();
   const html = generateDashboard(scenarios, {
     title: 'Plan Dashboard',
     subtitle: `Workspace: ${workspaceRootPath}`,
-    meta: `Generated ${new Date().toISOString().slice(0, 10)} | <a href="/api/scenarios">API</a>`
+    meta: `Generated ${new Date().toISOString().slice(0, 10)} | <a href="/api/scenarios">API</a>`,
+    workspaceName,
   });
 
   res.writeHead(200, {
@@ -227,10 +233,12 @@ async function serveScenarioDetail(req, res, scenarioName) {
     return;
   }
 
+  const workspaceName = getWorkspaceName();
   const html = generateScenarioDetail(scenario, {
     title: scenario.name,
     subtitle: 'Scenario Detail',
-    meta: `<a href="/">Back to Dashboard</a> | Generated ${new Date().toISOString().slice(0, 10)}`
+    meta: `Generated ${new Date().toISOString().slice(0, 10)}`,
+    workspaceName,
   });
 
   res.writeHead(200, {
@@ -309,42 +317,43 @@ function injectBreadcrumbIntoHtml(html, filePath) {
   if (!scenarioName) return html;
 
   // Skip injection if the doc already has a plan-harness breadcrumb (newer
-  // agent-generated HTML includes its own via the writer-prompt contract).
-  // Prevents duplicate bars stacked at the top.
+  // agent-generated HTML may include its own). Prevents duplicate bars.
   if (/\bph-breadcrumb\b/.test(html)) return html;
 
   const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
   }[c]));
+  const workspaceName = getWorkspaceName();
 
+  // Sticky header with workspace › scenario › doc breadcrumb. Uses inline
+  // styles (no CSS vars) so it renders correctly even on docs that don't
+  // define the plan-harness palette.
   const bar = `
 <nav class="ph-injected-breadcrumb" aria-label="Breadcrumb">
-  <a href="/">Dashboard</a>
+  <a href="/">${esc(workspaceName)}</a>
   <span class="sep">›</span>
   <a href="/scenario/${encodeURIComponent(scenarioName)}">${esc(scenarioName)}</a>
   ${docLabel ? `<span class="sep">›</span><span class="current">${esc(docLabel)}</span>` : ''}
 </nav>
 <style>
 .ph-injected-breadcrumb {
-  position: fixed; top: 10px; left: 50%; transform: translateX(-50%);
-  z-index: 10000;
-  background: rgba(15,16,17,0.92); color: #d0d6e0;
-  border: 1px solid rgba(255,255,255,0.08);
-  backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
-  padding: 6px 14px; border-radius: 8px;
-  font: 510 13px/1 'Inter Variable', Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  position: sticky; top: 0; z-index: 10000;
+  background: rgba(15,16,17,0.82); color: #d0d6e0;
+  border-bottom: 1px solid rgba(255,255,255,0.08);
+  backdrop-filter: blur(14px) saturate(180%); -webkit-backdrop-filter: blur(14px) saturate(180%);
+  padding: 0.6rem 1.25rem;
+  font: 510 13px/1.4 'Inter Variable', Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   font-feature-settings: "cv01","ss03";
-  display: flex; align-items: center; gap: 8px;
-  max-width: calc(100vw - 4rem); overflow: hidden;
-  box-shadow: 0 8px 32px rgba(0,0,0,0.4);
+  display: flex; align-items: center; gap: 0.4rem;
+  width: 100%;
 }
 @media (prefers-color-scheme: light) {
-  .ph-injected-breadcrumb { background: rgba(247,248,248,0.94); color: #08090a; border-color: #d0d6e0; box-shadow: 0 4px 16px rgba(0,0,0,0.08); }
+  .ph-injected-breadcrumb { background: rgba(247,248,248,0.82); color: #08090a; border-bottom-color: #d0d6e0; }
 }
-.ph-injected-breadcrumb a { color: #7170ff; text-decoration: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 18rem; }
-.ph-injected-breadcrumb a:hover { text-decoration: underline; }
-.ph-injected-breadcrumb .sep { opacity: 0.5; }
-.ph-injected-breadcrumb .current { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 22rem; }
+.ph-injected-breadcrumb a { color: inherit; text-decoration: none; opacity: 0.7; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 16rem; transition: opacity 0.15s, color 0.15s; }
+.ph-injected-breadcrumb a:hover { opacity: 1; color: #7170ff; }
+.ph-injected-breadcrumb .sep { opacity: 0.4; }
+.ph-injected-breadcrumb .current { font-weight: 590; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 22rem; }
 @media print { .ph-injected-breadcrumb { display: none !important; } }
 </style>`;
 
