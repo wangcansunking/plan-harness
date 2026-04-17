@@ -329,7 +329,9 @@ function injectBreadcrumbIntoHtml(html, filePath) {
 
   // Fixed pill at top-centre, mirroring the base.js .ph-breadcrumb design.
   // Inline styles (no CSS vars) so it renders correctly on docs that don't
-  // define the plan-harness palette; uses prefers-color-scheme for theming.
+  // define the plan-harness palette. Theme follows html[data-theme] (set by
+  // the doc's synchronous theme init script) so the pill switches together
+  // with the body when the user toggles, instead of drifting to OS preference.
   const bar = `
 <nav class="ph-injected-breadcrumb" aria-label="Breadcrumb">
   <a href="/">${esc(workspaceName)}</a>
@@ -344,20 +346,24 @@ function injectBreadcrumbIntoHtml(html, filePath) {
   padding: 0.4rem 0.9rem; border-radius: 999px;
   font: 510 13px/1.2 'Inter Variable', Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   font-feature-settings: "cv01","ss03";
-  background: rgba(15,16,17,0.85); color: #d0d6e0;
-  border: 1px solid rgba(255,255,255,0.08);
+  background: rgba(243,244,245,0.9); color: #62666d;
+  border: 1px solid #d0d6e0;
   backdrop-filter: blur(12px) saturate(180%); -webkit-backdrop-filter: blur(12px) saturate(180%);
-  box-shadow: 0 4px 16px rgba(0,0,0,0.3);
+  box-shadow: 0 2px 8px rgba(0,0,0,0.08);
   max-width: calc(100vw - 10rem); overflow: hidden;
-}
-@media (prefers-color-scheme: light) {
-  .ph-injected-breadcrumb { background: rgba(243,244,245,0.9); color: #62666d; border-color: #d0d6e0; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
 }
 .ph-injected-breadcrumb a { color: inherit; text-decoration: none; opacity: 0.75; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 14rem; transition: opacity 0.15s, color 0.15s; }
 .ph-injected-breadcrumb a:hover { opacity: 1; color: #7170ff; }
 .ph-injected-breadcrumb .sep { opacity: 0.4; }
-.ph-injected-breadcrumb .current { color: #f7f8f8; font-weight: 590; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 20rem; }
-@media (prefers-color-scheme: light) { .ph-injected-breadcrumb .current { color: #08090a; } }
+.ph-injected-breadcrumb .current { color: #08090a; font-weight: 590; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 20rem; }
+
+html[data-theme="dark"] .ph-injected-breadcrumb {
+  background: rgba(15,16,17,0.85); color: #d0d6e0;
+  border-color: rgba(255,255,255,0.08);
+  box-shadow: 0 4px 16px rgba(0,0,0,0.3);
+}
+html[data-theme="dark"] .ph-injected-breadcrumb .current { color: #f7f8f8; }
+
 @media (max-width: 899px) { .ph-injected-breadcrumb { left: 3.2rem; transform: none; max-width: calc(100vw - 7rem); } }
 @media print { .ph-injected-breadcrumb { display: none !important; } }
 </style>`;
