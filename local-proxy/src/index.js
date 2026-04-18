@@ -204,6 +204,48 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
         properties: {},
       },
     },
+    {
+      name: "plan_reanchor",
+      description:
+        "Re-anchor every comment in a scenario (or a single doc) against the current doc HTML. Runs a three-tier cascade per design.html §4: exact prefix+exact+suffix in same section, exact anywhere in same section (migratedFrom), or Jaccard ≥ 0.72 token-overlap across sections (migratedFrom). Anchors that fail all tiers are flagged orphaned and surface in the widget's 'Needs reattachment' group. Idempotent.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          workspaceRoot: {
+            type: "string",
+            description: "Absolute path to the workspace root.",
+          },
+          scenario: {
+            type: "string",
+            description: "Scenario name (directory under plans/).",
+          },
+          doc: {
+            type: "string",
+            description: "Optional: single doc slug (e.g. 'design', 'test-plan'). Omit to re-anchor every doc in the scenario.",
+          },
+        },
+        required: ["workspaceRoot", "scenario"],
+      },
+    },
+    {
+      name: "plan_list_pending_revises",
+      description:
+        "List every comment in a scenario with intent='revise' and reviseStatus='pending'. Used by the /plan-revise skill to batch-dispatch revise requests to a writer agent.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          workspaceRoot: {
+            type: "string",
+            description: "Absolute path to the workspace root.",
+          },
+          scenario: {
+            type: "string",
+            description: "Scenario name (directory under plans/).",
+          },
+        },
+        required: ["workspaceRoot", "scenario"],
+      },
+    },
   ],
 }));
 
@@ -570,6 +612,51 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             ? "Sharing stopped. Tunnel closed, password protection disabled."
             : "No active sharing session."
         );
+      }
+
+      case "plan_reanchor": {
+        if (!args.workspaceRoot || !args.scenario) {
+          throw new Error("workspaceRoot and scenario are required");
+        }
+        const commentMgr = await import("./comment-manager.js");
+        let result;
+        if (args.doc) {
+          result = await commentMgr.reanchorDocument(args.workspaceRoot, args.scenario, args.doc);
+          result.scenario = args.scenario;
+          result.doc = args.doc;
+        } else {
+          result = await commentMgr.reanchorScenario(args.workspaceRoot, args.scenario);
+          result.scenario = args.scenario;
+        }
+        const summary = args.doc
+          ? `Re-anchored ${args.scenario}/${args.doc}: ${result.held} held, ${result.migrated} migrated, ${result.orphaned} orphaned (${result.total} total).`
+          : `Re-anchored ${args.scenario}: ${result.held} held, ${result.migrated} migrated, ${result.orphaned} orphaned across ${result.docs.length} docs.`;
+        return {
+          content: [
+            { type: "text", text: summary },
+            { type: "text", text: JSON.stringify(result, null, 2) },
+          ],
+        };
+      }
+
+      case "plan_list_pending_revises": {
+        if (!args.workspaceRoot || !args.scenario) {
+          throw new Error("workspaceRoot and scenario are required");
+        }
+        const reviseMgr = await import("./revise-dispatcher.js");
+        const pending = await reviseMgr.listPendingRevises(args.workspaceRoot, args.scenario);
+        if (pending.length === 0) {
+          return textResult(`No pending revise requests in ${args.scenario}.`);
+        }
+        const lines = pending.map(
+          (p) => `  ${p.doc.padEnd(22)} ${p.id}  ${JSON.stringify(p.body).slice(0, 80)}  (${p.author})`
+        );
+        return {
+          content: [
+            { type: "text", text: `${pending.length} pending revise request(s) in ${args.scenario}:\n\n${lines.join("\n")}` },
+            { type: "text", text: JSON.stringify(pending, null, 2) },
+          ],
+        };
       }
 
       // ---- Unknown tool -------------------------------------------------

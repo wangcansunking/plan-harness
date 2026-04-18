@@ -8656,6 +8656,20 @@ var init_auth = __esm({
 });
 
 // src/comment-manager.js
+var comment_manager_exports = {};
+__export(comment_manager_exports, {
+  CommentError: () => CommentError,
+  appendComment: () => appendComment,
+  broadcastCommentEvent: () => broadcastCommentEvent,
+  checkRate: () => checkRate2,
+  deleteComment: () => deleteComment,
+  listComments: () => listComments,
+  patchComment: () => patchComment,
+  reanchorDocument: () => reanchorDocument,
+  reanchorScenario: () => reanchorScenario,
+  registerSseClient: () => registerSseClient,
+  sseHeartbeat: () => sseHeartbeat
+});
 import { appendFile, mkdir as mkdir2, readFile as readFile2 } from "node:fs/promises";
 import { join as join2, resolve, sep as sep2 } from "node:path";
 import { randomBytes as randomBytes2 } from "node:crypto";
@@ -8793,6 +8807,18 @@ function collapse(events) {
     } else if (ev.op === "revise") {
       if (typeof ev.reviseStatus === "string") c.reviseStatus = ev.reviseStatus;
       if (ev.proposalRef != null) c.reviseProposalRef = ev.proposalRef;
+    } else if (ev.op === "reanchor") {
+      if (ev.anchor && typeof ev.anchor === "object") {
+        c.anchor = Object.assign({}, c.anchor || {}, ev.anchor);
+      }
+      if (ev.anchor && ev.anchor.orphaned != null) {
+        c.anchor = c.anchor || {};
+        c.anchor.orphaned = !!ev.anchor.orphaned;
+      }
+      if (ev.anchor && ev.anchor.migratedFrom != null) {
+        c.anchor = c.anchor || {};
+        c.anchor.migratedFrom = ev.anchor.migratedFrom;
+      }
     }
   }
   return Array.from(byId.values());
@@ -8920,6 +8946,134 @@ async function patchComment(workspaceRoot, scenario, doc, id, patch, actor) {
   refreshed.replies = [];
   return refreshed;
 }
+function tokens(s) {
+  const t = String(s || "").replace(/<[^>]+>/g, " ").replace(/&[a-zA-Z#0-9]+;/g, " ").toLowerCase().replace(/[^a-z0-9\u00a0-\uffff]+/g, " ").trim();
+  return new Set(t ? t.split(/\s+/) : []);
+}
+function jaccard(a, b) {
+  if (a.size === 0 && b.size === 0) return 1;
+  let intersect = 0;
+  const small = a.size < b.size ? a : b;
+  const other = small === a ? b : a;
+  for (const t of small) if (other.has(t)) intersect += 1;
+  const union2 = a.size + b.size - intersect;
+  return union2 === 0 ? 0 : intersect / union2;
+}
+function indexDocSections(html) {
+  const out = /* @__PURE__ */ new Map();
+  const re = /<h[234][^>]*\bdata-section-id\s*=\s*["']([^"']+)["'][^>]*>([\s\S]*?)<\/h[234]>([\s\S]*?)(?=<h[234][^>]*\bdata-section-id|$)/gi;
+  let m;
+  while (m = re.exec(html)) {
+    out.set(m[1], { heading: m[2], content: m[3] });
+  }
+  return out;
+}
+function reanchorOne(docSections, anchor) {
+  if (!anchor || !anchor.exact) {
+    return { orphaned: true };
+  }
+  const needle = anchor.exact;
+  const sec = anchor.sectionId ? docSections.get(anchor.sectionId) : null;
+  if (sec) {
+    const combined = (anchor.prefix || "") + needle + (anchor.suffix || "");
+    if (combined.length > 0 && sec.content.includes(combined)) {
+      return { sectionId: anchor.sectionId, orphaned: false };
+    }
+  }
+  if (sec && sec.content.includes(needle)) {
+    return { sectionId: anchor.sectionId, orphaned: false };
+  }
+  const needleTokens = tokens(needle);
+  let best = { sectionId: null, score: 0 };
+  for (const [sid, s] of docSections) {
+    const chunks = s.content.match(/<(?:p|li|td|span|h[234]|strong|em|div)[^>]*>([\s\S]*?)<\/(?:p|li|td|span|h[234]|strong|em|div)>/gi) || [];
+    for (const chunk of chunks) {
+      const score = jaccard(needleTokens, tokens(chunk));
+      if (score > best.score) best = { sectionId: sid, score };
+    }
+  }
+  if (best.sectionId && best.score >= JACCARD_THRESHOLD) {
+    return {
+      sectionId: best.sectionId,
+      migratedFrom: anchor.sectionId || null,
+      orphaned: false
+    };
+  }
+  return { orphaned: true, migratedFrom: anchor.sectionId || null };
+}
+async function reanchorDocument(workspaceRoot, scenario, doc) {
+  assertName(scenario, "scenario");
+  assertName(doc, "doc");
+  const plansRoot = resolve(workspaceRoot, "plans");
+  const htmlPath = resolve(plansRoot, scenario, `${doc}.html`);
+  if (!htmlPath.startsWith(plansRoot + sep2)) {
+    throw new CommentError("BAD_REQUEST", "path traversal rejected", 400);
+  }
+  let html;
+  try {
+    html = await readFile2(htmlPath, "utf8");
+  } catch (err) {
+    if (err.code === "ENOENT") return { held: 0, migrated: 0, orphaned: 0, total: 0 };
+    throw err;
+  }
+  const sections = indexDocSections(html);
+  const file2 = commentFilePath(workspaceRoot, scenario, doc);
+  const existing = collapse(await readEvents(file2));
+  let held = 0, migrated = 0, orphaned = 0;
+  for (const c of existing) {
+    if (c.deleted) continue;
+    if (!c.anchor) continue;
+    const result = reanchorOne(sections, c.anchor);
+    const movedSection = result.sectionId && result.sectionId !== c.anchor.sectionId;
+    const justOrphaned = !!result.orphaned && !c.anchor.orphaned;
+    const cleared = !result.orphaned && c.anchor.orphaned;
+    if (!movedSection && !justOrphaned && !cleared) {
+      held += 1;
+      continue;
+    }
+    const newAnchor = {};
+    if (result.sectionId) newAnchor.sectionId = result.sectionId;
+    if (result.orphaned != null) newAnchor.orphaned = !!result.orphaned;
+    if (result.migratedFrom != null) newAnchor.migratedFrom = result.migratedFrom;
+    await appendEvent(file2, {
+      op: "reanchor",
+      id: c.id,
+      anchor: newAnchor,
+      at: (/* @__PURE__ */ new Date()).toISOString()
+    });
+    if (result.orphaned) orphaned += 1;
+    else migrated += 1;
+  }
+  console.error(`[comments] reanchor ${scenario}/${doc} held=${held} migrated=${migrated} orphaned=${orphaned}`);
+  return { held, migrated, orphaned, total: held + migrated + orphaned };
+}
+async function reanchorScenario(workspaceRoot, scenario) {
+  assertName(scenario, "scenario");
+  const commentsDir = resolve(workspaceRoot, "plans", scenario, ".comments");
+  let files = [];
+  try {
+    const { readdir: readdir3 } = await import("node:fs/promises");
+    files = await readdir3(commentsDir);
+  } catch {
+    return { held: 0, migrated: 0, orphaned: 0, total: 0, docs: [] };
+  }
+  const agg = { held: 0, migrated: 0, orphaned: 0, total: 0, docs: [] };
+  for (const name of files) {
+    if (!name.endsWith(".jsonl")) continue;
+    const doc = name.slice(0, -".jsonl".length);
+    try {
+      const r = await reanchorDocument(workspaceRoot, scenario, doc);
+      agg.held += r.held;
+      agg.migrated += r.migrated;
+      agg.orphaned += r.orphaned;
+      agg.total += r.total;
+      agg.docs.push({ doc, ...r });
+    } catch (err) {
+      agg.docs.push({ doc, error: err.message || String(err) });
+    }
+  }
+  return agg;
+}
 async function deleteComment(workspaceRoot, scenario, doc, id, actor) {
   if (!actor || !actor.name) throw new CommentError("FORBIDDEN", "actor required", 403);
   if (!ID_RE.test(id)) throw new CommentError("BAD_REQUEST", "invalid id", 400);
@@ -8997,7 +9151,7 @@ function sseHeartbeat() {
     }
   }
 }
-var NAME_RE, NAME_MAX, ID_RE, BODY_MIN, BODY_MAX, EXACT_MAX, AFFIX_MAX, EDIT_WINDOW_MS, CommentError, BUCKET_CAPACITY, BUCKET_WINDOW_MS, buckets, sseClients;
+var NAME_RE, NAME_MAX, ID_RE, BODY_MIN, BODY_MAX, EXACT_MAX, AFFIX_MAX, EDIT_WINDOW_MS, CommentError, JACCARD_THRESHOLD, BUCKET_CAPACITY, BUCKET_WINDOW_MS, buckets, sseClients;
 var init_comment_manager = __esm({
   "src/comment-manager.js"() {
     NAME_RE = /^[a-zA-Z0-9_-]+$/;
@@ -9015,6 +9169,7 @@ var init_comment_manager = __esm({
         this.status = status || 400;
       }
     };
+    JACCARD_THRESHOLD = 0.72;
     BUCKET_CAPACITY = 5;
     BUCKET_WINDOW_MS = 10 * 1e3;
     buckets = /* @__PURE__ */ new Map();
@@ -9027,6 +9182,16 @@ var init_comment_manager = __esm({
 });
 
 // src/revise-dispatcher.js
+var revise_dispatcher_exports = {};
+__export(revise_dispatcher_exports, {
+  acceptProposal: () => acceptProposal,
+  attachProposal: () => attachProposal,
+  dispatchRevise: () => dispatchRevise,
+  listPendingRevises: () => listPendingRevises,
+  maybeAutoDispatch: () => maybeAutoDispatch,
+  readProposal: () => readProposal,
+  rejectProposal: () => rejectProposal
+});
 import { appendFile as appendFile2, mkdir as mkdir3, readFile as readFile3, writeFile as writeFile2 } from "node:fs/promises";
 import { join as join3, resolve as resolve2, sep as sep3 } from "node:path";
 async function readConfig(workspaceRoot, scenario) {
@@ -9098,6 +9263,22 @@ async function dispatchRevise(workspaceRoot, scenario, doc, commentId, actor) {
     by: actor.name
   });
 }
+async function attachProposal(workspaceRoot, scenario, doc, commentId, diffContent, actor) {
+  requireHost(actor);
+  const file2 = proposalPath(workspaceRoot, scenario, doc, commentId);
+  await mkdir3(join3(file2, ".."), { recursive: true });
+  await writeFile2(file2, diffContent, "utf8");
+  const eventFile = commentFilePath2(workspaceRoot, scenario, doc);
+  const relRef = `.comments/${doc}.proposals/${commentId}.diff`;
+  await appendEvent2(eventFile, {
+    op: "revise",
+    id: commentId,
+    reviseStatus: "proposed",
+    proposalRef: relRef,
+    at: (/* @__PURE__ */ new Date()).toISOString(),
+    by: actor.name
+  });
+}
 async function acceptProposal(workspaceRoot, scenario, doc, commentId, anchor, actor) {
   requireHost(actor);
   const propFile = proposalPath(workspaceRoot, scenario, doc, commentId);
@@ -9159,6 +9340,44 @@ async function maybeAutoDispatch(workspaceRoot, scenario, doc, commentId, actor)
   } catch {
     return { mode: "active", dispatched: false };
   }
+}
+async function listPendingRevises(workspaceRoot, scenario) {
+  assertName2(scenario, "scenario");
+  const commentsDir = resolve2(workspaceRoot, "plans", scenario, ".comments");
+  let files;
+  try {
+    const { readdir: readdir3 } = await import("node:fs/promises");
+    files = await readdir3(commentsDir);
+  } catch {
+    return [];
+  }
+  const out = [];
+  for (const name of files) {
+    if (!name.endsWith(".jsonl")) continue;
+    const docSlug = name.slice(0, -".jsonl".length);
+    try {
+      const { listComments: listComments2 } = await Promise.resolve().then(() => (init_comment_manager(), comment_manager_exports));
+      const data = await listComments2(workspaceRoot, scenario, docSlug);
+      (function walk(list) {
+        for (const c of list) {
+          if (c.intent === "revise" && c.reviseStatus === "pending" && !c.deleted) {
+            out.push({
+              scenario,
+              doc: docSlug,
+              id: c.id,
+              body: c.body,
+              anchor: c.anchor,
+              author: c.author,
+              createdAt: c.createdAt
+            });
+          }
+          if (c.replies) walk(c.replies);
+        }
+      })(data.comments || []);
+    } catch {
+    }
+  }
+  return out;
 }
 function parseProposal(diff) {
   const m = /^REPLACE:\s*\n([\s\S]*?)\nWITH:\s*\n([\s\S]*)$/m.exec(String(diff || ""));
@@ -24651,6 +24870,46 @@ server2.setRequestHandler(ListToolsRequestSchema, async () => ({
         type: "object",
         properties: {}
       }
+    },
+    {
+      name: "plan_reanchor",
+      description: "Re-anchor every comment in a scenario (or a single doc) against the current doc HTML. Runs a three-tier cascade per design.html \xA74: exact prefix+exact+suffix in same section, exact anywhere in same section (migratedFrom), or Jaccard \u2265 0.72 token-overlap across sections (migratedFrom). Anchors that fail all tiers are flagged orphaned and surface in the widget's 'Needs reattachment' group. Idempotent.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          workspaceRoot: {
+            type: "string",
+            description: "Absolute path to the workspace root."
+          },
+          scenario: {
+            type: "string",
+            description: "Scenario name (directory under plans/)."
+          },
+          doc: {
+            type: "string",
+            description: "Optional: single doc slug (e.g. 'design', 'test-plan'). Omit to re-anchor every doc in the scenario."
+          }
+        },
+        required: ["workspaceRoot", "scenario"]
+      }
+    },
+    {
+      name: "plan_list_pending_revises",
+      description: "List every comment in a scenario with intent='revise' and reviseStatus='pending'. Used by the /plan-revise skill to batch-dispatch revise requests to a writer agent.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          workspaceRoot: {
+            type: "string",
+            description: "Absolute path to the workspace root."
+          },
+          scenario: {
+            type: "string",
+            description: "Scenario name (directory under plans/)."
+          }
+        },
+        required: ["workspaceRoot", "scenario"]
+      }
     }
   ]
 }));
@@ -24942,6 +25201,49 @@ ${ctx.structure.csprojFiles.map((f) => `  ${f}`).join("\n")}` : ""
         return textResult(
           wasRunning ? "Sharing stopped. Tunnel closed, password protection disabled." : "No active sharing session."
         );
+      }
+      case "plan_reanchor": {
+        if (!args.workspaceRoot || !args.scenario) {
+          throw new Error("workspaceRoot and scenario are required");
+        }
+        const commentMgr = await Promise.resolve().then(() => (init_comment_manager(), comment_manager_exports));
+        let result;
+        if (args.doc) {
+          result = await commentMgr.reanchorDocument(args.workspaceRoot, args.scenario, args.doc);
+          result.scenario = args.scenario;
+          result.doc = args.doc;
+        } else {
+          result = await commentMgr.reanchorScenario(args.workspaceRoot, args.scenario);
+          result.scenario = args.scenario;
+        }
+        const summary = args.doc ? `Re-anchored ${args.scenario}/${args.doc}: ${result.held} held, ${result.migrated} migrated, ${result.orphaned} orphaned (${result.total} total).` : `Re-anchored ${args.scenario}: ${result.held} held, ${result.migrated} migrated, ${result.orphaned} orphaned across ${result.docs.length} docs.`;
+        return {
+          content: [
+            { type: "text", text: summary },
+            { type: "text", text: JSON.stringify(result, null, 2) }
+          ]
+        };
+      }
+      case "plan_list_pending_revises": {
+        if (!args.workspaceRoot || !args.scenario) {
+          throw new Error("workspaceRoot and scenario are required");
+        }
+        const reviseMgr = await Promise.resolve().then(() => (init_revise_dispatcher(), revise_dispatcher_exports));
+        const pending = await reviseMgr.listPendingRevises(args.workspaceRoot, args.scenario);
+        if (pending.length === 0) {
+          return textResult(`No pending revise requests in ${args.scenario}.`);
+        }
+        const lines = pending.map(
+          (p) => `  ${p.doc.padEnd(22)} ${p.id}  ${JSON.stringify(p.body).slice(0, 80)}  (${p.author})`
+        );
+        return {
+          content: [
+            { type: "text", text: `${pending.length} pending revise request(s) in ${args.scenario}:
+
+${lines.join("\n")}` },
+            { type: "text", text: JSON.stringify(pending, null, 2) }
+          ]
+        };
       }
       // ---- Unknown tool -------------------------------------------------
       default:

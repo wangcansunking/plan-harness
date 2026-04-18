@@ -195,6 +195,23 @@ function collapse(events) {
       // transition: pending → dispatched → proposed → accepted|rejected
       if (typeof ev.reviseStatus === 'string') c.reviseStatus = ev.reviseStatus;
       if (ev.proposalRef != null) c.reviseProposalRef = ev.proposalRef;
+    } else if (ev.op === 'reanchor') {
+      // Emitted by reanchorDocument (Phase 10). Updates the live anchor
+      // fields + records migration / orphan status without rewriting the
+      // original create event.
+      if (ev.anchor && typeof ev.anchor === 'object') {
+        // Keep the original anchor's fields we didn't change (e.g. prefix)
+        // unless explicitly overridden.
+        c.anchor = Object.assign({}, c.anchor || {}, ev.anchor);
+      }
+      if (ev.anchor && ev.anchor.orphaned != null) {
+        c.anchor = c.anchor || {};
+        c.anchor.orphaned = !!ev.anchor.orphaned;
+      }
+      if (ev.anchor && ev.anchor.migratedFrom != null) {
+        c.anchor = c.anchor || {};
+        c.anchor.migratedFrom = ev.anchor.migratedFrom;
+      }
     }
   }
   return Array.from(byId.values());
@@ -347,6 +364,181 @@ export async function patchComment(workspaceRoot, scenario, doc, id, patch, acto
   const refreshed = collapse(await readEvents(file)).find((c) => c.id === id);
   refreshed.replies = [];
   return refreshed;
+}
+
+// ---- Phase 10: re-anchor cascade ----------------------------------------
+
+/**
+ * Normalized token set for Jaccard similarity. Lowercased, stripped of
+ * HTML tags + punctuation, split on whitespace, deduped.
+ */
+function tokens(s) {
+  const t = String(s || '')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&[a-zA-Z#0-9]+;/g, ' ')
+    .toLowerCase()
+    .replace(/[^a-z0-9\u00a0-\uffff]+/g, ' ')
+    .trim();
+  return new Set(t ? t.split(/\s+/) : []);
+}
+
+function jaccard(a, b) {
+  if (a.size === 0 && b.size === 0) return 1;
+  let intersect = 0;
+  const small = a.size < b.size ? a : b;
+  const other = small === a ? b : a;
+  for (const t of small) if (other.has(t)) intersect += 1;
+  const union = a.size + b.size - intersect;
+  return union === 0 ? 0 : intersect / union;
+}
+
+/**
+ * Split the doc HTML into sections keyed by sectionId.
+ * Returns Map<sectionId, { heading: string, content: string }>.
+ * Content is the HTML between this heading and the next `[data-section-id]`.
+ */
+function indexDocSections(html) {
+  const out = new Map();
+  const re = /<h[234][^>]*\bdata-section-id\s*=\s*["']([^"']+)["'][^>]*>([\s\S]*?)<\/h[234]>([\s\S]*?)(?=<h[234][^>]*\bdata-section-id|$)/gi;
+  let m;
+  while ((m = re.exec(html))) {
+    out.set(m[1], { heading: m[2], content: m[3] });
+  }
+  return out;
+}
+
+const JACCARD_THRESHOLD = 0.72; // Open decision B — Architect default
+
+/**
+ * Run the three-tier cascade for a single anchor against the current doc.
+ * Returns an object suitable for a `reanchor` event's `anchor` field.
+ */
+function reanchorOne(docSections, anchor) {
+  if (!anchor || !anchor.exact) {
+    return { orphaned: true };
+  }
+  const needle = anchor.exact;
+  const sec = anchor.sectionId ? docSections.get(anchor.sectionId) : null;
+
+  // Tier (a): exact prefix + exact + suffix in same sectionId
+  if (sec) {
+    const combined = (anchor.prefix || '') + needle + (anchor.suffix || '');
+    if (combined.length > 0 && sec.content.includes(combined)) {
+      return { sectionId: anchor.sectionId, orphaned: false };
+    }
+  }
+  // Tier (b): exact needle anywhere in the same section (no prefix/suffix)
+  if (sec && sec.content.includes(needle)) {
+    return { sectionId: anchor.sectionId, orphaned: false };
+  }
+  // Tier (c): Jaccard token-overlap across all sections — find best match
+  const needleTokens = tokens(needle);
+  let best = { sectionId: null, score: 0 };
+  for (const [sid, s] of docSections) {
+    // Score the needle against each <p>/<li>/<td> chunk of text in the section
+    const chunks = s.content.match(/<(?:p|li|td|span|h[234]|strong|em|div)[^>]*>([\s\S]*?)<\/(?:p|li|td|span|h[234]|strong|em|div)>/gi) || [];
+    for (const chunk of chunks) {
+      const score = jaccard(needleTokens, tokens(chunk));
+      if (score > best.score) best = { sectionId: sid, score };
+    }
+  }
+  if (best.sectionId && best.score >= JACCARD_THRESHOLD) {
+    return {
+      sectionId: best.sectionId,
+      migratedFrom: anchor.sectionId || null,
+      orphaned: false,
+    };
+  }
+  return { orphaned: true, migratedFrom: anchor.sectionId || null };
+}
+
+/**
+ * Re-anchor every comment in a single doc against the current doc HTML.
+ * Appends one `reanchor` event per comment. Returns counts.
+ *
+ * Called by the plan_reanchor MCP tool after a doc regen. Idempotent — if
+ * every anchor already holds, no events are written.
+ */
+export async function reanchorDocument(workspaceRoot, scenario, doc) {
+  assertName(scenario, 'scenario');
+  assertName(doc, 'doc');
+  const plansRoot = resolve(workspaceRoot, 'plans');
+  const htmlPath = resolve(plansRoot, scenario, `${doc}.html`);
+  if (!htmlPath.startsWith(plansRoot + sep)) {
+    throw new CommentError('BAD_REQUEST', 'path traversal rejected', 400);
+  }
+  let html;
+  try {
+    html = await readFile(htmlPath, 'utf8');
+  } catch (err) {
+    if (err.code === 'ENOENT') return { held: 0, migrated: 0, orphaned: 0, total: 0 };
+    throw err;
+  }
+  const sections = indexDocSections(html);
+
+  const file = commentFilePath(workspaceRoot, scenario, doc);
+  const existing = collapse(await readEvents(file));
+  let held = 0, migrated = 0, orphaned = 0;
+  for (const c of existing) {
+    if (c.deleted) continue;
+    if (!c.anchor) continue;
+    const result = reanchorOne(sections, c.anchor);
+    const movedSection = result.sectionId && result.sectionId !== c.anchor.sectionId;
+    const justOrphaned = !!result.orphaned && !c.anchor.orphaned;
+    const cleared = !result.orphaned && c.anchor.orphaned;
+    if (!movedSection && !justOrphaned && !cleared) {
+      held += 1;
+      continue;
+    }
+    // Build the new anchor shape. Preserve prefix/suffix/exact — only
+    // sectionId / orphaned / migratedFrom transition under the cascade.
+    const newAnchor = {};
+    if (result.sectionId) newAnchor.sectionId = result.sectionId;
+    if (result.orphaned != null) newAnchor.orphaned = !!result.orphaned;
+    if (result.migratedFrom != null) newAnchor.migratedFrom = result.migratedFrom;
+    await appendEvent(file, {
+      op: 'reanchor',
+      id: c.id,
+      anchor: newAnchor,
+      at: new Date().toISOString(),
+    });
+    if (result.orphaned) orphaned += 1;
+    else migrated += 1;
+  }
+
+  console.error(`[comments] reanchor ${scenario}/${doc} held=${held} migrated=${migrated} orphaned=${orphaned}`);
+  return { held, migrated, orphaned, total: held + migrated + orphaned };
+}
+
+/**
+ * Reanchor every doc in a scenario. Returns aggregate counts + per-doc detail.
+ */
+export async function reanchorScenario(workspaceRoot, scenario) {
+  assertName(scenario, 'scenario');
+  const commentsDir = resolve(workspaceRoot, 'plans', scenario, '.comments');
+  let files = [];
+  try {
+    const { readdir } = await import('node:fs/promises');
+    files = await readdir(commentsDir);
+  } catch {
+    return { held: 0, migrated: 0, orphaned: 0, total: 0, docs: [] };
+  }
+  const agg = { held: 0, migrated: 0, orphaned: 0, total: 0, docs: [] };
+  for (const name of files) {
+    if (!name.endsWith('.jsonl')) continue;
+    const doc = name.slice(0, -'.jsonl'.length);
+    try {
+      const r = await reanchorDocument(workspaceRoot, scenario, doc);
+      agg.held += r.held;
+      agg.migrated += r.migrated;
+      agg.orphaned += r.orphaned;
+      agg.total += r.total;
+      agg.docs.push({ doc, ...r });
+    } catch (err) {
+      agg.docs.push({ doc, error: err.message || String(err) });
+    }
+  }
+  return agg;
 }
 
 export async function deleteComment(workspaceRoot, scenario, doc, id, actor) {
