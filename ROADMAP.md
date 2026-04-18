@@ -127,12 +127,12 @@ When a document is regenerated, the server walks each comment's `anchor`:
 2. Try fuzzy match (Levenshtein on `exact` with tolerance)
 3. If no match → comment marked `orphaned: true` and kept in a "needs reattachment" bucket
 
-### Open questions to resolve before implementing
+### Open questions — resolved 2026-04-19
 
-- [ ] Do we need real-time sync across reviewers (multiple people viewing tunnel simultaneously)? Polling is simpler; WebSocket is nicer.
-- [ ] Resolve semantics: does resolve also collapse the thread, or just mark it done?
-- [ ] How to surface unresolved comments to the author when they open the dashboard — badge count on scenario card?
-- [ ] Should agent personas (architect/PM) be able to respond to comments as part of the review cycle?
+- [x] **Realtime sync:** keep current SSE push (no WebSocket, no presence). Suitable for 1–3 concurrent reviewers, no conflict handling needed.
+- [x] **Resolve semantics:** collapse the thread on resolve and hide from the default sidebar list; expose a "Show resolved" toggle at the top of the comments panel so discussion is still retrievable.
+- [x] **Unresolved surfacing:** scenario card shows a colored unresolved-comments badge AND each doc row in the scenario view shows its per-doc unresolved count (same style as the existing TODO count).
+- [x] **Agent persona replies:** support both paths — (a) `/plan-review` batch run writes one agent reply per open thread it has opinions on; (b) any user reply mentioning `@architect` / `@pm` / `@tester` triggers the revise-dispatcher to produce a single agent reply (bounded by the existing 3-concurrent cap).
 
 ---
 

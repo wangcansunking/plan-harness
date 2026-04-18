@@ -1650,6 +1650,25 @@ export function injectSidebarPanels(html) {
 .ph-comment-mark.ph-mark-revise { background: rgba(113,112,255,0.12); border-bottom-color: var(--purple, #7170ff); }
 @media print { .ph-select-cta, .ph-select-composer { display: none !important; } }
 
+/* Resolved-thread toggle at top of Comments panel body */
+.ph-comments-toggle-row {
+  display: flex; justify-content: flex-end;
+  padding: 0.1rem 0.5rem 0.35rem;
+}
+.ph-comments-toggle {
+  font: 600 0.62rem/1 inherit; padding: 0.2rem 0.45rem;
+  border: 1px solid var(--border); border-radius: 999px;
+  background: var(--bg); color: var(--muted); cursor: pointer;
+  text-transform: uppercase; letter-spacing: 0.05em;
+}
+.ph-comments-toggle:hover { color: var(--text); border-color: var(--text); }
+.ph-comments-toggle.is-on { color: var(--accent); border-color: var(--accent); }
+.ph-panel-list.ph-panel-list-resolved {
+  margin-top: 0.15rem; padding-top: 0.3rem;
+  border-top: 1px dashed var(--border);
+}
+.ph-panel-list.ph-panel-list-resolved .ph-panel-item { opacity: 0.7; }
+
 /* Phase 7 — Orphan pinned group at top of Comments panel */
 .ph-orphan-group {
   margin: 0 0.4rem 0.3rem; padding: 0.35rem 0.55rem;
@@ -1949,12 +1968,44 @@ export function injectSidebarPanels(html) {
     }
 
     // ---- Comments panel (simple list) ----
+    // Resolved threads are collapsed by default (Word / Google Docs model) — a
+    // toggle at the top of the panel body lets the reader expose them when
+    // they need to revisit a settled discussion. The preference is persisted
+    // per (scenario, doc) so each doc remembers its own state.
+    var SHOW_RESOLVED_KEY = prefKey + ':comments:showResolved';
+    function getShowResolved(){ return localStorage.getItem(SHOW_RESOLVED_KEY) === '1'; }
+    function setShowResolved(v){ localStorage.setItem(SHOW_RESOLVED_KEY, v ? '1' : '0'); }
+
     function renderCommentList(panel, items, orphans){
       var body = panel.querySelector('.ph-panel-body');
       body.innerHTML = '';
       var hasContent = items.length > 0 || (orphans && orphans.length > 0);
       if (!hasContent) { setVisibility(panel, false); return; }
       setVisibility(panel, true);
+
+      // Split items into open vs resolved buckets. 'it.done' covers both
+      // thread-level resolved and the TODO->comment bridge's auto-resolve
+      // (todoResolves) — either way the conversation is settled and should
+      // collapse out of sight by default.
+      var openItems = items.filter(function(it){ return !it.done; });
+      var resolvedItems = items.filter(function(it){ return it.done; });
+
+      if (resolvedItems.length > 0) {
+        var toggleRow = document.createElement('div');
+        toggleRow.className = 'ph-comments-toggle-row';
+        var showing = getShowResolved();
+        var toggleBtn = document.createElement('button');
+        toggleBtn.type = 'button';
+        toggleBtn.className = 'ph-comments-toggle' + (showing ? ' is-on' : '');
+        toggleBtn.setAttribute('aria-pressed', showing ? 'true' : 'false');
+        toggleBtn.textContent = (showing ? 'Hide' : 'Show') + ' resolved (' + resolvedItems.length + ')';
+        toggleBtn.addEventListener('click', function(){
+          setShowResolved(!getShowResolved());
+          renderCommentList(panel, items, orphans);
+        });
+        toggleRow.appendChild(toggleBtn);
+        body.appendChild(toggleRow);
+      }
 
       // Phase 7 — pinned orphan group at the top of the Comments panel.
       if (orphans && orphans.length > 0) {
@@ -2013,9 +2064,8 @@ export function injectSidebarPanels(html) {
       }
 
       if (items.length === 0) return;
-      var ul = document.createElement('ul');
-      ul.className = 'ph-panel-list';
-      items.forEach(function(it){
+
+      function renderRow(it){
         var li = document.createElement('li');
         var a = document.createElement('a');
         a.href = '#';
@@ -2029,7 +2079,6 @@ export function injectSidebarPanels(html) {
         metaSpan.textContent = it.meta || '';
         a.appendChild(lbl);
         if (it.meta) a.appendChild(metaSpan);
-        // Inline "Proposal ready" chip + click → open modal
         if (it.reviseStatus === 'proposed') {
           var chip = document.createElement('span');
           chip.className = 'ph-todo-chip ph-todo-chip-revise';
@@ -2043,17 +2092,26 @@ export function injectSidebarPanels(html) {
             openProposalModal(it.id, it.label, it.anchor && it.anchor.exact);
             return;
           }
-          // First, scroll the document to the anchor so the reader sees
-          // context, then open the thread panel for the conversation. This
-          // is the Word model: click → land at the highlight + see the
-          // thread alongside it.
           if (it.target) scrollTo(it.target);
           if (it.id) openThread(it.id);
         });
         li.appendChild(a);
-        ul.appendChild(li);
-      });
-      body.appendChild(ul);
+        return li;
+      }
+
+      if (openItems.length > 0) {
+        var ul = document.createElement('ul');
+        ul.className = 'ph-panel-list';
+        openItems.forEach(function(it){ ul.appendChild(renderRow(it)); });
+        body.appendChild(ul);
+      }
+
+      if (resolvedItems.length > 0 && getShowResolved()) {
+        var ulR = document.createElement('ul');
+        ulR.className = 'ph-panel-list ph-panel-list-resolved';
+        resolvedItems.forEach(function(it){ ulR.appendChild(renderRow(it)); });
+        body.appendChild(ulR);
+      }
     }
 
     // ---- Phase 9 — Proposal review modal ----
@@ -3090,7 +3148,14 @@ export function injectSidebarPanels(html) {
           var liveRoots = comments.filter(function(c){
             return !c.deleted && !(c.anchor && c.anchor.orphaned);
           });
-          setCount(commentPanel, liveRoots.length + orphans.length);
+          // Header count tracks *unresolved* threads + orphans — matches the
+          // scenario-card badge and the author's "what still needs attention"
+          // mental model. Resolved threads are available via the "Show
+          // resolved" toggle but don't inflate the count.
+          var unresolvedRoots = liveRoots.filter(function(c){
+            return !c.resolved && !c.todoResolves;
+          });
+          setCount(commentPanel, unresolvedRoots.length + orphans.length);
           var items = liveRoots.map(function(c){
             var anchor = c.anchor || {};
             var target = anchor.sectionId ? document.querySelector('[data-section-id="' + CSS.escape(anchor.sectionId) + '"]') : null;
