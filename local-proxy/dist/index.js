@@ -7785,19 +7785,33 @@ function injectSidebarPanels(html) {
 
       Array.prototype.forEach.call(main.querySelectorAll('li'), function(li){
         if (li.closest('.ph-side-panel')) return;
+
+        // Accept either raw [x]/[ ] text (pattern 2, pre-normalization) OR
+        // the data-done="0|1" attribute emitted by normalizeChecklistItems
+        // server-side. Either way, the panel shows one entry per checklist row.
         var direct = '';
         Array.prototype.forEach.call(li.childNodes, function(n){
           if (n.nodeType === 3) direct += n.textContent;
         });
         direct = direct.trim();
+        var done = null;
+        var labelText = '';
         var cm = /^\\[([ xX])\\]\\s*(.+)/.exec(direct);
-        if (!cm) return;
+        if (cm) {
+          done = cm[1] !== ' ';
+          labelText = cm[2];
+        } else if (li.hasAttribute('data-done')) {
+          done = li.getAttribute('data-done') === '1';
+          labelText = (li.textContent || '').trim();
+        } else {
+          return;
+        }
         var heading = findAnchorHeading(li);
         add({
-          label: (cm[1] === ' ' ? '\u2610 ' : '\u2611 ') + truncate(cm[2], 80),
+          label: (done ? '\u2611 ' : '\u2610 ') + truncate(labelText, 80),
           meta: heading ? truncate(heading.textContent || '', 48) : '',
           target: li,
-          done: cm[1] !== ' '
+          done: done
         });
       });
 
@@ -7930,7 +7944,9 @@ function injectSidebarPanels(html) {
       var resolvedBy = bucket && bucket.resolved;
       var threadLen = bucket ? bucket.thread.length : 0;
       var revising = bucket && bucket.revising;
-      todo.done = !!resolvedBy;
+      // todo.done may already be true from the doc itself (a "[x]" marker or
+      // data-done="1" attribute). Honor that plus any comment resolve.
+      todo.done = todo.done || !!resolvedBy;
 
       var li = document.createElement('li');
       li.className = 'ph-todo-row' + (todo.done ? ' ph-done' : '');
@@ -8023,7 +8039,7 @@ function injectSidebarPanels(html) {
       allTodos.forEach(function(t){
         var key = (t.anchor.sectionId || '') + '::' + t.anchor.exact;
         var bucket = todoCommentIndex.get(key);
-        if (bucket && bucket.resolved) resolved.push(t);
+        if ((bucket && bucket.resolved) || t.done) resolved.push(t);
         else open.push(t);
       });
 
@@ -8107,6 +8123,38 @@ function injectSidebarPanels(html) {
     return html.replace(/<\/body>/i, block + "</body>");
   }
   return html + block;
+}
+function normalizeChecklistItems(html) {
+  if (!html || typeof html !== "string") return html;
+  let changed = false;
+  let out = html.replace(
+    /<li\b([^>]*)>(\s*)(<input\b[^>]*type\s*=\s*["']checkbox["'][^>]*>)(\s*)\[([ xX])\]\s*/gi,
+    function(_m, liAttrs, ws1, inputTag, ws2, state) {
+      changed = true;
+      const done = state !== " ";
+      const hasChecked = /\bchecked\b/i.test(inputTag);
+      let fixedInput = inputTag;
+      if (done && !hasChecked) {
+        fixedInput = inputTag.replace(/\/?>$/, (end) => " checked" + end);
+      } else if (!done && hasChecked) {
+        fixedInput = inputTag.replace(/\s+checked(?:=["'][^"']*["'])?/i, "");
+      }
+      return "<li" + liAttrs + ">" + ws1 + fixedInput + ws2;
+    }
+  );
+  out = out.replace(
+    /<li\b([^>]*)>(\s*)\[([ xX])\]\s+/gi,
+    function(_m, liAttrs, ws, state) {
+      changed = true;
+      const done = state !== " ";
+      if (/\bdata-done\s*=/i.test(liAttrs)) return "<li" + liAttrs + ">" + ws;
+      return "<li" + liAttrs + ' data-done="' + (done ? "1" : "0") + '">' + ws;
+    }
+  );
+  if (!changed) return out;
+  const style = '<style>/* ph-checklist-normalize */\nli[data-done="1"]::before { content: "\\2611" !important; color: var(--green, #1a7f37) !important; }\nli[data-done="1"] { color: var(--muted, #62666d); }\nli[data-done="1"]:not(:has(*)) { text-decoration: line-through; }\n</style>';
+  if (/<\/head>/i.test(out)) return out.replace(/<\/head>/i, style + "</head>");
+  return style + out;
 }
 function normalizePlanTabs(html, existingSiblings) {
   if (!html || typeof html !== "string" || !existingSiblings || existingSiblings.size === 0) return html;
@@ -9025,7 +9073,8 @@ async function serveHtmlFile(req, res, filePath, ctx = {}) {
     } catch {
     }
     const withTabsFixed = normalizePlanTabs(raw, siblingSet);
-    const withSectionIds = injectSectionIds(withTabsFixed);
+    const withChecklistFixed = normalizeChecklistItems(withTabsFixed);
+    const withSectionIds = injectSectionIds(withChecklistFixed);
     const { scenarioName, docLabel } = parseScenarioFromPath(resolved);
     const fromLoopback = !!ctx.fromLoopback;
     const meta3 = {

@@ -14,7 +14,8 @@ import {
   injectSectionIds,
   injectPlanMeta,
   injectSidebarPanels,
-  normalizePlanTabs
+  normalizePlanTabs,
+  normalizeChecklistItems
 } from './templates/base.js';
 import * as auth from './auth.js';
 import * as commentMgr from './comment-manager.js';
@@ -499,8 +500,13 @@ async function serveHtmlFile(req, res, filePath, ctx = {}) {
     } catch { /* best-effort; if readdir fails, skip normalization */ }
     const withTabsFixed = normalizePlanTabs(raw, siblingSet);
 
+    // 0b. Collapse doubled-up checklist markers (<input type="checkbox"> paired
+    //     with a redundant `[x]` / `[ ]` text marker). Syncs `checked` from the
+    //     text marker, then strips the text, so only one render stays.
+    const withChecklistFixed = normalizeChecklistItems(withTabsFixed);
+
     // 1. Stable content-anchors for the future comment widget (idempotent).
-    const withSectionIds = injectSectionIds(withTabsFixed);
+    const withSectionIds = injectSectionIds(withChecklistFixed);
 
     // 2. Server-supplied context for the widget so it doesn't round-trip /api/me
     //    on every open. `role` today is loopback-or-not; once the auth layer

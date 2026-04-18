@@ -635,3 +635,7 @@ Before submitting your output, verify:
 3. Styled callout: `<p class="todo">...</p>` (or any element with `class="todo"`) — preferred for high-signal items that deserve visual weight in the flow.
 
 Do **not** use "TODO" casually inside arbitrary prose — only these three forms. The sidebar dedups by target element, so a single callout with a `TODO:` prefix counts once.
+
+**Do not combine pattern 2 with pattern 3 in the same `<li>`.** Never emit `<li><input type="checkbox"> [x] …</li>` — that's two markers in one row, they can disagree (unchecked box next to `[x]` text reads as broken), and `/view` has to fix it server-side. Pick ONE:
+- If the checklist is **interactive** (reader ticks items, state persists), use pattern 3 alone: `<li><input type="checkbox" checked> Item done</li>`.
+- If the checklist is **narrative** (snapshot of state at write time), use pattern 2 alone: `<li>[x] Item done</li>`.

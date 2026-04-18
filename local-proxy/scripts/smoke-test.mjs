@@ -160,6 +160,16 @@ async function main() {
           /<h[234][^>]+data-section-id="sec-[a-f0-9]{16}/.test(view.body),
           `${file} has data-section-id on at least one heading`
         );
+        // No <li> should carry BOTH an <input type="checkbox"> and a leading
+        // [x] / [ ] text marker. normalizeChecklistItems must have stripped
+        // the redundant text marker by the time /view returns the HTML.
+        const mixedMarker = /<li\b[^>]*>\s*<input\b[^>]*type\s*=\s*["']checkbox["'][^>]*>\s*\[[ xX]\]/i.test(view.body);
+        if (mixedMarker) {
+          fail(`${file} checklist markers`, 'an <li> still has both <input type=checkbox> and [x]/[ ] text');
+        } else {
+          pass(`${file} checklist markers deduped`);
+        }
+
         // Plan-tabs normalization: any anchor whose href points at an
         // existing sibling must not carry aria-disabled.
         const tabsMatch = view.body.match(/<nav class="plan-tabs"[\s\S]*?<\/nav>/);

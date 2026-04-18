@@ -1790,19 +1790,33 @@ export function injectSidebarPanels(html) {
 
       Array.prototype.forEach.call(main.querySelectorAll('li'), function(li){
         if (li.closest('.ph-side-panel')) return;
+
+        // Accept either raw [x]/[ ] text (pattern 2, pre-normalization) OR
+        // the data-done="0|1" attribute emitted by normalizeChecklistItems
+        // server-side. Either way, the panel shows one entry per checklist row.
         var direct = '';
         Array.prototype.forEach.call(li.childNodes, function(n){
           if (n.nodeType === 3) direct += n.textContent;
         });
         direct = direct.trim();
+        var done = null;
+        var labelText = '';
         var cm = /^\\[([ xX])\\]\\s*(.+)/.exec(direct);
-        if (!cm) return;
+        if (cm) {
+          done = cm[1] !== ' ';
+          labelText = cm[2];
+        } else if (li.hasAttribute('data-done')) {
+          done = li.getAttribute('data-done') === '1';
+          labelText = (li.textContent || '').trim();
+        } else {
+          return;
+        }
         var heading = findAnchorHeading(li);
         add({
-          label: (cm[1] === ' ' ? '☐ ' : '☑ ') + truncate(cm[2], 80),
+          label: (done ? '☑ ' : '☐ ') + truncate(labelText, 80),
           meta: heading ? truncate(heading.textContent || '', 48) : '',
           target: li,
-          done: cm[1] !== ' '
+          done: done
         });
       });
 
@@ -1935,7 +1949,9 @@ export function injectSidebarPanels(html) {
       var resolvedBy = bucket && bucket.resolved;
       var threadLen = bucket ? bucket.thread.length : 0;
       var revising = bucket && bucket.revising;
-      todo.done = !!resolvedBy;
+      // todo.done may already be true from the doc itself (a "[x]" marker or
+      // data-done="1" attribute). Honor that plus any comment resolve.
+      todo.done = todo.done || !!resolvedBy;
 
       var li = document.createElement('li');
       li.className = 'ph-todo-row' + (todo.done ? ' ph-done' : '');
@@ -2028,7 +2044,7 @@ export function injectSidebarPanels(html) {
       allTodos.forEach(function(t){
         var key = (t.anchor.sectionId || '') + '::' + t.anchor.exact;
         var bucket = todoCommentIndex.get(key);
-        if (bucket && bucket.resolved) resolved.push(t);
+        if ((bucket && bucket.resolved) || t.done) resolved.push(t);
         else open.push(t);
       });
 
@@ -2113,6 +2129,78 @@ export function injectSidebarPanels(html) {
     return html.replace(/<\/body>/i, block + '</body>');
   }
   return html + block;
+}
+
+/**
+ * Normalize mixed checklist markers in <li> items.
+ *
+ * The TODO format contract (writer-prompt.md / design §6.3) defines three
+ * recognized patterns. Writers occasionally emit pattern 2 (`[x]` / `[ ]`
+ * in text) AND pattern 3 (`<input type="checkbox">`) in the SAME <li>, which
+ * renders as two side-by-side markers that can disagree on done-state.
+ *
+ * This pass finds <li> items that contain both an `<input type="checkbox">`
+ * near the start AND a leading `[x]` / `[ ]` text marker, syncs the input's
+ * `checked` attribute from the text marker (source of truth for the writer's
+ * intent), and strips the redundant text marker.
+ *
+ * Idempotent: re-running on output yields the same output.
+ */
+export function normalizeChecklistItems(html) {
+  if (!html || typeof html !== 'string') return html;
+  let changed = false;
+
+  // Case A: <li>[ws]<input type="checkbox">[ws][x|X| ] ...
+  //   Sync `checked` from the text marker, then drop the redundant text.
+  let out = html.replace(
+    /<li\b([^>]*)>(\s*)(<input\b[^>]*type\s*=\s*["']checkbox["'][^>]*>)(\s*)\[([ xX])\]\s*/gi,
+    function (_m, liAttrs, ws1, inputTag, ws2, state) {
+      changed = true;
+      const done = state !== ' ';
+      const hasChecked = /\bchecked\b/i.test(inputTag);
+      let fixedInput = inputTag;
+      if (done && !hasChecked) {
+        fixedInput = inputTag.replace(/\/?>$/, (end) => ' checked' + end);
+      } else if (!done && hasChecked) {
+        fixedInput = inputTag.replace(/\s+checked(?:=["'][^"']*["'])?/i, '');
+      }
+      return '<li' + liAttrs + '>' + ws1 + fixedInput + ws2;
+    }
+  );
+
+  // Case B: <li>[ws][x|X| ] ...   (no <input> present)
+  //   Many docs render an ☐ pseudo-element via `.checklist li::before` and
+  //   then put `[x]` / `[ ]` in the text. Result: a fake empty box next to a
+  //   text marker that disagrees with it. Move the state onto a
+  //   `data-done="0|1"` attribute and drop the text so only one marker stays;
+  //   a companion <style> block (injected below) flips the pseudo-element to
+  //   ☑ green when `data-done="1"`.
+  out = out.replace(
+    /<li\b([^>]*)>(\s*)\[([ xX])\]\s+/gi,
+    function (_m, liAttrs, ws, state) {
+      changed = true;
+      const done = state !== ' ';
+      // Idempotent: skip if already tagged
+      if (/\bdata-done\s*=/i.test(liAttrs)) return '<li' + liAttrs + '>' + ws;
+      return '<li' + liAttrs + ' data-done="' + (done ? '1' : '0') + '">' + ws;
+    }
+  );
+
+  if (!changed) return out;
+
+  // Inject a CSS block that retargets the common `.checklist li::before`
+  // patterns to render ☑ (\2611) green when the li is data-done="1", and
+  // adds a subtle opacity fade. Works for docs that use the generator's
+  // default checklist CSS; docs with a bespoke stylesheet may need their
+  // own tweak (rare — this is the scaffold most writers reach for).
+  const style =
+    '<style>/* ph-checklist-normalize */\n' +
+    'li[data-done="1"]::before { content: "\\2611" !important; color: var(--green, #1a7f37) !important; }\n' +
+    'li[data-done="1"] { color: var(--muted, #62666d); }\n' +
+    'li[data-done="1"]:not(:has(*)) { text-decoration: line-through; }\n' +
+    '</style>';
+  if (/<\/head>/i.test(out)) return out.replace(/<\/head>/i, style + '</head>');
+  return style + out;
 }
 
 /**
