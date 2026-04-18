@@ -7581,6 +7581,64 @@ function injectSidebarPanels(html) {
 .ph-composer button.ph-composer-submit:hover { opacity: 0.9; }
 .ph-composer button:disabled { opacity: 0.5; cursor: not-allowed; }
 .ph-composer-error { color: var(--red, #cf222e); font-size: 0.7rem; }
+
+/* Floating Comment CTA, positioned at selection end */
+.ph-select-cta {
+  position: absolute; z-index: 10050;
+  display: none; align-items: center; gap: 0.35rem;
+  padding: 0.3rem 0.7rem; border-radius: 999px;
+  background: var(--accent, #5e6ad2); color: white;
+  border: 1px solid var(--accent, #5e6ad2); box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+  font: 600 0.75rem/1 'Inter Variable', Inter, system-ui, sans-serif; cursor: pointer;
+  backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+  transition: transform 0.12s, box-shadow 0.12s;
+}
+.ph-select-cta:hover { transform: translateY(-1px); box-shadow: 0 6px 16px rgba(0,0,0,0.25); }
+.ph-select-cta svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+
+/* Floating composer anchored near the selection */
+.ph-select-composer {
+  position: absolute; z-index: 10051; width: 340px;
+  display: none; padding: 0.6rem; gap: 0.5rem; flex-direction: column;
+  background: var(--surface, #f3f4f5); border: 1px solid var(--border, #d0d6e0);
+  border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,0.18);
+  font: 510 0.8rem/1.4 'Inter Variable', Inter, system-ui, sans-serif;
+}
+.ph-select-composer[data-open="1"] { display: flex; }
+.ph-select-composer .ph-sc-context {
+  font-size: 0.7rem; color: var(--muted, #62666d);
+  padding: 0.3rem 0.5rem; border-left: 2px solid var(--accent, #5e6ad2);
+  background: var(--bg, #f7f8f8); border-radius: 3px;
+  max-height: 4rem; overflow: hidden; text-overflow: ellipsis;
+}
+.ph-select-composer textarea {
+  width: 100%; min-height: 3.5rem; max-height: 12rem; resize: vertical; box-sizing: border-box;
+  padding: 0.4rem 0.5rem; border: 1px solid var(--border, #d0d6e0); border-radius: 4px;
+  font: 500 0.78rem/1.4 inherit; background: var(--bg, #f7f8f8); color: var(--text, #08090a);
+}
+.ph-select-composer textarea:focus { outline: 2px solid var(--accent, #5e6ad2); outline-offset: -1px; }
+.ph-select-composer-row { display: flex; justify-content: space-between; align-items: center; gap: 0.4rem; }
+.ph-select-composer .ph-sc-hint { font-size: 0.65rem; color: var(--muted, #62666d); }
+.ph-select-composer button {
+  font: 600 0.72rem/1 inherit; padding: 0.3rem 0.7rem; border-radius: 4px; cursor: pointer;
+  border: 1px solid var(--border, #d0d6e0); background: var(--bg, #f7f8f8); color: var(--text, #08090a);
+}
+.ph-select-composer button.ph-sc-submit { background: var(--accent, #5e6ad2); color: white; border-color: var(--accent, #5e6ad2); }
+.ph-select-composer button.ph-sc-revise { background: var(--purple, #7170ff); color: white; border-color: var(--purple, #7170ff); }
+.ph-select-composer button:disabled { opacity: 0.5; cursor: not-allowed; }
+.ph-select-composer .ph-sc-err { color: var(--red, #cf222e); font-size: 0.68rem; }
+
+/* Inline <mark> wraps around the anchored exact text */
+.ph-comment-mark {
+  background: rgba(94,106,210,0.15);
+  border-bottom: 2px solid var(--accent, #5e6ad2);
+  border-radius: 2px; padding: 0.05rem 0.1rem; cursor: pointer;
+  transition: background 0.12s;
+}
+.ph-comment-mark:hover { background: rgba(94,106,210,0.28); }
+.ph-comment-mark.ph-mark-resolved { background: rgba(26,127,55,0.12); border-bottom-color: var(--green, #1a7f37); }
+.ph-comment-mark.ph-mark-revise { background: rgba(113,112,255,0.12); border-bottom-color: var(--purple, #7170ff); }
+@media print { .ph-select-cta, .ph-select-composer { display: none !important; } }
 .ph-side-panel > summary {
   cursor: pointer; padding: 0.55rem 1rem;
   font: 700 0.68rem/1 'Inter Variable', Inter, system-ui, sans-serif;
@@ -8083,33 +8141,278 @@ function injectSidebarPanels(html) {
       return;
     }
 
-    fetch('/api/comments/' + encodeURIComponent(meta.scenario) + '/' + encodeURIComponent(meta.doc), { credentials: 'same-origin' })
-      .then(function(r){ if (!r.ok) throw 0; return r.json(); })
-      .then(function(data){
-        var comments = (data && data.comments) || [];
-        todoCommentIndex = indexCommentsByTodoAnchor(comments);
-        renderTodoPanel();
-
-        // Comments panel shows ALL comments; TODO-scoped ones still appear,
-        // which is useful when the reader wants a flat chronological view.
-        setCount(commentPanel, comments.length);
-        var items = comments.map(function(c){
-          var anchor = c.anchor || {};
-          var target = anchor.sectionId ? document.querySelector('[data-section-id="' + CSS.escape(anchor.sectionId) + '"]') : null;
-          return {
-            label: truncate(c.body || '(empty)', 70),
-            meta: (c.author || '?') + ' \xB7 ' + truncate(anchor.exact || '', 40),
-            target: target,
-            done: !!c.resolved || !!c.todoResolves
-          };
-        });
-        renderCommentList(commentPanel, items);
-      })
-      .catch(function(){
-        // API unreachable \u2014 render TODOs without resolve overlay; hide comments.
-        renderTodoPanel();
-        setVisibility(commentPanel, false);
+    // ---- Inline <mark> highlights for anchored comments ----
+    // On load + after any post, walk each comment's (sectionId, exact) anchor
+    // and wrap the first matching text span in that section with a <mark>.
+    // Best-effort \u2014 if the exact text has drifted, the mark is skipped and
+    // the comment is surfaced only in the sidebar. Re-anchor cascade (Phase 10)
+    // will repair this on a doc regen.
+    function unwrapAllMarks(){
+      Array.prototype.forEach.call(document.querySelectorAll('mark.ph-comment-mark'), function(m){
+        var parent = m.parentNode;
+        while (m.firstChild) parent.insertBefore(m.firstChild, m);
+        parent.removeChild(m);
+        parent.normalize();
       });
+    }
+
+    function sectionContent(sectionEl){
+      // Returns the following-sibling elements that belong to this section
+      // (stopping at the next [data-section-id] or the end of the parent).
+      var out = [];
+      var sib = sectionEl.nextElementSibling;
+      while (sib) {
+        if (sib.hasAttribute && sib.hasAttribute('data-section-id')) break;
+        out.push(sib);
+        sib = sib.nextElementSibling;
+      }
+      return out;
+    }
+
+    function wrapFirstMatchIn(container, needle, className, cmtId){
+      if (!needle || needle.length < 3) return false;
+      var walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT, null);
+      var node;
+      while ((node = walker.nextNode())) {
+        var parent = node.parentElement;
+        if (!parent) continue;
+        // Skip text nodes inside our own widget chrome or existing marks.
+        if (parent.closest('.ph-side-panel, .ph-injected-breadcrumb, .ph-select-composer, .ph-select-cta, .ph-composer, mark.ph-comment-mark, script, style')) continue;
+        var idx = node.textContent.indexOf(needle);
+        if (idx < 0) continue;
+        var range = document.createRange();
+        range.setStart(node, idx);
+        range.setEnd(node, idx + needle.length);
+        var mark = document.createElement('mark');
+        mark.className = className;
+        mark.setAttribute('data-cmt-id', cmtId);
+        try { range.surroundContents(mark); return true; }
+        catch (e) { return false; }
+      }
+      return false;
+    }
+
+    function applyMarks(comments){
+      unwrapAllMarks();
+      comments.forEach(function(c){
+        if (!c.anchor || !c.anchor.sectionId || !c.anchor.exact) return;
+        if (c.deleted) return;
+        if (c.todoResolves) return; // TODO-resolves are panel-side, no doc highlight
+        var sectionEl = document.querySelector('[data-section-id="' + CSS.escape(c.anchor.sectionId) + '"]');
+        if (!sectionEl) return;
+        var classes = 'ph-comment-mark';
+        if (c.resolved) classes += ' ph-mark-resolved';
+        if (c.intent === 'revise') classes += ' ph-mark-revise';
+        var siblings = sectionContent(sectionEl);
+        for (var i = 0; i < siblings.length; i++) {
+          if (wrapFirstMatchIn(siblings[i], c.anchor.exact, classes, c.id)) break;
+        }
+      });
+    }
+
+    // Click any <mark> to scroll the Comments panel into view and flash the
+    // matching entry. Delegated so new marks don't need re-binding.
+    document.addEventListener('click', function(e){
+      var mark = e.target.closest && e.target.closest('mark.ph-comment-mark');
+      if (!mark) return;
+      commentPanel.open = true;
+      localStorage.setItem(prefKey + ':comments', '1');
+      commentPanel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      mark.classList.add('ph-flash');
+      setTimeout(function(){ mark.classList.remove('ph-flash'); }, 1200);
+    });
+
+    // ---- Selection detector + floating Comment CTA (Phase 4) ----
+    var selCta = document.createElement('button');
+    selCta.type = 'button';
+    selCta.className = 'ph-select-cta';
+    selCta.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg><span>Comment</span>';
+    selCta.setAttribute('aria-label', 'Add comment on selection');
+    selCta.style.display = 'none';
+    document.body.appendChild(selCta);
+
+    var selComposer = null;
+    var currentSelection = null;
+    var pendingUpdate = false;
+
+    function hideCta(){ selCta.style.display = 'none'; }
+    function hideComposer(){ if (selComposer) { selComposer.remove(); selComposer = null; } }
+
+    function computeAnchorFromSelection(){
+      var sel = window.getSelection();
+      if (!sel || sel.isCollapsed) return null;
+      var text = sel.toString().trim();
+      if (text.length < 3) return null;
+      if (text.length > 2000) return null; // anchor.exact cap
+      var range = sel.getRangeAt(0);
+      var common = range.commonAncestorContainer;
+      var el = common.nodeType === 1 ? common : common.parentElement;
+      if (!el || el.closest('.ph-side-panel, .ph-injected-breadcrumb, .ph-select-cta, .ph-select-composer, .ph-composer, button, textarea, input, mark.ph-comment-mark')) return null;
+
+      // Find the governing [data-section-id]. It's either an ancestor or a
+      // preceding heading sibling (headings are siblings, not parents).
+      var sectionEl = el.closest('[data-section-id]');
+      if (!sectionEl) {
+        var cur = el;
+        scan: while (cur && cur !== document.body) {
+          var prev = cur.previousElementSibling;
+          while (prev) {
+            if (prev.hasAttribute && prev.hasAttribute('data-section-id')) { sectionEl = prev; break scan; }
+            prev = prev.previousElementSibling;
+          }
+          cur = cur.parentElement;
+        }
+      }
+      if (!sectionEl) return null;
+
+      var prefix = '', suffix = '';
+      if (range.startContainer.nodeType === 3) prefix = range.startContainer.textContent.slice(0, range.startOffset).slice(-64);
+      if (range.endContainer.nodeType === 3) suffix = range.endContainer.textContent.slice(range.endOffset).slice(0, 64);
+
+      var rect = range.getBoundingClientRect();
+      return {
+        sectionId: sectionEl.getAttribute('data-section-id'),
+        exact: text,
+        prefix: prefix,
+        suffix: suffix,
+        rect: rect,
+        range: range.cloneRange()
+      };
+    }
+
+    function updateSelectionCta(){
+      var anchor = computeAnchorFromSelection();
+      if (!anchor) { hideCta(); currentSelection = null; return; }
+      currentSelection = anchor;
+      selCta.style.top = (window.scrollY + anchor.rect.bottom + 6) + 'px';
+      selCta.style.left = (window.scrollX + Math.max(8, anchor.rect.right - 80)) + 'px';
+      selCta.style.display = 'inline-flex';
+    }
+
+    function openSelectComposer(){
+      if (!currentSelection) return;
+      hideCta();
+      hideComposer();
+      var anchor = currentSelection;
+      var role = meta.role || 'reviewer';
+      selComposer = document.createElement('div');
+      selComposer.className = 'ph-select-composer';
+      selComposer.setAttribute('data-open', '1');
+      selComposer.style.top = (window.scrollY + anchor.rect.bottom + 6) + 'px';
+      selComposer.style.left = (window.scrollX + Math.max(8, anchor.rect.right - 340)) + 'px';
+      var reviseBtnHtml = role === 'host'
+        ? '<button type="button" class="ph-sc-revise" title="Ctrl+Shift+Enter \u2014 ask an agent to revise this">Request update</button>' : '';
+      selComposer.innerHTML =
+        '<div class="ph-sc-context">' + (anchor.exact.length > 200 ? anchor.exact.slice(0, 199) + '\u2026' : anchor.exact).replace(/[&<>"']/g, function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];}) + '</div>' +
+        '<textarea placeholder="Your comment\u2026" rows="3" autofocus></textarea>' +
+        '<div class="ph-select-composer-row">' +
+          '<span class="ph-sc-hint">Ctrl+Enter to post \xB7 Esc to cancel</span>' +
+          '<span class="ph-sc-err" aria-live="polite"></span>' +
+          '<span style="display:flex;gap:0.3rem;">' +
+            '<button type="button" class="ph-sc-cancel">Cancel</button>' +
+            reviseBtnHtml +
+            '<button type="button" class="ph-sc-submit">Post</button>' +
+          '</span>' +
+        '</div>';
+      document.body.appendChild(selComposer);
+
+      var ta = selComposer.querySelector('textarea');
+      var submit = selComposer.querySelector('.ph-sc-submit');
+      var cancel = selComposer.querySelector('.ph-sc-cancel');
+      var revise = selComposer.querySelector('.ph-sc-revise');
+      var errBox = selComposer.querySelector('.ph-sc-err');
+      setTimeout(function(){ ta.focus(); }, 0);
+
+      function doSubmit(withIntent){
+        var val = ta.value;
+        if (!val || !val.trim()) { errBox.textContent = 'Required.'; return; }
+        submit.disabled = true;
+        if (revise) revise.disabled = true;
+        var payload = { body: val };
+        if (withIntent === 'revise') payload.intent = 'revise';
+        postComment({ sectionId: anchor.sectionId, exact: anchor.exact, prefix: anchor.prefix, suffix: anchor.suffix }, payload)
+          .then(function(){
+            hideComposer();
+            window.getSelection().removeAllRanges();
+            refreshAll();
+          })
+          .catch(function(err){
+            errBox.textContent = String(err.message || err);
+            submit.disabled = false;
+            if (revise) revise.disabled = false;
+          });
+      }
+
+      submit.addEventListener('click', function(){ doSubmit(); });
+      if (revise) revise.addEventListener('click', function(){ doSubmit('revise'); });
+      cancel.addEventListener('click', hideComposer);
+      ta.addEventListener('keydown', function(e){
+        if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+          e.preventDefault();
+          doSubmit(e.shiftKey && role === 'host' ? 'revise' : undefined);
+        } else if (e.key === 'Escape') { e.preventDefault(); hideComposer(); }
+      });
+    }
+
+    selCta.addEventListener('click', function(e){ e.stopPropagation(); openSelectComposer(); });
+
+    document.addEventListener('mouseup', function(){
+      // Wait for selection to finalize after the click.
+      setTimeout(updateSelectionCta, 15);
+    });
+    document.addEventListener('selectionchange', function(){
+      if (pendingUpdate) return;
+      pendingUpdate = true;
+      requestAnimationFrame(function(){ pendingUpdate = false; updateSelectionCta(); });
+    });
+    // Dismiss CTA / composer on outside click.
+    document.addEventListener('mousedown', function(e){
+      if (e.target.closest('.ph-select-cta, .ph-select-composer, mark.ph-comment-mark')) return;
+      hideCta();
+      // Don't auto-close the composer on clicks inside its own element;
+      // do close on genuine outside clicks.
+      if (selComposer && !selComposer.contains(e.target)) hideComposer();
+    });
+    // Ctrl+Alt+M: open composer against current selection.
+    document.addEventListener('keydown', function(e){
+      if (e.ctrlKey && e.altKey && (e.key === 'm' || e.key === 'M')) {
+        e.preventDefault();
+        updateSelectionCta();
+        if (currentSelection) openSelectComposer();
+      }
+    });
+
+    // ---- refreshAll: re-fetch comments and rebuild every surface ----
+    function refreshAll(){
+      return fetch('/api/comments/' + encodeURIComponent(meta.scenario) + '/' + encodeURIComponent(meta.doc), { credentials: 'same-origin' })
+        .then(function(r){ if (!r.ok) throw 0; return r.json(); })
+        .then(function(data){
+          var comments = (data && data.comments) || [];
+          var flatList = [];
+          (function walk(list){ list.forEach(function(c){ flatList.push(c); if (c.replies) walk(c.replies); }); })(comments);
+          todoCommentIndex = indexCommentsByTodoAnchor(comments);
+          renderTodoPanel();
+          setCount(commentPanel, comments.length);
+          var items = comments.map(function(c){
+            var anchor = c.anchor || {};
+            var target = anchor.sectionId ? document.querySelector('[data-section-id="' + CSS.escape(anchor.sectionId) + '"]') : null;
+            return {
+              label: truncate(c.body || '(empty)', 70),
+              meta: (c.author || '?') + ' \xB7 ' + truncate(anchor.exact || '', 40),
+              target: target,
+              done: !!c.resolved || !!c.todoResolves
+            };
+          });
+          renderCommentList(commentPanel, items);
+          applyMarks(flatList);
+        })
+        .catch(function(){
+          renderTodoPanel();
+          setVisibility(commentPanel, false);
+        });
+    }
+
+    refreshAll();
   }
 
   if (document.readyState === 'loading') {
