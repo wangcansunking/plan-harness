@@ -10,7 +10,8 @@ import {
   generateDashboard,
   generateScenarioDetail,
   injectSectionIds,
-  injectPlanMeta
+  injectPlanMeta,
+  injectSidebarPanels
 } from './templates/base.js';
 import * as auth from './auth.js';
 
@@ -298,8 +299,11 @@ async function serveHtmlFile(req, res, filePath, ctx = {}) {
     };
     const withMeta = injectPlanMeta(withSectionIds, meta);
 
-    // 3. Breadcrumb pill (last so it sits above the doc's head metadata).
-    const injected = injectBreadcrumbIntoHtml(withMeta, resolved);
+    // 3. Sidebar auxiliary panels (TODOs + Comments). Runs on DOMContentLoaded.
+    const withPanels = injectSidebarPanels(withMeta);
+
+    // 4. Breadcrumb pill (last so it sits above the doc's head metadata).
+    const injected = injectBreadcrumbIntoHtml(withPanels, resolved);
 
     res.writeHead(200, {
       'Content-Type': 'text/html; charset=utf-8',

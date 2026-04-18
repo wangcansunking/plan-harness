@@ -7503,6 +7503,279 @@ function injectSectionIds(html) {
     }
   );
 }
+function injectSidebarPanels(html) {
+  if (!html || typeof html !== "string") return html;
+  if (html.includes("/* ph-sidebar-panels */")) return html;
+  const block = `
+<style>/* ph-sidebar-panels */
+.ph-side-panel { border-top: 1px solid var(--border, #e0e0e0); margin: 0; padding: 0; background: transparent; border-left: 0; border-right: 0; border-bottom: 0; border-radius: 0; overflow: visible; }
+.ph-side-panel > .ph-panel-body { display: none; }
+.ph-side-panel[open] > .ph-panel-body { display: block; }
+.ph-side-panel > summary {
+  cursor: pointer; padding: 0.55rem 1rem;
+  font: 700 0.68rem/1 'Inter Variable', Inter, system-ui, sans-serif;
+  text-transform: uppercase; letter-spacing: 0.08em;
+  color: var(--muted, #62666d);
+  display: flex; align-items: center; justify-content: space-between; gap: 0.5rem;
+  list-style: none; user-select: none; transition: color 0.12s;
+}
+.ph-side-panel > summary::-webkit-details-marker { display: none; }
+.ph-side-panel > summary::before {
+  content: '\u25B8'; font-size: 0.6rem; margin-right: 0.35rem;
+  transition: transform 0.15s; display: inline-block; color: var(--muted, #62666d);
+}
+.ph-side-panel[open] > summary::before { transform: rotate(90deg); }
+.ph-side-panel > summary:hover { color: var(--text, #08090a); }
+.ph-side-panel > summary:focus-visible { outline: 2px solid var(--accent, #5e6ad2); outline-offset: -2px; border-radius: 3px; }
+.ph-count {
+  font-size: 0.65rem; background: var(--code-bg, #eeeff1); color: var(--muted, #62666d);
+  padding: 0.1rem 0.45rem; border-radius: 999px; font-weight: 600;
+  text-transform: none; letter-spacing: 0; min-width: 1.5rem; text-align: center;
+}
+.ph-count.ph-count-empty { opacity: 0.4; }
+.ph-panel-body { padding: 0.15rem 0.4rem 0.6rem; }
+.ph-panel-empty { padding: 0.5rem 0.6rem; font-size: 0.72rem; color: var(--muted, #62666d); font-style: italic; }
+.ph-panel-list { list-style: none; margin: 0; padding: 0; }
+.ph-panel-item {
+  display: block; padding: 0.4rem 0.55rem; font-size: 0.76rem;
+  color: var(--text, #08090a); text-decoration: none; border-radius: 4px;
+  border-left: 2px solid transparent; transition: background 0.12s, border-color 0.12s;
+}
+.ph-panel-item:hover { background: var(--bg, #f7f8f8); border-left-color: var(--accent, #5e6ad2); text-decoration: none; }
+.ph-panel-item:focus-visible { outline: 2px solid var(--accent, #5e6ad2); outline-offset: -2px; }
+.ph-panel-item.ph-done .ph-item-label { text-decoration: line-through; opacity: 0.55; }
+.ph-item-label {
+  display: block; font-weight: 510;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.ph-item-meta {
+  display: block; font-size: 0.65rem; color: var(--muted, #62666d);
+  margin-top: 0.15rem;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.ph-flash { animation: ph-flash-anim 1.2s ease-out; border-radius: 4px; }
+@keyframes ph-flash-anim {
+  0%   { background: rgba(94,106,210,0.28); box-shadow: 0 0 0 4px rgba(94,106,210,0.28); }
+  100% { background: transparent; box-shadow: 0 0 0 0 transparent; }
+}
+@media (max-width: 899px) {
+  .ph-side-panel { display: none; }
+}
+</style>
+<script>/* ph-sidebar-panels */
+(function(){
+  if (window.__PH_SIDEBAR_PANELS_LOADED) return;
+  window.__PH_SIDEBAR_PANELS_LOADED = true;
+
+  function boot(){
+    var meta = window.__PLAN_HARNESS_META__ || {};
+    var sideNav = document.querySelector('.side-nav');
+    if (!sideNav) return;
+
+    var prefKey = 'ph-panels:' + (meta.scenario || '_') + ':' + (meta.doc || '_');
+    var main = document.querySelector('main, .main, .content, article') ||
+               (function(){
+                 var candidates = Array.prototype.slice.call(document.body.children);
+                 return candidates.filter(function(el){
+                   return !el.matches('nav, header, aside, .side-nav, .theme-toggle, .ph-injected-breadcrumb, script, style');
+                 }).sort(function(a,b){ return (b.textContent||'').length - (a.textContent||'').length; })[0];
+               })() || document.body;
+
+    function makePanel(id, title){
+      var saved = localStorage.getItem(prefKey + ':' + id);
+      var det = document.createElement('details');
+      det.className = 'ph-side-panel';
+      det.setAttribute('data-panel', id);
+      if (saved === '1') det.open = true;
+      det.innerHTML = '<summary><span class="ph-panel-title">' + title + '</span><span class="ph-count ph-count-empty">0</span></summary><div class="ph-panel-body" aria-live="polite"></div>';
+      det.addEventListener('toggle', function(){
+        localStorage.setItem(prefKey + ':' + id, det.open ? '1' : '0');
+      });
+      return det;
+    }
+
+    function findAnchorHeading(el){
+      var cur = el;
+      while (cur && cur !== document.body) {
+        if (cur.hasAttribute && cur.hasAttribute('data-section-id')) return cur;
+        var prev = cur.previousElementSibling;
+        while (prev) {
+          if (prev.hasAttribute && prev.hasAttribute('data-section-id')) return prev;
+          var deep = prev.querySelector && prev.querySelector('[data-section-id]');
+          if (deep) return deep;
+          prev = prev.previousElementSibling;
+        }
+        cur = cur.parentElement;
+      }
+      return null;
+    }
+
+    function scrollTo(target){
+      if (!target) return;
+      target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      target.classList.add('ph-flash');
+      setTimeout(function(){ target.classList.remove('ph-flash'); }, 1200);
+    }
+
+    function truncate(s, n){
+      s = String(s || '').replace(/\\s+/g, ' ').trim();
+      return s.length > n ? s.slice(0, n - 1) + '\u2026' : s;
+    }
+
+    function setCount(panel, n){
+      var c = panel.querySelector('.ph-count');
+      c.textContent = String(n);
+      c.classList.toggle('ph-count-empty', n === 0);
+    }
+
+    function renderList(panel, items){
+      var body = panel.querySelector('.ph-panel-body');
+      body.innerHTML = '';
+      if (!items.length) {
+        body.innerHTML = '<div class="ph-panel-empty">' + (panel.dataset.empty || 'Nothing here.') + '</div>';
+        return;
+      }
+      var ul = document.createElement('ul');
+      ul.className = 'ph-panel-list';
+      items.forEach(function(it){
+        var li = document.createElement('li');
+        var a = document.createElement('a');
+        a.href = '#';
+        a.className = 'ph-panel-item' + (it.done ? ' ph-done' : '');
+        var lbl = document.createElement('span');
+        lbl.className = 'ph-item-label';
+        lbl.textContent = it.label;
+        var meta = document.createElement('span');
+        meta.className = 'ph-item-meta';
+        meta.textContent = it.meta || '';
+        a.appendChild(lbl);
+        if (it.meta) a.appendChild(meta);
+        a.addEventListener('click', function(e){
+          e.preventDefault();
+          scrollTo(it.target);
+        });
+        li.appendChild(a);
+        ul.appendChild(li);
+      });
+      body.appendChild(ul);
+    }
+
+    // ---- TODOs ----
+    function scanTodos(){
+      var found = [];
+      var seen = new Set();
+      var add = function(item){
+        if (!item.target) return;
+        // Dedup by target + label so the same TODO picked up twice doesn't repeat.
+        var key = item.label + '::' + (item.target.outerHTML || '').slice(0, 80);
+        if (seen.has(key)) return;
+        seen.add(key);
+        found.push(item);
+      };
+
+      var todoRe = /\\b(TODO|FIXME)\\s*[:\uFF1A]\\s*(.{2,200})/;
+      var walker = document.createTreeWalker(main, NodeFilter.SHOW_TEXT, null);
+      var node;
+      while ((node = walker.nextNode())) {
+        var text = node.textContent || '';
+        if (!/\\b(TODO|FIXME)\\b/.test(text)) continue;
+        var m = todoRe.exec(text);
+        if (!m) continue;
+        var host = node.parentElement;
+        if (!host || host.closest('.ph-side-panel, .ph-injected-breadcrumb, script, style')) continue;
+        var heading = findAnchorHeading(host);
+        add({
+          label: m[1] + ': ' + truncate(m[2], 80),
+          meta: heading ? truncate(heading.textContent || '', 48) : '',
+          target: host
+        });
+      }
+
+      Array.prototype.forEach.call(main.querySelectorAll('li'), function(li){
+        if (li.closest('.ph-side-panel')) return;
+        var direct = '';
+        Array.prototype.forEach.call(li.childNodes, function(n){
+          if (n.nodeType === 3) direct += n.textContent;
+        });
+        direct = direct.trim();
+        var cm = /^\\[([ xX])\\]\\s*(.+)/.exec(direct);
+        if (!cm) return;
+        var heading = findAnchorHeading(li);
+        add({
+          label: (cm[1] === ' ' ? '\u2610 ' : '\u2611 ') + truncate(cm[2], 80),
+          meta: heading ? truncate(heading.textContent || '', 48) : '',
+          target: li,
+          done: cm[1] !== ' '
+        });
+      });
+
+      Array.prototype.forEach.call(main.querySelectorAll('.todo'), function(el){
+        if (el.closest('.ph-side-panel')) return;
+        var heading = findAnchorHeading(el);
+        add({
+          label: truncate(el.textContent || '', 80),
+          meta: heading ? truncate(heading.textContent || '', 48) : '',
+          target: el
+        });
+      });
+
+      return found;
+    }
+
+    // ---- Build panels ----
+    var todoPanel = makePanel('todos', 'TODOs');
+    todoPanel.dataset.empty = 'No open TODOs on this page.';
+    var commentPanel = makePanel('comments', 'Comments');
+    commentPanel.dataset.empty = 'No comments yet.';
+    sideNav.appendChild(todoPanel);
+    sideNav.appendChild(commentPanel);
+
+    var todos = scanTodos();
+    setCount(todoPanel, todos.length);
+    renderList(todoPanel, todos);
+
+    // Comments \u2014 API may not exist yet (Phase 2). Graceful stub.
+    if (!meta.scenario || !meta.doc) {
+      setCount(commentPanel, 0);
+      renderList(commentPanel, []);
+      return;
+    }
+    fetch('/api/comments/' + encodeURIComponent(meta.scenario) + '/' + encodeURIComponent(meta.doc), { credentials: 'same-origin' })
+      .then(function(r){ if (!r.ok) throw 0; return r.json(); })
+      .then(function(data){
+        var comments = (data && data.comments) || [];
+        setCount(commentPanel, comments.length);
+        var items = comments.map(function(c){
+          var anchor = c.anchor || {};
+          var target = anchor.sectionId ? document.querySelector('[data-section-id="' + CSS.escape(anchor.sectionId) + '"]') : null;
+          return {
+            label: truncate(c.body || '(empty)', 70),
+            meta: (c.author || '?') + ' \xB7 ' + truncate(anchor.exact || '', 40),
+            target: target,
+            done: !!c.resolved
+          };
+        });
+        renderList(commentPanel, items);
+      })
+      .catch(function(){
+        setCount(commentPanel, 0);
+        var body = commentPanel.querySelector('.ph-panel-body');
+        body.innerHTML = '<div class="ph-panel-empty">Comments API coming in Phase 2.</div>';
+      });
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', boot);
+  } else {
+    boot();
+  }
+})();
+</script>`;
+  if (/<\/body>/i.test(html)) {
+    return html.replace(/<\/body>/i, block + "</body>");
+  }
+  return html + block;
+}
 function injectPlanMeta(html, meta3) {
   if (!html || typeof html !== "string" || !meta3) return html;
   const json2 = JSON.stringify(meta3).replace(/</g, "\\u003c");
@@ -7853,7 +8126,8 @@ async function serveHtmlFile(req, res, filePath, ctx = {}) {
       user: req.user?.name || (fromLoopback ? "Host (local)" : "Anonymous")
     };
     const withMeta = injectPlanMeta(withSectionIds, meta3);
-    const injected = injectBreadcrumbIntoHtml(withMeta, resolved);
+    const withPanels = injectSidebarPanels(withMeta);
+    const injected = injectBreadcrumbIntoHtml(withPanels, resolved);
     res.writeHead(200, {
       "Content-Type": "text/html; charset=utf-8",
       "Cache-Control": "no-cache"
