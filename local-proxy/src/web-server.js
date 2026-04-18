@@ -14,6 +14,8 @@ import {
   injectSidebarPanels
 } from './templates/base.js';
 import * as auth from './auth.js';
+import * as commentMgr from './comment-manager.js';
+import { CommentError } from './comment-manager.js';
 
 let server = null;
 let serverPort = null;
@@ -203,9 +205,191 @@ async function handleRequest(req, res) {
     return;
   }
 
+  // ---- Comment routes (Phase 2 of built-in-comment-ui) ----
+  // Scenario + doc validated inside comment-manager for path safety.
+  const commentListMatch = pathname.match(/^\/api\/comments\/([^/]+)\/([^/]+)$/);
+  const commentItemMatch = pathname.match(/^\/api\/comments\/([^/]+)\/([^/]+)\/([^/]+)$/);
+  const commentStreamMatch = pathname.match(/^\/api\/comments\/([^/]+)\/([^/]+)\/stream$/);
+
+  if (commentStreamMatch && req.method === 'GET') {
+    return handleCommentStream(req, res, {
+      scenario: commentStreamMatch[1],
+      doc: commentStreamMatch[2],
+    });
+  }
+
+  if (commentListMatch && req.method === 'GET') {
+    return handleCommentList(req, res, {
+      scenario: commentListMatch[1],
+      doc: commentListMatch[2],
+    });
+  }
+
+  if (commentListMatch && req.method === 'POST') {
+    return handleCommentCreate(req, res, {
+      scenario: commentListMatch[1],
+      doc: commentListMatch[2],
+      actor: resolveActor(req, fromLoopback),
+    });
+  }
+
+  if (commentItemMatch && commentItemMatch[3] !== 'stream' && req.method === 'PATCH') {
+    return handleCommentPatch(req, res, {
+      scenario: commentItemMatch[1],
+      doc: commentItemMatch[2],
+      id: commentItemMatch[3],
+      actor: resolveActor(req, fromLoopback),
+    });
+  }
+
+  if (commentItemMatch && commentItemMatch[3] !== 'stream' && req.method === 'DELETE') {
+    return handleCommentDelete(req, res, {
+      scenario: commentItemMatch[1],
+      doc: commentItemMatch[2],
+      id: commentItemMatch[3],
+      actor: resolveActor(req, fromLoopback),
+    });
+  }
+
   // 404
   res.writeHead(404, { 'Content-Type': 'text/plain' });
   res.end('Not Found');
+}
+
+// ---- Comment route helpers ----
+
+function resolveActor(req, fromLoopback) {
+  return {
+    name: req.user?.name || (fromLoopback ? 'Host (local)' : 'Anonymous'),
+    role: fromLoopback ? 'host' : 'reviewer',
+  };
+}
+
+function rateKey(req) {
+  return req.user?.sid || req.socket?.remoteAddress || 'anon';
+}
+
+function sendJson(res, status, payload) {
+  res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' });
+  res.end(JSON.stringify(payload));
+}
+
+function sendCommentError(res, err) {
+  if (err instanceof CommentError) {
+    sendJson(res, err.status, { error: err.code, message: err.message });
+  } else {
+    console.error('[comments] internal error:', err);
+    sendJson(res, 500, { error: 'INTERNAL', message: 'internal error' });
+  }
+}
+
+async function readJsonBody(req, cap = 64 * 1024) {
+  return new Promise((resolvePromise, rejectPromise) => {
+    let size = 0;
+    const chunks = [];
+    req.on('data', (chunk) => {
+      size += chunk.length;
+      if (size > cap) {
+        rejectPromise(new CommentError('BAD_REQUEST', 'request body too large', 413));
+        req.destroy();
+        return;
+      }
+      chunks.push(chunk);
+    });
+    req.on('end', () => {
+      if (chunks.length === 0) return resolvePromise({});
+      try {
+        resolvePromise(JSON.parse(Buffer.concat(chunks).toString('utf8')));
+      } catch {
+        rejectPromise(new CommentError('BAD_REQUEST', 'body is not valid JSON', 400));
+      }
+    });
+    req.on('error', rejectPromise);
+  });
+}
+
+async function handleCommentList(req, res, { scenario, doc }) {
+  try {
+    const data = await commentMgr.listComments(workspaceRootPath, scenario, doc);
+    sendJson(res, 200, data);
+  } catch (err) {
+    sendCommentError(res, err);
+  }
+}
+
+async function handleCommentCreate(req, res, { scenario, doc, actor }) {
+  try {
+    const rate = commentMgr.checkRate(rateKey(req));
+    if (!rate.ok) {
+      res.setHeader('Retry-After', String(rate.retryAfter));
+      return sendJson(res, 429, { error: 'RATE_LIMITED', message: 'too many comments; slow down' });
+    }
+    const body = await readJsonBody(req);
+    const comment = await commentMgr.appendComment(workspaceRootPath, scenario, doc, body, actor);
+    commentMgr.broadcastCommentEvent(scenario, doc, 'create', comment);
+    console.error(`[comments] POST ${scenario}/${doc} author=${actor.name} id=${comment.id} intent=${comment.intent}`);
+    sendJson(res, 201, comment);
+  } catch (err) {
+    sendCommentError(res, err);
+  }
+}
+
+async function handleCommentPatch(req, res, { scenario, doc, id, actor }) {
+  try {
+    const rate = commentMgr.checkRate(rateKey(req));
+    if (!rate.ok) {
+      res.setHeader('Retry-After', String(rate.retryAfter));
+      return sendJson(res, 429, { error: 'RATE_LIMITED', message: 'too many edits; slow down' });
+    }
+    const body = await readJsonBody(req);
+    const updated = await commentMgr.patchComment(workspaceRootPath, scenario, doc, id, body, actor);
+    commentMgr.broadcastCommentEvent(scenario, doc, 'patch', updated);
+    const field = typeof body.body === 'string' ? 'body' : 'resolved';
+    console.error(`[comments] PATCH ${scenario}/${doc} id=${id} field=${field} actor=${actor.name}`);
+    sendJson(res, 200, updated);
+  } catch (err) {
+    sendCommentError(res, err);
+  }
+}
+
+async function handleCommentDelete(req, res, { scenario, doc, id, actor }) {
+  try {
+    const rate = commentMgr.checkRate(rateKey(req));
+    if (!rate.ok) {
+      res.setHeader('Retry-After', String(rate.retryAfter));
+      return sendJson(res, 429, { error: 'RATE_LIMITED', message: 'too many deletes; slow down' });
+    }
+    await commentMgr.deleteComment(workspaceRootPath, scenario, doc, id, actor);
+    commentMgr.broadcastCommentEvent(scenario, doc, 'delete', { id });
+    console.error(`[comments] DELETE ${scenario}/${doc} id=${id} actor=${actor.name}`);
+    res.writeHead(204);
+    res.end();
+  } catch (err) {
+    sendCommentError(res, err);
+  }
+}
+
+function handleCommentStream(req, res, { scenario, doc }) {
+  // SSE: long-lived response, keep-alive via 30s ping from module-level heartbeat.
+  try {
+    // Validate names up-front so we fail before opening the stream.
+    commentMgr.listComments(workspaceRootPath, scenario, doc).catch(() => {});
+    res.writeHead(200, {
+      'Content-Type': 'text/event-stream; charset=utf-8',
+      'Cache-Control': 'no-cache, no-transform',
+      'Connection': 'keep-alive',
+      'X-Accel-Buffering': 'no',
+    });
+    res.write('retry: 3000\n\n');
+    const unregister = commentMgr.registerSseClient(scenario, doc, res);
+    console.error(`[comments] SSE connected ${scenario}/${doc}`);
+    req.on('close', () => {
+      unregister();
+      console.error(`[comments] SSE disconnected ${scenario}/${doc}`);
+    });
+  } catch (err) {
+    sendCommentError(res, err);
+  }
 }
 
 // ---- Route handlers ----

@@ -2982,7 +2982,7 @@ var require_compile = __commonJS({
       const schOrFunc = root.refs[ref];
       if (schOrFunc)
         return schOrFunc;
-      let _sch = resolve2.call(this, root, ref);
+      let _sch = resolve3.call(this, root, ref);
       if (_sch === void 0) {
         const schema = (_a2 = root.localRefs) === null || _a2 === void 0 ? void 0 : _a2[ref];
         const { schemaId } = this.opts;
@@ -3009,7 +3009,7 @@ var require_compile = __commonJS({
     function sameSchemaEnv(s1, s2) {
       return s1.schema === s2.schema && s1.root === s2.root && s1.baseId === s2.baseId;
     }
-    function resolve2(root, ref) {
+    function resolve3(root, ref) {
       let sch;
       while (typeof (sch = this.refs[ref]) == "string")
         ref = sch;
@@ -3584,7 +3584,7 @@ var require_fast_uri = __commonJS({
       }
       return uri;
     }
-    function resolve2(baseURI, relativeURI, options) {
+    function resolve3(baseURI, relativeURI, options) {
       const schemelessOptions = options ? Object.assign({ scheme: "null" }, options) : { scheme: "null" };
       const resolved = resolveComponent(parse3(baseURI, schemelessOptions), parse3(relativeURI, schemelessOptions), schemelessOptions, true);
       schemelessOptions.skipEscape = true;
@@ -3811,7 +3811,7 @@ var require_fast_uri = __commonJS({
     var fastUri = {
       SCHEMES,
       normalize,
-      resolve: resolve2,
+      resolve: resolve3,
       resolveComponent,
       equal,
       serialize,
@@ -7941,6 +7941,363 @@ var init_auth = __esm({
   }
 });
 
+// src/comment-manager.js
+import { appendFile, mkdir as mkdir2, readFile as readFile2 } from "node:fs/promises";
+import { join as join2, resolve, sep as sep2 } from "node:path";
+import { randomBytes as randomBytes2 } from "node:crypto";
+function assertName(value, label) {
+  if (typeof value !== "string" || !NAME_RE.test(value) || value.length > NAME_MAX) {
+    throw new CommentError("BAD_REQUEST", `invalid ${label}`, 400);
+  }
+}
+function commentFilePath(workspaceRoot, scenario, doc) {
+  assertName(scenario, "scenario");
+  assertName(doc, "doc");
+  const plansRoot = resolve(workspaceRoot, "plans");
+  const file2 = resolve(plansRoot, scenario, ".comments", `${doc}.jsonl`);
+  if (!file2.startsWith(plansRoot + sep2)) {
+    throw new CommentError("BAD_REQUEST", "path traversal rejected", 400);
+  }
+  return file2;
+}
+function validateAnchor(a) {
+  if (a == null) return null;
+  if (typeof a !== "object" || Array.isArray(a)) {
+    throw new CommentError("BAD_REQUEST", "anchor must be an object or null", 400);
+  }
+  const out = {};
+  if (a.sectionId != null) {
+    if (typeof a.sectionId !== "string" || !/^sec-[a-f0-9]{16}(-[0-9]+)?$/.test(a.sectionId)) {
+      throw new CommentError("BAD_REQUEST", "anchor.sectionId must be sec-<16hex>", 400);
+    }
+    out.sectionId = a.sectionId;
+  }
+  if (a.exact != null) {
+    if (typeof a.exact !== "string" || a.exact.length === 0 || a.exact.length > EXACT_MAX) {
+      throw new CommentError("BAD_REQUEST", `anchor.exact must be 1..${EXACT_MAX} chars`, 400);
+    }
+    out.exact = a.exact;
+  }
+  if (a.prefix != null) {
+    if (typeof a.prefix !== "string" || a.prefix.length > AFFIX_MAX) throw new CommentError("BAD_REQUEST", "anchor.prefix too long", 400);
+    out.prefix = a.prefix;
+  }
+  if (a.suffix != null) {
+    if (typeof a.suffix !== "string" || a.suffix.length > AFFIX_MAX) throw new CommentError("BAD_REQUEST", "anchor.suffix too long", 400);
+    out.suffix = a.suffix;
+  }
+  return out;
+}
+function validateBody(body) {
+  if (typeof body !== "string" || body.length < BODY_MIN || body.length > BODY_MAX) {
+    throw new CommentError("BAD_REQUEST", `body must be ${BODY_MIN}..${BODY_MAX} chars`, 400);
+  }
+  return body;
+}
+function validateIntent(intent, role) {
+  if (intent == null || intent === "comment") return "comment";
+  if (intent === "revise") {
+    if (role !== "host") {
+      throw new CommentError("FORBIDDEN", "revise intent requires host role", 403);
+    }
+    return "revise";
+  }
+  throw new CommentError("BAD_REQUEST", 'intent must be "comment" or "revise"', 400);
+}
+async function readEvents(file2) {
+  try {
+    const text = await readFile2(file2, "utf8");
+    const events = [];
+    for (const line of text.split("\n")) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+      try {
+        events.push(JSON.parse(trimmed));
+      } catch {
+      }
+    }
+    return events;
+  } catch (err) {
+    if (err.code === "ENOENT") return [];
+    throw err;
+  }
+}
+async function appendEvent(file2, event) {
+  await mkdir2(join2(file2, ".."), { recursive: true });
+  await appendFile(file2, JSON.stringify(event) + "\n", "utf8");
+}
+function collapse(events) {
+  const byId = /* @__PURE__ */ new Map();
+  for (const ev of events) {
+    if (!ev || typeof ev !== "object" || !ev.id) continue;
+    let c = byId.get(ev.id);
+    if (!c) {
+      if (ev.op !== "create") continue;
+      c = {
+        id: ev.id,
+        createdAt: ev.createdAt,
+        author: ev.author,
+        anchor: ev.anchor || null,
+        body: ev.body,
+        threadId: ev.threadId || ev.id,
+        replyTo: ev.replyTo || null,
+        intent: ev.intent || "comment",
+        resolved: false,
+        resolvedBy: null,
+        resolvedAt: null,
+        deleted: false,
+        deletedBy: null,
+        editedAt: null,
+        reviseStatus: ev.intent === "revise" ? "pending" : null,
+        reviseProposalRef: null
+      };
+      byId.set(ev.id, c);
+      continue;
+    }
+    if (ev.op === "edit" && typeof ev.body === "string") {
+      c.body = ev.body;
+      c.editedAt = ev.at || (/* @__PURE__ */ new Date()).toISOString();
+    } else if (ev.op === "resolve") {
+      c.resolved = !!ev.resolved;
+      c.resolvedBy = ev.by || null;
+      c.resolvedAt = ev.at || null;
+    } else if (ev.op === "delete") {
+      c.deleted = true;
+      c.deletedBy = ev.by || null;
+      c.body = "[deleted]";
+    } else if (ev.op === "revise") {
+      if (typeof ev.reviseStatus === "string") c.reviseStatus = ev.reviseStatus;
+      if (ev.proposalRef != null) c.reviseProposalRef = ev.proposalRef;
+    }
+  }
+  return Array.from(byId.values());
+}
+function threadTree(comments) {
+  const roots = [];
+  const byId = /* @__PURE__ */ new Map();
+  for (const c of comments) byId.set(c.id, c);
+  for (const c of comments) {
+    if (!c.replyTo) {
+      c.replies = [];
+      roots.push(c);
+    }
+  }
+  for (const c of comments) {
+    if (c.replyTo) {
+      const parent = byId.get(c.threadId) || byId.get(c.replyTo);
+      if (parent) {
+        parent.replies = parent.replies || [];
+        parent.replies.push(c);
+      }
+    }
+  }
+  roots.sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)));
+  for (const r of roots) r.replies.sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)));
+  return roots;
+}
+function genId() {
+  return "cmt_" + randomBytes2(3).toString("hex");
+}
+async function listComments(workspaceRoot, scenario, doc) {
+  const file2 = commentFilePath(workspaceRoot, scenario, doc);
+  const events = await readEvents(file2);
+  const flat = collapse(events);
+  const roots = threadTree(flat);
+  const total = flat.length;
+  const resolved = flat.filter((c) => c.resolved).length;
+  const orphaned = flat.filter((c) => c.anchor && c.anchor.orphaned).length;
+  return { comments: roots, meta: { total, resolved, orphaned } };
+}
+async function appendComment(workspaceRoot, scenario, doc, payload, actor) {
+  if (!actor || !actor.name) throw new CommentError("FORBIDDEN", "actor required", 403);
+  const body = validateBody(payload.body);
+  const anchor = validateAnchor(payload.anchor);
+  const intent = validateIntent(payload.intent, actor.role);
+  let threadId = null;
+  let replyTo = null;
+  if (payload.replyTo != null) {
+    if (typeof payload.replyTo !== "string" || !ID_RE.test(payload.replyTo)) {
+      throw new CommentError("BAD_REQUEST", "replyTo must be cmt_<6hex>", 400);
+    }
+    const file3 = commentFilePath(workspaceRoot, scenario, doc);
+    const existing = collapse(await readEvents(file3));
+    const parent = existing.find((c) => c.id === payload.replyTo);
+    if (!parent) throw new CommentError("NOT_FOUND", "parent comment not found", 404);
+    if (parent.deleted) throw new CommentError("BAD_REQUEST", "cannot reply to deleted comment", 400);
+    replyTo = parent.id;
+    threadId = parent.threadId;
+  }
+  const id = genId();
+  const createdAt = (/* @__PURE__ */ new Date()).toISOString();
+  const event = {
+    op: "create",
+    id,
+    createdAt,
+    author: actor.name,
+    anchor,
+    body,
+    threadId: threadId || id,
+    replyTo,
+    intent
+  };
+  const file2 = commentFilePath(workspaceRoot, scenario, doc);
+  await appendEvent(file2, event);
+  return {
+    id,
+    createdAt,
+    author: actor.name,
+    anchor,
+    body,
+    threadId: event.threadId,
+    replyTo,
+    intent,
+    resolved: false,
+    resolvedBy: null,
+    resolvedAt: null,
+    deleted: false,
+    deletedBy: null,
+    editedAt: null,
+    reviseStatus: intent === "revise" ? "pending" : null,
+    reviseProposalRef: null,
+    replies: []
+  };
+}
+async function patchComment(workspaceRoot, scenario, doc, id, patch, actor) {
+  if (!actor || !actor.name) throw new CommentError("FORBIDDEN", "actor required", 403);
+  if (!ID_RE.test(id)) throw new CommentError("BAD_REQUEST", "invalid id", 400);
+  const file2 = commentFilePath(workspaceRoot, scenario, doc);
+  const events = await readEvents(file2);
+  const existing = collapse(events).find((c) => c.id === id);
+  if (!existing) throw new CommentError("NOT_FOUND", "comment not found", 404);
+  if (existing.deleted) throw new CommentError("BAD_REQUEST", "cannot patch deleted comment", 400);
+  const now = (/* @__PURE__ */ new Date()).toISOString();
+  if (typeof patch.body === "string") {
+    if (existing.author !== actor.name && actor.role !== "host") {
+      throw new CommentError("FORBIDDEN", "body edit is author-only", 403);
+    }
+    if (Date.now() - Date.parse(existing.createdAt) > EDIT_WINDOW_MS) {
+      throw new CommentError("FORBIDDEN", "edit window expired", 403);
+    }
+    const body = validateBody(patch.body);
+    await appendEvent(file2, { op: "edit", id, body, at: now, by: actor.name });
+  } else if (typeof patch.resolved === "boolean") {
+    if (actor.role !== "host" && existing.author !== actor.name) {
+      throw new CommentError("FORBIDDEN", "resolve requires host or author", 403);
+    }
+    await appendEvent(file2, { op: "resolve", id, resolved: patch.resolved, at: now, by: actor.name });
+  } else {
+    throw new CommentError("BAD_REQUEST", "patch must set body or resolved", 400);
+  }
+  const refreshed = collapse(await readEvents(file2)).find((c) => c.id === id);
+  refreshed.replies = [];
+  return refreshed;
+}
+async function deleteComment(workspaceRoot, scenario, doc, id, actor) {
+  if (!actor || !actor.name) throw new CommentError("FORBIDDEN", "actor required", 403);
+  if (!ID_RE.test(id)) throw new CommentError("BAD_REQUEST", "invalid id", 400);
+  const file2 = commentFilePath(workspaceRoot, scenario, doc);
+  const events = await readEvents(file2);
+  const existing = collapse(events).find((c) => c.id === id);
+  if (!existing) throw new CommentError("NOT_FOUND", "comment not found", 404);
+  if (existing.deleted) return;
+  if (existing.author !== actor.name && actor.role !== "host") {
+    throw new CommentError("FORBIDDEN", "delete requires author or host", 403);
+  }
+  await appendEvent(file2, { op: "delete", id, at: (/* @__PURE__ */ new Date()).toISOString(), by: actor.name });
+}
+function checkRate2(key) {
+  const now = Date.now();
+  let b = buckets.get(key);
+  if (!b) {
+    b = { tokens: BUCKET_CAPACITY, lastRefillAt: now };
+    buckets.set(key, b);
+  }
+  const elapsed = now - b.lastRefillAt;
+  if (elapsed > 0) {
+    const refill = elapsed / BUCKET_WINDOW_MS * BUCKET_CAPACITY;
+    b.tokens = Math.min(BUCKET_CAPACITY, b.tokens + refill);
+    b.lastRefillAt = now;
+  }
+  if (b.tokens < 1) {
+    const shortfall = 1 - b.tokens;
+    const retryAfter = Math.ceil(shortfall / BUCKET_CAPACITY * (BUCKET_WINDOW_MS / 1e3));
+    return { ok: false, retryAfter };
+  }
+  b.tokens -= 1;
+  return { ok: true, retryAfter: 0 };
+}
+function sseKey(scenario, doc) {
+  return `${scenario}::${doc}`;
+}
+function registerSseClient(scenario, doc, res) {
+  const key = sseKey(scenario, doc);
+  let set2 = sseClients.get(key);
+  if (!set2) {
+    set2 = /* @__PURE__ */ new Set();
+    sseClients.set(key, set2);
+  }
+  set2.add(res);
+  return () => {
+    const s = sseClients.get(key);
+    if (!s) return;
+    s.delete(res);
+    if (s.size === 0) sseClients.delete(key);
+  };
+}
+function broadcastCommentEvent(scenario, doc, op, comment) {
+  const key = sseKey(scenario, doc);
+  const set2 = sseClients.get(key);
+  if (!set2 || set2.size === 0) return;
+  const payload = `event: comment
+data: ${JSON.stringify({ op, comment })}
+
+`;
+  for (const res of set2) {
+    try {
+      res.write(payload);
+    } catch {
+    }
+  }
+}
+function sseHeartbeat() {
+  for (const set2 of sseClients.values()) {
+    for (const res of set2) {
+      try {
+        res.write("event: ping\ndata: {}\n\n");
+      } catch {
+      }
+    }
+  }
+}
+var NAME_RE, NAME_MAX, ID_RE, BODY_MIN, BODY_MAX, EXACT_MAX, AFFIX_MAX, EDIT_WINDOW_MS, CommentError, BUCKET_CAPACITY, BUCKET_WINDOW_MS, buckets, sseClients;
+var init_comment_manager = __esm({
+  "src/comment-manager.js"() {
+    NAME_RE = /^[a-zA-Z0-9_-]+$/;
+    NAME_MAX = 80;
+    ID_RE = /^cmt_[a-f0-9]{6}$/;
+    BODY_MIN = 1;
+    BODY_MAX = 4e3;
+    EXACT_MAX = 2e3;
+    AFFIX_MAX = 64;
+    EDIT_WINDOW_MS = 10 * 60 * 1e3;
+    CommentError = class extends Error {
+      constructor(code, message, status) {
+        super(message);
+        this.code = code;
+        this.status = status || 400;
+      }
+    };
+    BUCKET_CAPACITY = 5;
+    BUCKET_WINDOW_MS = 10 * 1e3;
+    buckets = /* @__PURE__ */ new Map();
+    sseClients = /* @__PURE__ */ new Map();
+    if (!globalThis.__PH_SSE_HEARTBEAT_STARTED__) {
+      globalThis.__PH_SSE_HEARTBEAT_STARTED__ = true;
+      setInterval(sseHeartbeat, 30 * 1e3).unref();
+    }
+  }
+});
+
 // src/web-server.js
 var web_server_exports = {};
 __export(web_server_exports, {
@@ -7953,14 +8310,14 @@ __export(web_server_exports, {
   stopDashboard: () => stopDashboard
 });
 import { createServer } from "node:http";
-import { readdir as readdir2, readFile as readFile2, stat as stat2 } from "node:fs/promises";
-import { join as join2, basename as basename2, extname as extname2, resolve, sep as sep2 } from "node:path";
+import { readdir as readdir2, readFile as readFile3, stat as stat2 } from "node:fs/promises";
+import { join as join3, basename as basename2, extname as extname2, resolve as resolve2, sep as sep3 } from "node:path";
 import { URL as URL2 } from "node:url";
 async function startDashboard(workspaceRoot, port = 3847) {
   if (server) {
     return getDashboardUrl();
   }
-  workspaceRootPath = resolve(workspaceRoot);
+  workspaceRootPath = resolve2(workspaceRoot);
   return new Promise((resolvePromise, rejectPromise) => {
     server = createServer(async (req, res) => {
       try {
@@ -8064,8 +8421,169 @@ async function handleRequest(req, res) {
     }));
     return;
   }
+  const commentListMatch = pathname.match(/^\/api\/comments\/([^/]+)\/([^/]+)$/);
+  const commentItemMatch = pathname.match(/^\/api\/comments\/([^/]+)\/([^/]+)\/([^/]+)$/);
+  const commentStreamMatch = pathname.match(/^\/api\/comments\/([^/]+)\/([^/]+)\/stream$/);
+  if (commentStreamMatch && req.method === "GET") {
+    return handleCommentStream(req, res, {
+      scenario: commentStreamMatch[1],
+      doc: commentStreamMatch[2]
+    });
+  }
+  if (commentListMatch && req.method === "GET") {
+    return handleCommentList(req, res, {
+      scenario: commentListMatch[1],
+      doc: commentListMatch[2]
+    });
+  }
+  if (commentListMatch && req.method === "POST") {
+    return handleCommentCreate(req, res, {
+      scenario: commentListMatch[1],
+      doc: commentListMatch[2],
+      actor: resolveActor(req, fromLoopback)
+    });
+  }
+  if (commentItemMatch && commentItemMatch[3] !== "stream" && req.method === "PATCH") {
+    return handleCommentPatch(req, res, {
+      scenario: commentItemMatch[1],
+      doc: commentItemMatch[2],
+      id: commentItemMatch[3],
+      actor: resolveActor(req, fromLoopback)
+    });
+  }
+  if (commentItemMatch && commentItemMatch[3] !== "stream" && req.method === "DELETE") {
+    return handleCommentDelete(req, res, {
+      scenario: commentItemMatch[1],
+      doc: commentItemMatch[2],
+      id: commentItemMatch[3],
+      actor: resolveActor(req, fromLoopback)
+    });
+  }
   res.writeHead(404, { "Content-Type": "text/plain" });
   res.end("Not Found");
+}
+function resolveActor(req, fromLoopback) {
+  return {
+    name: req.user?.name || (fromLoopback ? "Host (local)" : "Anonymous"),
+    role: fromLoopback ? "host" : "reviewer"
+  };
+}
+function rateKey(req) {
+  return req.user?.sid || req.socket?.remoteAddress || "anon";
+}
+function sendJson(res, status, payload) {
+  res.writeHead(status, { "Content-Type": "application/json; charset=utf-8" });
+  res.end(JSON.stringify(payload));
+}
+function sendCommentError(res, err) {
+  if (err instanceof CommentError) {
+    sendJson(res, err.status, { error: err.code, message: err.message });
+  } else {
+    console.error("[comments] internal error:", err);
+    sendJson(res, 500, { error: "INTERNAL", message: "internal error" });
+  }
+}
+async function readJsonBody(req, cap = 64 * 1024) {
+  return new Promise((resolvePromise, rejectPromise) => {
+    let size = 0;
+    const chunks = [];
+    req.on("data", (chunk) => {
+      size += chunk.length;
+      if (size > cap) {
+        rejectPromise(new CommentError("BAD_REQUEST", "request body too large", 413));
+        req.destroy();
+        return;
+      }
+      chunks.push(chunk);
+    });
+    req.on("end", () => {
+      if (chunks.length === 0) return resolvePromise({});
+      try {
+        resolvePromise(JSON.parse(Buffer.concat(chunks).toString("utf8")));
+      } catch {
+        rejectPromise(new CommentError("BAD_REQUEST", "body is not valid JSON", 400));
+      }
+    });
+    req.on("error", rejectPromise);
+  });
+}
+async function handleCommentList(req, res, { scenario, doc }) {
+  try {
+    const data = await listComments(workspaceRootPath, scenario, doc);
+    sendJson(res, 200, data);
+  } catch (err) {
+    sendCommentError(res, err);
+  }
+}
+async function handleCommentCreate(req, res, { scenario, doc, actor }) {
+  try {
+    const rate = checkRate2(rateKey(req));
+    if (!rate.ok) {
+      res.setHeader("Retry-After", String(rate.retryAfter));
+      return sendJson(res, 429, { error: "RATE_LIMITED", message: "too many comments; slow down" });
+    }
+    const body = await readJsonBody(req);
+    const comment = await appendComment(workspaceRootPath, scenario, doc, body, actor);
+    broadcastCommentEvent(scenario, doc, "create", comment);
+    console.error(`[comments] POST ${scenario}/${doc} author=${actor.name} id=${comment.id} intent=${comment.intent}`);
+    sendJson(res, 201, comment);
+  } catch (err) {
+    sendCommentError(res, err);
+  }
+}
+async function handleCommentPatch(req, res, { scenario, doc, id, actor }) {
+  try {
+    const rate = checkRate2(rateKey(req));
+    if (!rate.ok) {
+      res.setHeader("Retry-After", String(rate.retryAfter));
+      return sendJson(res, 429, { error: "RATE_LIMITED", message: "too many edits; slow down" });
+    }
+    const body = await readJsonBody(req);
+    const updated = await patchComment(workspaceRootPath, scenario, doc, id, body, actor);
+    broadcastCommentEvent(scenario, doc, "patch", updated);
+    const field = typeof body.body === "string" ? "body" : "resolved";
+    console.error(`[comments] PATCH ${scenario}/${doc} id=${id} field=${field} actor=${actor.name}`);
+    sendJson(res, 200, updated);
+  } catch (err) {
+    sendCommentError(res, err);
+  }
+}
+async function handleCommentDelete(req, res, { scenario, doc, id, actor }) {
+  try {
+    const rate = checkRate2(rateKey(req));
+    if (!rate.ok) {
+      res.setHeader("Retry-After", String(rate.retryAfter));
+      return sendJson(res, 429, { error: "RATE_LIMITED", message: "too many deletes; slow down" });
+    }
+    await deleteComment(workspaceRootPath, scenario, doc, id, actor);
+    broadcastCommentEvent(scenario, doc, "delete", { id });
+    console.error(`[comments] DELETE ${scenario}/${doc} id=${id} actor=${actor.name}`);
+    res.writeHead(204);
+    res.end();
+  } catch (err) {
+    sendCommentError(res, err);
+  }
+}
+function handleCommentStream(req, res, { scenario, doc }) {
+  try {
+    listComments(workspaceRootPath, scenario, doc).catch(() => {
+    });
+    res.writeHead(200, {
+      "Content-Type": "text/event-stream; charset=utf-8",
+      "Cache-Control": "no-cache, no-transform",
+      "Connection": "keep-alive",
+      "X-Accel-Buffering": "no"
+    });
+    res.write("retry: 3000\n\n");
+    const unregister = registerSseClient(scenario, doc, res);
+    console.error(`[comments] SSE connected ${scenario}/${doc}`);
+    req.on("close", () => {
+      unregister();
+      console.error(`[comments] SSE disconnected ${scenario}/${doc}`);
+    });
+  } catch (err) {
+    sendCommentError(res, err);
+  }
 }
 function getWorkspaceName() {
   return workspaceRootPath ? basename2(workspaceRootPath) : "workspace";
@@ -8112,8 +8630,8 @@ async function serveHtmlFile(req, res, filePath, ctx = {}) {
     res.end('Missing "path" query parameter');
     return;
   }
-  const resolved = resolve(filePath);
-  if (resolved !== workspaceRootPath && !resolved.startsWith(workspaceRootPath + sep2)) {
+  const resolved = resolve2(filePath);
+  if (resolved !== workspaceRootPath && !resolved.startsWith(workspaceRootPath + sep3)) {
     res.writeHead(403, { "Content-Type": "text/plain" });
     res.end("Access denied: path is outside workspace root");
     return;
@@ -8125,7 +8643,7 @@ async function serveHtmlFile(req, res, filePath, ctx = {}) {
     return;
   }
   try {
-    const raw = await readFile2(resolved, "utf-8");
+    const raw = await readFile3(resolved, "utf-8");
     const withSectionIds = injectSectionIds(raw);
     const { scenarioName, docLabel } = parseScenarioFromPath(resolved);
     const fromLoopback = !!ctx.fromLoopback;
@@ -8256,7 +8774,7 @@ async function serveApiScenarioStatus(req, res, scenarioName) {
   }, null, 2));
 }
 async function scanScenarios() {
-  const plansDir = join2(workspaceRootPath, "plans");
+  const plansDir = join3(workspaceRootPath, "plans");
   try {
     await stat2(plansDir);
   } catch {
@@ -8267,7 +8785,7 @@ async function scanScenarios() {
   const flatFiles = [];
   for (const entry of entries) {
     if (entry.isDirectory()) {
-      const scenario = await scanScenarioDir(entry.name, join2(plansDir, entry.name));
+      const scenario = await scanScenarioDir(entry.name, join3(plansDir, entry.name));
       if (scenario) subdirScenarios.push(scenario);
     } else if (entry.isFile() && extname2(entry.name).toLowerCase() === ".html") {
       flatFiles.push(entry.name);
@@ -8300,7 +8818,7 @@ async function scanScenarioDir(name, dirPath) {
     for (const suffix of pt.suffixes) {
       const matching = entries.find((e) => e.toLowerCase().endsWith(suffix));
       if (matching) {
-        const filePath = join2(dirPath, matching);
+        const filePath = join3(dirPath, matching);
         const completion2 = await estimateFileCompletion(filePath);
         files.push({ type: pt.type, path: filePath, exists: true, completion: completion2 });
         found = true;
@@ -8308,7 +8826,7 @@ async function scanScenarioDir(name, dirPath) {
       }
     }
     if (!found) {
-      files.push({ type: pt.type, path: join2(dirPath, `${name}-${pt.type}.html`), exists: false, completion: 0 });
+      files.push({ type: pt.type, path: join3(dirPath, `${name}-${pt.type}.html`), exists: false, completion: 0 });
     }
   }
   const existingFiles = files.filter((f) => f.exists);
@@ -8368,7 +8886,7 @@ function groupFlatFilesIntoScenarios(fileNames, plansDir) {
       prefixMap.get(prefix).push({
         type: planTypeMap[matchedSuffix],
         fileName,
-        path: join2(plansDir, fileName),
+        path: join3(plansDir, fileName),
         exists: true
       });
     }
@@ -8381,7 +8899,7 @@ function groupFlatFilesIntoScenarios(fileNames, plansDir) {
       if (found) {
         return { type, path: found.path, exists: true, completion: 50 };
       }
-      return { type, path: join2(plansDir, `${prefix}-${type}.html`), exists: false, completion: 0 };
+      return { type, path: join3(plansDir, `${prefix}-${type}.html`), exists: false, completion: 0 };
     });
     const existingCount = files.filter((f) => f.exists).length;
     const completion = Math.round(existingCount / files.length * 100);
@@ -8398,7 +8916,7 @@ function groupFlatFilesIntoScenarios(fileNames, plansDir) {
 }
 async function estimateFileCompletion(filePath) {
   try {
-    const content = await readFile2(filePath, "utf-8");
+    const content = await readFile3(filePath, "utf-8");
     const checkboxes = (content.match(/type=["']checkbox["']/g) || []).length;
     if (checkboxes === 0) {
       return content.length > 1e3 ? 50 : 10;
@@ -8411,13 +8929,13 @@ async function estimateFileCompletion(filePath) {
 }
 async function readScenarioDescription(dirPath) {
   try {
-    let metaPath = join2(dirPath, "manifest.json");
+    let metaPath = join3(dirPath, "manifest.json");
     try {
       await stat2(metaPath);
     } catch {
-      metaPath = join2(dirPath, "metadata.json");
+      metaPath = join3(dirPath, "metadata.json");
     }
-    const content = await readFile2(metaPath, "utf-8");
+    const content = await readFile3(metaPath, "utf-8");
     const meta3 = JSON.parse(content);
     return meta3.description || null;
   } catch {
@@ -8568,6 +9086,8 @@ var init_web_server = __esm({
   "src/web-server.js"() {
     init_base();
     init_auth();
+    init_comment_manager();
+    init_comment_manager();
     server = null;
     serverPort = null;
     workspaceRootPath = null;
@@ -21368,7 +21888,7 @@ var Protocol = class {
           return;
         }
         const pollInterval = task2.pollInterval ?? this._options?.defaultTaskPollInterval ?? 1e3;
-        await new Promise((resolve2) => setTimeout(resolve2, pollInterval));
+        await new Promise((resolve3) => setTimeout(resolve3, pollInterval));
         options?.signal?.throwIfAborted();
       }
     } catch (error2) {
@@ -21385,7 +21905,7 @@ var Protocol = class {
    */
   request(request, resultSchema, options) {
     const { relatedRequestId, resumptionToken, onresumptiontoken, task, relatedTask } = options ?? {};
-    return new Promise((resolve2, reject) => {
+    return new Promise((resolve3, reject) => {
       const earlyReject = (error2) => {
         reject(error2);
       };
@@ -21463,7 +21983,7 @@ var Protocol = class {
           if (!parseResult.success) {
             reject(parseResult.error);
           } else {
-            resolve2(parseResult.data);
+            resolve3(parseResult.data);
           }
         } catch (error2) {
           reject(error2);
@@ -21724,12 +22244,12 @@ var Protocol = class {
       }
     } catch {
     }
-    return new Promise((resolve2, reject) => {
+    return new Promise((resolve3, reject) => {
       if (signal.aborted) {
         reject(new McpError(ErrorCode.InvalidRequest, "Request cancelled"));
         return;
       }
-      const timeoutId = setTimeout(resolve2, interval);
+      const timeoutId = setTimeout(resolve3, interval);
       signal.addEventListener("abort", () => {
         clearTimeout(timeoutId);
         reject(new McpError(ErrorCode.InvalidRequest, "Request cancelled"));
@@ -22599,12 +23119,12 @@ var StdioServerTransport = class {
     this.onclose?.();
   }
   send(message) {
-    return new Promise((resolve2) => {
+    return new Promise((resolve3) => {
       const json2 = serializeMessage(message);
       if (this._stdout.write(json2)) {
-        resolve2();
+        resolve3();
       } else {
-        this._stdout.once("drain", resolve2);
+        this._stdout.once("drain", resolve3);
       }
     });
   }
@@ -23324,14 +23844,14 @@ ${ctx.structure.csprojFiles.map((f) => `  ${f}`).join("\n")}` : ""
           tunnelProcess = proc;
           tunnelMode = args.mode;
           let output = "";
-          const urlPromise = new Promise((resolve2, reject) => {
+          const urlPromise = new Promise((resolve3, reject) => {
             const timeout = setTimeout(() => reject(new Error("Timed out waiting for devtunnel URL")), 3e4);
             const onData = (chunk) => {
               output += chunk.toString();
               const urlMatch = output.match(/https:\/\/[^\s]+devtunnels\.ms[^\s]*/);
               if (urlMatch) {
                 clearTimeout(timeout);
-                resolve2(urlMatch[0]);
+                resolve3(urlMatch[0]);
               }
             };
             proc.stdout.on("data", onData);
