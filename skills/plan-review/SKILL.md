@@ -269,7 +269,65 @@ Review Progress: design.html
 Progress: 3/10 sections reviewed (30%)
 ```
 
-### Step 5: Document Review Summary
+### Step 5: Reply to Open Comment Threads
+
+After the section-by-section review completes, drain the scenario's comment queues so reviewers get agent feedback on the threads they opened. Two surfaces to handle, in this order:
+
+#### 5a. Pending @-mentions
+
+Call the MCP tool:
+
+```
+plan_list_pending_mentions(workspaceRoot=<repo>, scenario=<scenario>)
+```
+
+The tool returns every live comment that names a persona via `@architect` / `@pm` / `@tester` / `@frontend` / `@backend` / `@writer` and hasn't received a reply from that persona yet. For each entry:
+
+1. Read the referenced doc and the anchored section (`anchor.sectionId` → `<h2|h3|h4 data-section-id="...">`) so the persona has concrete context.
+2. Draft the reply **in the persona's voice** — do not soften or hedge. Use the same review dimensions from Step 3a but phrased as a targeted response to the reviewer's question.
+3. Post the reply via:
+
+```
+plan_post_persona_reply(
+  workspaceRoot=<repo>,
+  scenario=<scenario>,
+  doc=<doc-slug>,
+  parentId=<id of the mention>,
+  persona=<architect|pm|tester|frontend|backend|writer>,
+  body=<reply text, 1..4000 chars>
+)
+```
+
+The tool refuses to post if the parent didn't actually mention that persona (a weak anti-spam guard). Treat that rejection as the user's signal that the mention was ambiguous — do not retry with a different persona silently.
+
+#### 5b. Open non-mention threads on reviewed sections
+
+For each section that closed with `NEEDS_CHANGES` or `BLOCKED`, fetch the open comments on that section:
+
+```
+GET /api/comments/<scenario>/<doc>          # returns the full tree
+```
+
+Filter to threads where:
+- `anchor.sectionId` matches the section just reviewed
+- The root comment is not `resolved` and not `deleted`
+- No reply from the relevant reviewer persona exists yet
+
+For each, post one reply per applicable role using `plan_post_persona_reply`, authored by whichever persona from §3a's reviewer set has the most relevant expertise. Skip threads that already contain a fully-resolved or agent-answered discussion.
+
+Keep bodies concise (under ~500 chars). Long-form rationale belongs in the section fix, not in comment threads.
+
+#### 5c. Report
+
+At the end, show the user a one-line tally:
+
+```
+Posted N persona replies (M @-mentions + K thread responses) across <doc>.
+```
+
+If nothing to post, state that explicitly and continue to Step 6.
+
+### Step 6: Document Review Summary
 
 After all sections are reviewed:
 
@@ -301,7 +359,7 @@ Update `manifest.json`:
 }
 ```
 
-### Step 6: Suggest Next Steps
+### Step 7: Suggest Next Steps
 
 ```
 Next steps:
