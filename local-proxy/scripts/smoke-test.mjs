@@ -229,6 +229,51 @@ async function main() {
       // so we test with a literal dot in the name.
       const tr = await fetch(base + '/api/comments/bad.name/design');
       expect(tr.status === 400, 'path traversal rejected (400)', `got ${tr.status}`);
+
+      // ---- XSS sweep: payloads round-trip as inert text (Phase 11) ----
+      process.stdout.write(`\n[api] XSS payload sweep\n`);
+      // Kept to three — the rate bucket is 5/10s per IP, and the round-trip
+      // test above already burned one token. Three payloads cover the
+      // classic vectors (inline event handler on an attr, literal script
+      // tag, SVG with onload); adding more triggers 429 without changing
+      // what the test proves.
+      const payloads = [
+        '<img src=x onerror=alert(1)>',
+        '<script>alert(1)</script>',
+        '<svg onload=alert(1)></svg>',
+      ];
+      const xssCreated = [];
+      for (const payload of payloads) {
+        const r = await fetch(base + listUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            anchor: { sectionId: 'sec-0000000000000001', exact: 'xss-sweep', prefix: '', suffix: '' },
+            body: payload,
+          }),
+        });
+        const j = await r.json().catch(() => null);
+        expect(r.status === 201, `XSS POST accepted (${payload.slice(0, 20)}...)`, `got ${r.status}`);
+        if (j?.id) {
+          expect(j.body === payload, `XSS body round-trips verbatim`, `got ${j.body}`);
+          xssCreated.push(j.id);
+        }
+      }
+      // Verify none of the payloads changed doc HTML: /view should NOT contain
+      // the raw script tag inline (comments are API-scoped, doc is static).
+      const viewAfter = await getText(`/view?path=${encodeURIComponent(join(sc.path, sc.files[0])).replace(/%5C/g, '/')}`);
+      expect(
+        !/<script>alert\(1\)<\/script>/.test(viewAfter.body),
+        'doc HTML unchanged by XSS-payload comments'
+      );
+      // Cleanup the sweep rows.
+      for (const id of xssCreated) {
+        await fetch(base + listUrl + '/' + id, { method: 'DELETE' });
+      }
+
+      // ---- Reanchor idempotence ----
+      // (no fixture that would migrate, but the endpoint must at least not
+      // crash on a doc with existing comments.)
     }
 
     // ---- 404 on missing routes ----

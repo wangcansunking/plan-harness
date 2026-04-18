@@ -1644,6 +1644,87 @@ export function injectSidebarPanels(html) {
 .ph-comment-mark.ph-mark-resolved { background: rgba(26,127,55,0.12); border-bottom-color: var(--green, #1a7f37); }
 .ph-comment-mark.ph-mark-revise { background: rgba(113,112,255,0.12); border-bottom-color: var(--purple, #7170ff); }
 @media print { .ph-select-cta, .ph-select-composer { display: none !important; } }
+
+/* Phase 7 — Orphan pinned group at top of Comments panel */
+.ph-orphan-group {
+  margin: 0 0.4rem 0.3rem; padding: 0.35rem 0.55rem;
+  border: 1px solid var(--yellow, #9a6700); border-radius: 6px;
+  background: var(--badge-yellow-bg, rgba(154,103,0,0.08));
+}
+.ph-orphan-group > summary {
+  cursor: pointer; font-size: 0.7rem; font-weight: 700;
+  color: var(--yellow, #9a6700); list-style: none;
+  text-transform: uppercase; letter-spacing: 0.06em;
+  display: flex; align-items: center; gap: 0.35rem;
+}
+.ph-orphan-group > summary::-webkit-details-marker { display: none; }
+.ph-orphan-group > summary::before { content: '⚠'; font-size: 0.85rem; }
+.ph-orphan-row { padding: 0.35rem 0; font-size: 0.74rem; border-top: 1px dashed var(--border); }
+.ph-orphan-row:first-of-type { border-top: 0; margin-top: 0.35rem; }
+.ph-orphan-row .ph-orphan-body { color: var(--text); font-weight: 510; margin-bottom: 0.1rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ph-orphan-row blockquote.ph-orphan-exact {
+  margin: 0.25rem 0; padding: 0.2rem 0.5rem; font-size: 0.68rem;
+  color: var(--muted); border-left: 2px solid var(--yellow, #9a6700);
+  background: var(--bg); overflow: hidden; text-overflow: ellipsis;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+}
+.ph-orphan-actions { display: flex; gap: 0.3rem; margin-top: 0.25rem; }
+.ph-orphan-actions button {
+  font: 600 0.65rem/1 inherit; padding: 0.2rem 0.5rem; border-radius: 3px;
+  border: 1px solid var(--border); background: var(--bg); color: var(--text); cursor: pointer;
+}
+.ph-orphan-actions button:hover { border-color: var(--accent); color: var(--accent); }
+
+/* Phase 9 — Proposal modal */
+.ph-proposal-backdrop {
+  position: fixed; inset: 0; z-index: 10100;
+  background: rgba(8,9,10,0.55);
+  display: flex; align-items: center; justify-content: center;
+  backdrop-filter: blur(4px);
+}
+.ph-proposal-modal {
+  width: min(780px, 92vw); max-height: 86vh; overflow: hidden;
+  display: flex; flex-direction: column;
+  background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+  box-shadow: 0 16px 48px rgba(0,0,0,0.35);
+  font: 510 0.82rem/1.4 'Inter Variable', Inter, system-ui, sans-serif;
+}
+.ph-proposal-head {
+  display: flex; justify-content: space-between; align-items: center; gap: 0.5rem;
+  padding: 0.9rem 1rem; border-bottom: 1px solid var(--border);
+}
+.ph-proposal-head h3 { margin: 0; font-size: 1rem; font-weight: 700; letter-spacing: -0.01em; color: var(--text); }
+.ph-proposal-head .ph-proposal-close {
+  background: transparent; border: 0; font: inherit; cursor: pointer; color: var(--muted);
+  width: 26px; height: 26px; border-radius: 4px; padding: 0;
+}
+.ph-proposal-head .ph-proposal-close:hover { background: var(--bg); color: var(--text); }
+.ph-proposal-body { padding: 0.9rem 1rem; overflow-y: auto; flex: 1; }
+.ph-proposal-body > p { margin: 0 0 0.6rem; color: var(--muted); font-size: 0.76rem; }
+.ph-proposal-body blockquote.ph-proposal-context {
+  margin: 0 0 0.7rem; padding: 0.4rem 0.7rem; font-size: 0.78rem;
+  color: var(--text); border-left: 3px solid var(--accent); background: var(--bg); border-radius: 3px;
+}
+.ph-proposal-body pre.ph-proposal-diff {
+  margin: 0; padding: 0.7rem 0.9rem;
+  background: var(--bg); color: var(--text); border: 1px solid var(--border);
+  border-radius: 4px; font: 0.75rem/1.45 'Berkeley Mono', ui-monospace, Menlo, Consolas, monospace;
+  white-space: pre-wrap; word-break: break-word; max-height: 40vh; overflow-y: auto;
+}
+.ph-proposal-foot {
+  display: flex; justify-content: space-between; align-items: center; gap: 0.5rem;
+  padding: 0.7rem 1rem; border-top: 1px solid var(--border);
+  background: var(--bg);
+}
+.ph-proposal-err { color: var(--red); font-size: 0.72rem; }
+.ph-proposal-foot button {
+  font: 600 0.78rem/1 inherit; padding: 0.45rem 0.9rem; border-radius: 4px; cursor: pointer;
+  border: 1px solid var(--border); background: var(--surface); color: var(--text);
+}
+.ph-proposal-foot button.ph-proposal-accept { background: var(--green); color: white; border-color: var(--green); }
+.ph-proposal-foot button.ph-proposal-reject { background: var(--red); color: white; border-color: var(--red); }
+.ph-proposal-foot button:disabled { opacity: 0.5; cursor: not-allowed; }
+@media print { .ph-proposal-backdrop, .ph-orphan-group { display: none !important; } }
 .ph-side-panel > summary {
   cursor: pointer; padding: 0.55rem 1rem;
   font: 700 0.68rem/1 'Inter Variable', Inter, system-ui, sans-serif;
@@ -1772,11 +1853,70 @@ export function injectSidebarPanels(html) {
     }
 
     // ---- Comments panel (simple list) ----
-    function renderCommentList(panel, items){
+    function renderCommentList(panel, items, orphans){
       var body = panel.querySelector('.ph-panel-body');
       body.innerHTML = '';
-      if (!items.length) { setVisibility(panel, false); return; }
+      var hasContent = items.length > 0 || (orphans && orphans.length > 0);
+      if (!hasContent) { setVisibility(panel, false); return; }
       setVisibility(panel, true);
+
+      // Phase 7 — pinned orphan group at the top of the Comments panel.
+      if (orphans && orphans.length > 0) {
+        var group = document.createElement('details');
+        group.className = 'ph-orphan-group';
+        group.open = true;
+        var sum = document.createElement('summary');
+        sum.textContent = 'Needs reattachment (' + orphans.length + ')';
+        group.appendChild(sum);
+        orphans.forEach(function(o){
+          var row = document.createElement('div');
+          row.className = 'ph-orphan-row';
+          var body2 = document.createElement('div');
+          body2.className = 'ph-orphan-body';
+          body2.textContent = truncate(o.body || '(empty)', 60);
+          var quote = document.createElement('blockquote');
+          quote.className = 'ph-orphan-exact';
+          quote.textContent = truncate(o.anchor.exact || '', 140);
+          var actions = document.createElement('div');
+          actions.className = 'ph-orphan-actions';
+          var meta2 = document.createElement('span');
+          meta2.style.cssText = 'flex:1;color:var(--muted);font-size:0.64rem;align-self:center;';
+          meta2.textContent = (o.author || '?') + ' · ' + (o.anchor.migratedFrom ? 'was ' + o.anchor.migratedFrom.slice(0,16) : 'no section');
+          var reattach = document.createElement('button');
+          reattach.type = 'button';
+          reattach.textContent = 'Reattach';
+          reattach.title = 'Select a new span in the doc to reattach this orphaned comment';
+          reattach.addEventListener('click', function(){
+            // For the MVP reattach mode: focus the user to select a new span,
+            // then reuse the selection-composer flow. We pre-seed a flag so
+            // the next POST carries the orphan's id as replyTo... but the
+            // true Phase 10 would be a proper /api/comments/.../reattach
+            // route. For now, surface an inline hint + scroll to the first
+            // doc section as a hint.
+            alert('Select a new span anywhere in the doc, then open the composer and reference this comment id: ' + o.id);
+          });
+          var archive = document.createElement('button');
+          archive.type = 'button';
+          archive.textContent = 'Archive';
+          archive.addEventListener('click', function(){
+            if (!confirm('Archive this orphaned comment? This soft-deletes it.')) return;
+            fetch('/api/comments/' + encodeURIComponent(meta.scenario) + '/' + encodeURIComponent(meta.doc) + '/' + encodeURIComponent(o.id), {
+              method: 'DELETE',
+              credentials: 'same-origin'
+            }).then(function(r){ if (r.ok) refreshAll(); });
+          });
+          actions.appendChild(meta2);
+          actions.appendChild(reattach);
+          actions.appendChild(archive);
+          row.appendChild(body2);
+          row.appendChild(quote);
+          row.appendChild(actions);
+          group.appendChild(row);
+        });
+        body.appendChild(group);
+      }
+
+      if (items.length === 0) return;
       var ul = document.createElement('ul');
       ul.className = 'ph-panel-list';
       items.forEach(function(it){
@@ -1784,16 +1924,29 @@ export function injectSidebarPanels(html) {
         var a = document.createElement('a');
         a.href = '#';
         a.className = 'ph-panel-item' + (it.done ? ' ph-done' : '');
+        if (it.reviseStatus === 'proposed') a.className += ' ph-proposed';
         var lbl = document.createElement('span');
         lbl.className = 'ph-item-label';
         lbl.textContent = it.label;
-        var meta = document.createElement('span');
-        meta.className = 'ph-item-meta';
-        meta.textContent = it.meta || '';
+        var metaSpan = document.createElement('span');
+        metaSpan.className = 'ph-item-meta';
+        metaSpan.textContent = it.meta || '';
         a.appendChild(lbl);
-        if (it.meta) a.appendChild(meta);
+        if (it.meta) a.appendChild(metaSpan);
+        // Inline "Proposal ready" chip + click → open modal
+        if (it.reviseStatus === 'proposed') {
+          var chip = document.createElement('span');
+          chip.className = 'ph-todo-chip ph-todo-chip-revise';
+          chip.textContent = 'Proposal ready';
+          chip.style.marginLeft = '0.3rem';
+          a.appendChild(chip);
+        }
         a.addEventListener('click', function(e){
           e.preventDefault();
+          if (it.reviseStatus === 'proposed' && (meta.role === 'host')) {
+            openProposalModal(it.id, it.label, it.anchor && it.anchor.exact);
+            return;
+          }
           scrollTo(it.target);
         });
         li.appendChild(a);
@@ -1801,6 +1954,80 @@ export function injectSidebarPanels(html) {
       });
       body.appendChild(ul);
     }
+
+    // ---- Phase 9 — Proposal review modal ----
+    function openProposalModal(commentId, title, exactText){
+      closeProposalModal();
+      var backdrop = document.createElement('div');
+      backdrop.className = 'ph-proposal-backdrop';
+      backdrop.innerHTML =
+        '<div class="ph-proposal-modal" role="dialog" aria-modal="true" aria-labelledby="ph-prop-title">' +
+          '<header class="ph-proposal-head">' +
+            '<h3 id="ph-prop-title">Proposal review</h3>' +
+            '<button type="button" class="ph-proposal-close" aria-label="Close">✕</button>' +
+          '</header>' +
+          '<div class="ph-proposal-body">' +
+            '<p>Applied via textual replacement on Accept. Anchor-drift guard refuses to apply if the target span has moved.</p>' +
+            (exactText ? '<blockquote class="ph-proposal-context"></blockquote>' : '') +
+            '<pre class="ph-proposal-diff">Loading…</pre>' +
+          '</div>' +
+          '<footer class="ph-proposal-foot">' +
+            '<span class="ph-proposal-err" aria-live="polite"></span>' +
+            '<span style="display:flex;gap:0.4rem;">' +
+              '<button type="button" class="ph-proposal-reject">Reject</button>' +
+              '<button type="button" class="ph-proposal-accept">Accept &amp; apply</button>' +
+            '</span>' +
+          '</footer>' +
+        '</div>';
+      document.body.appendChild(backdrop);
+
+      var diffPre = backdrop.querySelector('.ph-proposal-diff');
+      var errBox = backdrop.querySelector('.ph-proposal-err');
+      var acceptBtn = backdrop.querySelector('.ph-proposal-accept');
+      var rejectBtn = backdrop.querySelector('.ph-proposal-reject');
+      var closeBtn = backdrop.querySelector('.ph-proposal-close');
+      var ctx = backdrop.querySelector('.ph-proposal-context');
+      if (ctx && exactText) ctx.textContent = exactText;
+
+      fetch('/api/comments/' + encodeURIComponent(meta.scenario) + '/' + encodeURIComponent(meta.doc) + '/' + encodeURIComponent(commentId) + '/revise-proposal', { credentials: 'same-origin' })
+        .then(function(r){ if (!r.ok) throw new Error('proposal not found (' + r.status + ')'); return r.text(); })
+        .then(function(text){ diffPre.textContent = text; })
+        .catch(function(err){ diffPre.textContent = ''; errBox.textContent = String(err.message || err); acceptBtn.disabled = true; });
+
+      function act(action){
+        acceptBtn.disabled = true; rejectBtn.disabled = true;
+        errBox.textContent = '';
+        fetch('/api/comments/' + encodeURIComponent(meta.scenario) + '/' + encodeURIComponent(meta.doc) + '/' + encodeURIComponent(commentId) + '/revise-' + action, {
+          method: 'POST', credentials: 'same-origin'
+        }).then(function(r){
+          if (!r.ok) return r.json().then(function(j){ throw new Error((j && j.message) || ('HTTP ' + r.status)); });
+          closeProposalModal();
+          if (action === 'accept') {
+            // Doc has been rewritten on disk — reload so the new HTML lands
+            // (and the injected section-ids + marks reflect the change).
+            location.reload();
+          } else {
+            refreshAll();
+          }
+        }).catch(function(err){
+          errBox.textContent = String(err.message || err);
+          acceptBtn.disabled = false;
+          rejectBtn.disabled = false;
+        });
+      }
+
+      acceptBtn.addEventListener('click', function(){ act('accept'); });
+      rejectBtn.addEventListener('click', function(){ act('reject'); });
+      closeBtn.addEventListener('click', closeProposalModal);
+      backdrop.addEventListener('click', function(e){ if (e.target === backdrop) closeProposalModal(); });
+      document.addEventListener('keydown', escCloseProposal);
+    }
+    function closeProposalModal(){
+      var b = document.querySelector('.ph-proposal-backdrop');
+      if (b) b.remove();
+      document.removeEventListener('keydown', escCloseProposal);
+    }
+    function escCloseProposal(e){ if (e.key === 'Escape') closeProposalModal(); }
 
     // ---- TODOs ----
     // Build a stable {sectionId, exact} anchor from a TODO target element.
@@ -2397,18 +2624,29 @@ export function injectSidebarPanels(html) {
           (function walk(list){ list.forEach(function(c){ flatList.push(c); if (c.replies) walk(c.replies); }); })(comments);
           todoCommentIndex = indexCommentsByTodoAnchor(comments);
           renderTodoPanel();
-          setCount(commentPanel, comments.length);
-          var items = comments.map(function(c){
+          // Split: orphaned comments get the pinned group at the top; the
+          // rest render in the flat list. Deleted comments stay out entirely.
+          var orphans = flatList.filter(function(c){
+            return c.anchor && c.anchor.orphaned && !c.deleted;
+          });
+          var liveRoots = comments.filter(function(c){
+            return !c.deleted && !(c.anchor && c.anchor.orphaned);
+          });
+          setCount(commentPanel, liveRoots.length + orphans.length);
+          var items = liveRoots.map(function(c){
             var anchor = c.anchor || {};
             var target = anchor.sectionId ? document.querySelector('[data-section-id="' + CSS.escape(anchor.sectionId) + '"]') : null;
             return {
+              id: c.id,
               label: truncate(c.body || '(empty)', 70),
               meta: (c.author || '?') + ' · ' + truncate(anchor.exact || '', 40),
               target: target,
-              done: !!c.resolved || !!c.todoResolves
+              anchor: anchor,
+              done: !!c.resolved || !!c.todoResolves,
+              reviseStatus: c.reviseStatus || null
             };
           });
-          renderCommentList(commentPanel, items);
+          renderCommentList(commentPanel, items, orphans);
           applyMarks(flatList);
         })
         .catch(function(){
