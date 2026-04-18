@@ -224,12 +224,12 @@ Tech Stack:   React, TypeScript, .NET/C#, Azure Functions
 Patterns:     MSBuild traversal, Jest testing
 
 --- Next Steps ---
-  /plan-analyze        Collect performance data
-  /plan-design         Design optimization strategy
+  /plan-gen analysis        Collect performance data
+  /plan-gen design         Design optimization strategy
   /plan-full           Run full planning workflow (4 documents)
 ```
 
-The "Next Steps" section only lists skills whose documents are enabled by the selected generation rules context. For example, with `performance-audit` selected, don't suggest `/plan-state-machine` or `/plan-test-cases`.
+The "Next Steps" section only lists skills whose documents are enabled by the selected generation rules context. For example, with `performance-audit` selected, don't suggest `/plan-gen state-machine` or `/plan-gen test-cases`.
 
 ## How Skills Load Contexts
 
@@ -265,11 +265,11 @@ Three-tier loading (see `docs/context-design.md`):
 | Skill | Depends On |
 |-------|-----------|
 | `/plan-context` | **Upstream** — creates the context `.md` files |
-| `/plan-analyze` | `manifest.json` (reads contexts, enriches with discovered patterns) |
-| `/plan-design` | `manifest.json` |
-| `/plan-test-plan` | `manifest.json` + `design.html` |
-| `/plan-state-machine` | `manifest.json` + `design.html` |
-| `/plan-test-cases` | `manifest.json` + `design.html` + `test-plan.html` |
-| `/plan-implementation` | `manifest.json` + `design.html` |
+| `/plan-gen analysis` | `manifest.json` (reads contexts, enriches with discovered patterns) |
+| `/plan-gen design` | `manifest.json` |
+| `/plan-gen test-plan` | `manifest.json` + `design.html` |
+| `/plan-gen state-machine` | `manifest.json` + `design.html` |
+| `/plan-gen test-cases` | `manifest.json` + `design.html` + `test-plan.html` |
+| `/plan-gen implementation` | `manifest.json` + `design.html` |
 | `/plan-review` | Any generated plan document |
 | `/plan-full` | Calls `/plan-init` as its first step |

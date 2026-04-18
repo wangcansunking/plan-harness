@@ -1,7 +1,3 @@
----
-name: plan-state-machine
-description: Generate state machine documentation with entity diagrams — dispatches architect and writer agent team
----
 
 # plan-state-machine
 

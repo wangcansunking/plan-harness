@@ -253,7 +253,7 @@ Review report: {scenario-path}/review-report.html
 
 Next steps:
   - Fix 1 critical issue in test-plan.html: {description}
-  - Generate missing test-cases.html: run /plan-test-cases
+  - Generate missing test-cases.html: run /plan-gen test-cases
   - After fixes: run /plan-review test-plan.html to re-review
 ```
 

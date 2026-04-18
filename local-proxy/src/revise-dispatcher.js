@@ -80,6 +80,99 @@ async function appendEvent(file, event) {
   await appendFile(file, JSON.stringify(event) + '\n', 'utf8');
 }
 
+// ---- HTML → rendered-text normalization ----------------------------------
+
+// Entity table covering the common named + numeric entities that appear in
+// plan docs. Keep this small — plan HTML is writer-produced, not arbitrary.
+const ENT_NAMED = {
+  mdash: '\u2014', ndash: '\u2013', hellip: '\u2026',
+  lsquo: '\u2018', rsquo: '\u2019', ldquo: '\u201C', rdquo: '\u201D',
+  nbsp: '\u00A0', amp: '&', lt: '<', gt: '>', quot: '"', apos: "'",
+  times: '\u00D7', check: '\u2713', cross: '\u2717',
+  laquo: '\u00AB', raquo: '\u00BB',
+  copy: '\u00A9', reg: '\u00AE', trade: '\u2122',
+};
+
+function decodeEntity(ent) {
+  // ent = "&mdash;" or "&#8212;" or "&#x2014;"
+  const inner = ent.slice(1, -1);
+  if (inner.startsWith('#')) {
+    const code = inner.startsWith('#x') ? parseInt(inner.slice(2), 16) : parseInt(inner.slice(1), 10);
+    return Number.isFinite(code) ? String.fromCodePoint(code) : ent;
+  }
+  return ENT_NAMED[inner] ?? ent;
+}
+
+function normalizeSpaces(s) {
+  return (s || '').replace(/\s+/g, ' ').trim();
+}
+
+/**
+ * Walk the HTML and produce a rendered-text view plus a position map.
+ * The map for each rendered-text char i carries:
+ *   map[i]         = index into the original html where this char's source begins
+ *   charRawLen[i]  = how many raw-html bytes produced this char (1 for a plain
+ *                    char, N for an entity like `&mdash;` → one `—`)
+ *
+ * Whitespace is collapsed to single spaces so callers can match against
+ * user-selected text that went through the browser's Selection API.
+ */
+function renderText(html) {
+  const text = [];
+  const map = [];
+  const charRawLen = [];
+  let lastWasSpace = true; // collapse leading whitespace
+  let i = 0;
+  while (i < html.length) {
+    const c = html[i];
+    if (c === '<') {
+      const end = html.indexOf('>', i);
+      if (end === -1) { i++; continue; }
+      i = end + 1; // skip whole tag
+      continue;
+    }
+    if (c === '&') {
+      const semi = html.indexOf(';', i);
+      if (semi !== -1 && semi - i <= 10) {
+        const ent = html.slice(i, semi + 1);
+        const decoded = decodeEntity(ent);
+        if (decoded !== ent) {
+          // distribute the raw span across decoded chars (rare: most entities → 1 char)
+          const raw = ent.length;
+          for (let j = 0; j < decoded.length; j++) {
+            const ch = decoded[j];
+            if (/\s/.test(ch)) {
+              if (!lastWasSpace) { text.push(' '); map.push(i); charRawLen.push(j === decoded.length - 1 ? raw : 0); lastWasSpace = true; }
+            } else {
+              text.push(ch);
+              map.push(i);
+              charRawLen.push(j === decoded.length - 1 ? raw : 0);
+              lastWasSpace = false;
+            }
+          }
+          i += raw;
+          continue;
+        }
+      }
+      // bare & — emit as literal
+      text.push('&'); map.push(i); charRawLen.push(1); lastWasSpace = false; i++;
+      continue;
+    }
+    if (/\s/.test(c)) {
+      if (!lastWasSpace) { text.push(' '); map.push(i); charRawLen.push(1); lastWasSpace = true; }
+      i++;
+      continue;
+    }
+    text.push(c); map.push(i); charRawLen.push(1); lastWasSpace = false;
+    i++;
+  }
+  // trim trailing whitespace from the rendered view
+  while (text.length && text[text.length - 1] === ' ') {
+    text.pop(); map.pop(); charRawLen.pop();
+  }
+  return { text: text.join(''), map, charRawLen };
+}
+
 // ---- Host-role guard ------------------------------------------------------
 
 function requireHost(actor) {
@@ -148,15 +241,33 @@ export async function acceptProposal(workspaceRoot, scenario, doc, commentId, an
 
   const htmlPath = docHtmlPath(workspaceRoot, scenario, doc);
   const html = await readFile(htmlPath, 'utf8');
-  if (anchor && anchor.exact && !html.includes(anchor.exact)) {
-    // Anchor drifted — refuse to apply.
-    throw new CommentError('ANCHOR_DRIFT', 'anchor no longer matches; reattach manually', 409);
+
+  // Anchors are captured by the browser's Selection API against rendered
+  // text (em-dash, no tags), but the on-disk HTML carries entity-encoded
+  // characters (&mdash;) and inline wrappers (<kbd>Ctrl</kbd>). A naive
+  // string includes() misses every such case. Normalize the HTML into a
+  // rendered-text view and keep a position map back into the raw source,
+  // so we can locate AND replace in the right span.
+  const rendered = renderText(html);
+
+  if (anchor && anchor.exact) {
+    const a = normalizeSpaces(anchor.exact);
+    if (a && rendered.text.indexOf(a) === -1) {
+      throw new CommentError('ANCHOR_DRIFT', 'anchor no longer matches; reattach manually', 409);
+    }
   }
-  if (!html.includes(parsed.from)) {
+  const needle = normalizeSpaces(parsed.from);
+  const nIdx = rendered.text.indexOf(needle);
+  if (nIdx === -1) {
     throw new CommentError('ANCHOR_DRIFT', 'proposal target text not found in doc', 409);
   }
+  if (rendered.text.indexOf(needle, nIdx + 1) !== -1) {
+    throw new CommentError('AMBIGUOUS_TARGET', 'proposal target appears more than once; refine the anchor', 409);
+  }
+  const rawStart = rendered.map[nIdx];
+  const rawEnd = rendered.map[nIdx + needle.length - 1] + rendered.charRawLen[nIdx + needle.length - 1];
 
-  const next = html.replace(parsed.from, parsed.to);
+  const next = html.slice(0, rawStart) + parsed.to + html.slice(rawEnd);
   await writeFile(htmlPath, next, 'utf8');
 
   const eventFile = commentFilePath(workspaceRoot, scenario, doc);

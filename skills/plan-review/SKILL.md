@@ -50,7 +50,7 @@ The scenario directory is determined in this order:
 
 ## When to Use
 
-- After generating any plan document (`/plan-analyze`, `/plan-design`, `/plan-test-plan`, `/plan-state-machine`, `/plan-test-cases`, `/plan-implementation`)
+- After generating any plan document (`/plan-gen analysis`, `/plan-gen design`, `/plan-gen test-plan`, `/plan-gen state-machine`, `/plan-gen test-cases`, `/plan-gen implementation`)
 - When the user says "review the design", "review plan", "check the test plan", "plan-review", or "review {document-name}"
 - When a document needs quality validation before proceeding to the next planning phase
 - When the user provides a specific file path to review
@@ -109,7 +109,7 @@ Or type "all" to review every document in sequence.
 ```
 
 **If no plan documents found at all**: 
-> "No plan documents found. Run a generation skill first (e.g., `/plan-design`, `/plan-analyze`)."
+> "No plan documents found. Run a generation skill first (e.g., `/plan-gen design`, `/plan-gen analysis`)."
 
 ### Step 2: Parse Sections
 
@@ -307,7 +307,7 @@ Update `manifest.json`:
 Next steps:
   - /plan-review state-machine.html  — Review state machines
   - /plan-review-cycle               — Review all documents in sequence
-  - /plan-design                     — Regenerate design if major changes needed
+  - /plan-gen design                     — Regenerate design if major changes needed
 ```
 
 ## Handling "review all"
@@ -363,7 +363,7 @@ If user says "review all" or types "all" at document selection:
 
 | Error | Resolution |
 |-------|-----------|
-| No plan documents found | "No plan documents exist in this scenario. Run a plan generation skill first (e.g., /plan-design)." |
+| No plan documents found | "No plan documents exist in this scenario. Run a plan generation skill first (e.g., /plan-gen design)." |
 | HTML file cannot be parsed | "Could not parse {file}. The file may be malformed. Try regenerating with the corresponding skill." |
 | Reviewer agent returns no verdict | Default to NEEDS_CHANGES and flag for manual review |
 | User interrupts mid-review | Save progress to `{scenario-path}/.review-state.json` so review can resume |

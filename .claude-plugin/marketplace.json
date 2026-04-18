@@ -8,8 +8,8 @@
   "plugins": [
     {
       "name": "plan-harness",
-      "description": "Structured project planning with agent teams — generates interconnected design docs, test plans, state machines, test cases, and implementation plans as interactive HTML",
-      "version": "1.0.0",
+      "description": "Structured project planning with agent teams — unified /plan-gen dispatcher (design / state-machine / test-plan / test-cases / implementation / test-report / analysis), cascade sync, interactive test-report fix-loop, lightbox-backed evidence screenshots",
+      "version": "1.1.0",
       "source": "./",
       "icon": "./assets/icon.png",
       "category": "planning",

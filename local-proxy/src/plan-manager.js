@@ -45,6 +45,7 @@ function planTypeFromName(fileName) {
     "test-plan": "test-plan",
     "state-machine": "state-machine",
     "test-cases": "test-cases",
+    "test-report": "test-report",
     "implementation-plan": "implementation-plan",
     dashboard: "dashboard",
     manifest: "manifest",
@@ -147,6 +148,7 @@ export async function listScenarios(workspaceRoot) {
           hasImplementationPlan: fileNames.includes("implementation-plan.html"),
           hasDashboard: fileNames.includes("dashboard.html"),
           hasReviewReport: fileNames.includes("review-report.html"),
+          hasTestReport: fileNames.includes("test-report.html"),
         });
       }
     }

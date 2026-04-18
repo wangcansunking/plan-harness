@@ -686,6 +686,7 @@ export function generateScenarioDetail(scenario, options = {}) {
     { type: 'state-machine', label: 'State Machine', blurb: 'Entity states, transitions, invariants', skill: '/plan-state-machine' },
     { type: 'test-cases', label: 'Test Cases', blurb: 'Priority-ranked cases with expected outcomes', skill: '/plan-test-cases' },
     { type: 'implementation-plan', label: 'Implementation', blurb: 'File-level steps, phases, dependencies', skill: '/plan-implementation' },
+    { type: 'test-report', label: 'Test Report', blurb: 'Last E2E run: pass/fail per scenario with evidence', skill: '/plan-test-report' },
   ];
 
   const files = scenario.files || [];
@@ -3275,6 +3276,167 @@ export function normalizePlanTabs(html, existingSiblings, scenarioDir) {
       return match.replace(inner, newInner);
     }
   );
+}
+
+/**
+ * Rewrite relative <a href="...png|jpg|jpeg|gif|webp|svg"> to /asset?path=<abs>
+ * so they resolve when the parent HTML is served via /view?path=... (browsers
+ * resolve relative hrefs against the current URL, which would otherwise 404).
+ * Absolute URLs, already-/view / /asset hrefs, and anchor refs are left alone.
+ */
+export function normalizeAssetLinks(html, scenarioDir) {
+  if (!html || typeof html !== 'string' || !scenarioDir) return html;
+  const imgExt = /\.(png|jpe?g|gif|webp|svg)(?:[?#]|$)/i;
+  // Also rewrite <img src="..."> for the same reason.
+  const rewriteHref = (attrs, attr) => {
+    const re = new RegExp('\\b' + attr + '\\s*=\\s*["\']([^"\']+)["\']', 'i');
+    const m = attrs.match(re);
+    if (!m) return attrs;
+    const href = m[1];
+    if (/^(https?:|data:|\/)/i.test(href)) return attrs;
+    if (!imgExt.test(href)) return attrs;
+    const clean = href.replace(/^\.\//, '').replace(/[#?].*$/, '');
+    const absPath = scenarioDir.replace(/\\/g, '/') + '/' + clean;
+    const newVal = '/asset?path=' + encodeURIComponent(absPath);
+    return attrs.replace(re, attr + '="' + newVal + '"');
+  };
+  let out = html.replace(/<a\b([^>]*)>/gi, (m, attrs) => '<a' + rewriteHref(attrs, 'href') + '>');
+  out = out.replace(/<img\b([^>]*?)\/?>/gi, (m, attrs) => '<img' + rewriteHref(attrs, 'src') + '>');
+  return out;
+}
+
+/**
+ * Inject a lightweight lightbox widget: intercepts clicks on <a href=/asset?...>
+ * (and any <a> ending in an image extension) and opens a modal with prev/next
+ * navigation. All image anchors on the page form the gallery. Keyboard: ← →
+ * for navigation, Esc to close. Self-contained — no external deps.
+ */
+export function injectLightbox(html) {
+  if (!html || typeof html !== 'string') return html;
+  const marker = '<!-- ph-lightbox -->';
+  if (html.includes(marker)) return html;
+  const widget = `
+${marker}
+<style>
+.ph-lb-overlay { position: fixed; inset: 0; background: rgba(8,9,10,0.88); z-index: 10000; display: none; align-items: center; justify-content: center; }
+.ph-lb-overlay[data-open="1"] { display: flex; }
+.ph-lb-stage { position: relative; width: min(96vw, 1400px); height: min(92vh, 900px); display: flex; flex-direction: column; }
+.ph-lb-img-wrap { flex: 1 1 auto; display: flex; align-items: center; justify-content: center; overflow: hidden; padding: 0.5rem; }
+.ph-lb-img { max-width: 100%; max-height: 100%; box-shadow: 0 8px 32px rgba(0,0,0,0.5); border-radius: 6px; background: #fff; }
+.ph-lb-bar { display: flex; align-items: center; gap: 0.75rem; padding: 0.5rem 0.75rem; color: #f7f8f8; font: 510 0.85rem/1.4 system-ui, -apple-system, "Segoe UI", sans-serif; }
+.ph-lb-title { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; opacity: 0.92; }
+.ph-lb-counter { font-variant-numeric: tabular-nums; opacity: 0.7; }
+.ph-lb-btn { appearance: none; background: rgba(255,255,255,0.08); color: #f7f8f8; border: 1px solid rgba(255,255,255,0.18); border-radius: 6px; padding: 0.35rem 0.7rem; cursor: pointer; font: inherit; }
+.ph-lb-btn:hover { background: rgba(255,255,255,0.14); }
+.ph-lb-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+.ph-lb-nav { position: absolute; top: 50%; transform: translateY(-50%); width: 44px; height: 44px; border-radius: 50%; display: flex; align-items: center; justify-content: center; background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2); color: #f7f8f8; cursor: pointer; font-size: 1.4rem; user-select: none; }
+.ph-lb-nav:hover { background: rgba(255,255,255,0.18); }
+.ph-lb-nav[disabled] { opacity: 0.25; cursor: default; }
+.ph-lb-prev { left: 0.5rem; }
+.ph-lb-next { right: 0.5rem; }
+@media (max-width: 640px) { .ph-lb-nav { width: 36px; height: 36px; } }
+@media print { .ph-lb-overlay { display: none !important; } }
+</style>
+<div class="ph-lb-overlay" role="dialog" aria-modal="true" aria-label="Image preview">
+  <div class="ph-lb-stage">
+    <div class="ph-lb-bar">
+      <span class="ph-lb-title" id="ph-lb-title"></span>
+      <span class="ph-lb-counter" id="ph-lb-counter"></span>
+      <a class="ph-lb-btn" id="ph-lb-open-new" target="_blank" rel="noopener">Open in tab</a>
+      <button class="ph-lb-btn" id="ph-lb-close" type="button" aria-label="Close">Close (Esc)</button>
+    </div>
+    <div class="ph-lb-img-wrap">
+      <button class="ph-lb-nav ph-lb-prev" type="button" aria-label="Previous image">‹</button>
+      <img class="ph-lb-img" id="ph-lb-img" alt="">
+      <button class="ph-lb-nav ph-lb-next" type="button" aria-label="Next image">›</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+  var IMG_EXT = /\\.(png|jpe?g|gif|webp|svg)(?:[?#]|$)/i;
+  var overlay, imgEl, titleEl, counterEl, openNewEl, prevEl, nextEl;
+  var gallery = [];
+  var idx = -1;
+  function collectAnchors() {
+    var links = document.querySelectorAll('a[href]');
+    var out = [];
+    for (var i = 0; i < links.length; i++) {
+      var a = links[i];
+      var h = a.getAttribute('href') || '';
+      // treat /asset?path=...png OR anything ending in image ext
+      if (/^\\/asset\\?/.test(h) && IMG_EXT.test(h) ) out.push(a);
+      else if (IMG_EXT.test(h) && !/^(https?:)/i.test(h)) out.push(a);
+    }
+    return out;
+  }
+  function show(n) {
+    if (!gallery.length) return;
+    idx = (n + gallery.length) % gallery.length;
+    var a = gallery[idx];
+    var href = a.getAttribute('href');
+    imgEl.src = href;
+    imgEl.alt = a.textContent.trim() || 'Screenshot';
+    titleEl.textContent = a.textContent.trim() || decodeURIComponent((href.split('path=')[1] || '').split('&')[0]).split('/').pop();
+    counterEl.textContent = (idx + 1) + ' / ' + gallery.length;
+    openNewEl.setAttribute('href', href);
+    prevEl.disabled = gallery.length < 2;
+    nextEl.disabled = gallery.length < 2;
+  }
+  function open(i) {
+    gallery = collectAnchors();
+    if (!gallery.length) return;
+    show(i);
+    overlay.setAttribute('data-open', '1');
+    document.body.style.overflow = 'hidden';
+  }
+  function close() {
+    overlay.removeAttribute('data-open');
+    document.body.style.overflow = '';
+    imgEl.src = '';
+  }
+  function findAnchor(el) {
+    while (el && el !== document.body) {
+      if (el.tagName === 'A' && el.href) {
+        var h = el.getAttribute('href') || '';
+        if ((IMG_EXT.test(h) && !/^https?:/i.test(h)) || /^\\/asset\\?/.test(h)) return el;
+      }
+      el = el.parentElement;
+    }
+    return null;
+  }
+  document.addEventListener('DOMContentLoaded', function(){
+    overlay = document.querySelector('.ph-lb-overlay');
+    imgEl = document.getElementById('ph-lb-img');
+    titleEl = document.getElementById('ph-lb-title');
+    counterEl = document.getElementById('ph-lb-counter');
+    openNewEl = document.getElementById('ph-lb-open-new');
+    prevEl = overlay.querySelector('.ph-lb-prev');
+    nextEl = overlay.querySelector('.ph-lb-next');
+    document.getElementById('ph-lb-close').addEventListener('click', close);
+    overlay.addEventListener('click', function(e){ if (e.target === overlay) close(); });
+    prevEl.addEventListener('click', function(){ show(idx - 1); });
+    nextEl.addEventListener('click', function(){ show(idx + 1); });
+    document.addEventListener('keydown', function(e){
+      if (!overlay.getAttribute('data-open')) return;
+      if (e.key === 'Escape') { e.preventDefault(); close(); }
+      else if (e.key === 'ArrowLeft') { e.preventDefault(); show(idx - 1); }
+      else if (e.key === 'ArrowRight') { e.preventDefault(); show(idx + 1); }
+    });
+    document.addEventListener('click', function(e){
+      var a = findAnchor(e.target);
+      if (!a) return;
+      e.preventDefault();
+      gallery = collectAnchors();
+      var i = gallery.indexOf(a);
+      open(i >= 0 ? i : 0);
+    }, true);
+  });
+})();
+</script>
+`;
+  if (/<\/body>/i.test(html)) return html.replace(/<\/body>/i, widget + '</body>');
+  return html + widget;
 }
 
 /**

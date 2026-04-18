@@ -14,7 +14,9 @@ import {
   injectSectionIds,
   injectPlanMeta,
   injectSidebarPanels,
+  injectLightbox,
   normalizePlanTabs,
+  normalizeAssetLinks,
   normalizeChecklistItems
 } from './templates/base.js';
 import * as auth from './auth.js';
@@ -187,6 +189,14 @@ async function handleRequest(req, res) {
   if (pathname === '/view' && req.method === 'GET') {
     const filePath = parsedUrl.searchParams.get('path');
     return serveHtmlFile(req, res, filePath, { fromLoopback });
+  }
+
+  // Route: GET /asset?path=<absolute-path> -> Serve a static binary asset
+  // (PNG/JPG/GIF/WEBP/SVG) from under the workspace root. Used by plan docs
+  // to reference screenshots and other evidence artefacts.
+  if (pathname === '/asset' && req.method === 'GET') {
+    const filePath = parsedUrl.searchParams.get('path');
+    return serveAssetFile(req, res, filePath);
   }
 
   // Route: GET /api/scenarios -> JSON list of all scenarios
@@ -539,6 +549,48 @@ async function serveScenarioDetail(req, res, scenarioName) {
   res.end(html);
 }
 
+const ASSET_MIME = {
+  '.png':  'image/png',
+  '.jpg':  'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.gif':  'image/gif',
+  '.webp': 'image/webp',
+  '.svg':  'image/svg+xml',
+  '.ico':  'image/x-icon',
+};
+
+async function serveAssetFile(req, res, filePath) {
+  if (!filePath) {
+    res.writeHead(400, { 'Content-Type': 'text/plain' });
+    res.end('Missing "path" query parameter');
+    return;
+  }
+  const resolved = resolve(filePath);
+  if (resolved !== workspaceRootPath && !resolved.startsWith(workspaceRootPath + sep)) {
+    res.writeHead(403, { 'Content-Type': 'text/plain' });
+    res.end('Access denied: path is outside workspace root');
+    return;
+  }
+  const ext = extname(resolved).toLowerCase();
+  const mime = ASSET_MIME[ext];
+  if (!mime) {
+    res.writeHead(415, { 'Content-Type': 'text/plain' });
+    res.end(`Unsupported asset type: ${ext}`);
+    return;
+  }
+  try {
+    const data = await readFile(resolved);
+    res.writeHead(200, {
+      'Content-Type': mime,
+      'Cache-Control': 'private, max-age=60',
+    });
+    res.end(data);
+  } catch (err) {
+    res.writeHead(err.code === 'ENOENT' ? 404 : 500, { 'Content-Type': 'text/plain' });
+    res.end(err.code === 'ENOENT' ? 'Asset not found' : 'Asset read error');
+  }
+}
+
 async function serveHtmlFile(req, res, filePath, ctx = {}) {
   if (!filePath) {
     res.writeHead(400, { 'Content-Type': 'text/plain' });
@@ -602,7 +654,14 @@ async function serveHtmlFile(req, res, filePath, ctx = {}) {
     const withPanels = injectSidebarPanels(withMeta);
 
     // 4. Breadcrumb pill (last so it sits above the doc's head metadata).
-    const injected = injectBreadcrumbIntoHtml(withPanels, resolved);
+    const withBreadcrumb = injectBreadcrumbIntoHtml(withPanels, resolved);
+
+    // 5. Rewrite relative image-asset hrefs to /asset?path=<abs> so they
+    //    resolve under /view (browser would otherwise resolve them against
+    //    /view?path=... → 404), and inject a lightbox widget that intercepts
+    //    clicks + adds prev/next navigation.
+    const withAssets = normalizeAssetLinks(withBreadcrumb, scenarioDir);
+    const injected = injectLightbox(withAssets);
 
     res.writeHead(200, {
       'Content-Type': 'text/html; charset=utf-8',
@@ -809,7 +868,8 @@ async function scanScenarioDir(name, dirPath) {
     { type: 'state-machine', suffixes: ['state-machine.html', '-state-machine.html', '-state-machines.html'] },
     { type: 'test-cases', suffixes: ['test-cases.html', '-test-cases.html'] },
     { type: 'implementation-plan', suffixes: ['implementation-plan.html', '-implementation-plan.html', '-impl-plan.html'] },
-    { type: 'review-report', suffixes: ['review-report.html', '-review-report.html'] }
+    { type: 'review-report', suffixes: ['review-report.html', '-review-report.html'] },
+    { type: 'test-report', suffixes: ['test-report.html', '-test-report.html'] }
   ];
 
   let entries;
@@ -889,7 +949,8 @@ function groupFlatFilesIntoScenarios(fileNames, plansDir) {
     '-design.html', '-design-concise.html', '-test-plan.html', '-e2e-test-plan.html',
     '-state-machine.html', '-state-machines.html', '-test-cases.html',
     '-impl-plan.html', '-implementation-plan.html',
-    '-review-report.html'
+    '-review-report.html',
+    '-test-report.html'
   ];
 
   const planTypeMap = {
@@ -903,7 +964,8 @@ function groupFlatFilesIntoScenarios(fileNames, plansDir) {
     '-test-cases.html': 'test-cases',
     '-impl-plan.html': 'implementation-plan',
     '-implementation-plan.html': 'implementation-plan',
-    '-review-report.html': 'review-report'
+    '-review-report.html': 'review-report',
+    '-test-report.html': 'test-report'
   };
 
   // Extract prefixes

@@ -1,7 +1,7 @@
 {
   "name": "plan-harness",
-  "version": "1.0.0",
-  "description": "Project planning harness — generates interconnected design docs, test plans, state machines, test cases, and implementation plans as interactive HTML. Includes MCP tools for plan management and a local dashboard for viewing/navigating plans.",
+  "version": "1.1.0",
+  "description": "Project planning harness — one unified /plan-gen command with multi-select UI generates every plan doc type (design, state-machine, test-plan, test-cases, implementation, test-report, analysis). Adds /plan-sync cascade orchestrator, /plan-test-report interactive fix-loop, and a server-side lightbox + /asset route for evidence screenshots.",
   "icon": "./assets/icon.png",
   "author": {
     "name": "DevX Platform team",

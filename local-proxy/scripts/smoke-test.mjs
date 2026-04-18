@@ -276,6 +276,59 @@ async function main() {
       // crash on a doc with existing comments.)
     }
 
+    // ---- acceptProposal: HTML-text normalization (regression for L1 of the
+    // built-in-comment-ui test report — the anchor-drift guard naively
+    // compared rendered plain text against raw HTML with &mdash; + <kbd>) ----
+    process.stdout.write(`\n[revise] acceptProposal handles entities + inline tags\n`);
+    {
+      const { acceptProposal } = await import('../src/revise-dispatcher.js');
+      const { mkdir, writeFile, readFile, rm } = await import('node:fs/promises');
+      const { tmpdir } = await import('node:os');
+      const tmp = join(tmpdir(), 'ph-accept-' + Date.now());
+      const scen = 'unit-accept';
+      const docSlug = 'design';
+      const scenDir = join(tmp, 'plans', scen);
+      const docPath = join(scenDir, `${docSlug}.html`);
+      const proposalsDir = join(scenDir, '.comments', `${docSlug}.proposals`);
+      const eventLog = join(scenDir, '.comments', `${docSlug}.jsonl`);
+      const cid = 'cmt_ac1234';
+      try {
+        await mkdir(proposalsDir, { recursive: true });
+        await mkdir(join(scenDir, '.comments'), { recursive: true });
+        await writeFile(docPath,
+          `<!doctype html><html><body>` +
+          `<li>Phase 5 &mdash; composer panel submits with <kbd>Ctrl</kbd>+<kbd>Enter</kbd>; draft survives reload; AC-8 green</li>` +
+          `</body></html>`, 'utf8');
+        await writeFile(join(proposalsDir, `${cid}.diff`),
+          'REPLACE:\nPhase 5 \u2014 composer panel submits with Ctrl+Enter; draft survives reload; AC-8 green\n' +
+          'WITH:\nPhase 5a \u2014 composer opens beside selection; Phase 5b \u2014 Ctrl+Enter submits\n',
+          'utf8');
+        await writeFile(eventLog, '', 'utf8');
+        const anchor = { sectionId: 'sec-x', exact: 'Phase 5 \u2014 composer panel submits with Ctrl+Enter; draft survives reload; AC-8 green', prefix: '', suffix: '' };
+        await acceptProposal(tmp, scen, docSlug, cid, anchor, { name: 'Host', role: 'host' });
+        const rewritten = await readFile(docPath, 'utf8');
+        expect(
+          rewritten.includes('Phase 5a \u2014 composer opens beside selection'),
+          'acceptProposal rewrites doc even when source has &mdash; + <kbd>'
+        );
+        expect(
+          !rewritten.includes('Phase 5 &mdash; composer panel submits'),
+          'original line replaced, not duplicated'
+        );
+        const events = (await readFile(eventLog, 'utf8')).split('\n').filter(Boolean).map(JSON.parse);
+        expect(
+          events.some(e => e.op === 'revise' && e.reviseStatus === 'accepted'),
+          'revise accepted event appended'
+        );
+        expect(
+          events.some(e => e.op === 'resolve' && e.resolved === true),
+          'resolve event appended on accept'
+        );
+      } finally {
+        await rm(tmp, { recursive: true, force: true });
+      }
+    }
+
     // ---- 404 on missing routes ----
     const miss = await getText('/does-not-exist');
     expect(miss.status === 404, 'unknown path returns 404');

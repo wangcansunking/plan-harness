@@ -1,7 +1,3 @@
----
-name: plan-test-cases
-description: Generate comprehensive test cases with priority levels and interactive tracking — dispatches tester, frontend dev, and writer agent team
----
 
 # plan-test-cases
 

@@ -7364,7 +7364,8 @@ function generateScenarioDetail(scenario, options = {}) {
     { type: "test-plan", label: "Test Plan", blurb: "E2E scenarios, entry criteria, ownership", skill: "/plan-test-plan" },
     { type: "state-machine", label: "State Machine", blurb: "Entity states, transitions, invariants", skill: "/plan-state-machine" },
     { type: "test-cases", label: "Test Cases", blurb: "Priority-ranked cases with expected outcomes", skill: "/plan-test-cases" },
-    { type: "implementation-plan", label: "Implementation", blurb: "File-level steps, phases, dependencies", skill: "/plan-implementation" }
+    { type: "implementation-plan", label: "Implementation", blurb: "File-level steps, phases, dependencies", skill: "/plan-implementation" },
+    { type: "test-report", label: "Test Report", blurb: "Last E2E run: pass/fail per scenario with evidence", skill: "/plan-test-report" }
   ];
   const files = scenario.files || [];
   const byType = Object.fromEntries(files.map((f) => [f.type, f]));
@@ -9198,6 +9199,152 @@ function normalizePlanTabs(html, existingSiblings, scenarioDir) {
     }
   );
 }
+function normalizeAssetLinks(html, scenarioDir) {
+  if (!html || typeof html !== "string" || !scenarioDir) return html;
+  const imgExt = /\.(png|jpe?g|gif|webp|svg)(?:[?#]|$)/i;
+  const rewriteHref = (attrs, attr) => {
+    const re = new RegExp("\\b" + attr + `\\s*=\\s*["']([^"']+)["']`, "i");
+    const m = attrs.match(re);
+    if (!m) return attrs;
+    const href = m[1];
+    if (/^(https?:|data:|\/)/i.test(href)) return attrs;
+    if (!imgExt.test(href)) return attrs;
+    const clean = href.replace(/^\.\//, "").replace(/[#?].*$/, "");
+    const absPath = scenarioDir.replace(/\\/g, "/") + "/" + clean;
+    const newVal = "/asset?path=" + encodeURIComponent(absPath);
+    return attrs.replace(re, attr + '="' + newVal + '"');
+  };
+  let out = html.replace(/<a\b([^>]*)>/gi, (m, attrs) => "<a" + rewriteHref(attrs, "href") + ">");
+  out = out.replace(/<img\b([^>]*?)\/?>/gi, (m, attrs) => "<img" + rewriteHref(attrs, "src") + ">");
+  return out;
+}
+function injectLightbox(html) {
+  if (!html || typeof html !== "string") return html;
+  const marker = "<!-- ph-lightbox -->";
+  if (html.includes(marker)) return html;
+  const widget = `
+${marker}
+<style>
+.ph-lb-overlay { position: fixed; inset: 0; background: rgba(8,9,10,0.88); z-index: 10000; display: none; align-items: center; justify-content: center; }
+.ph-lb-overlay[data-open="1"] { display: flex; }
+.ph-lb-stage { position: relative; width: min(96vw, 1400px); height: min(92vh, 900px); display: flex; flex-direction: column; }
+.ph-lb-img-wrap { flex: 1 1 auto; display: flex; align-items: center; justify-content: center; overflow: hidden; padding: 0.5rem; }
+.ph-lb-img { max-width: 100%; max-height: 100%; box-shadow: 0 8px 32px rgba(0,0,0,0.5); border-radius: 6px; background: #fff; }
+.ph-lb-bar { display: flex; align-items: center; gap: 0.75rem; padding: 0.5rem 0.75rem; color: #f7f8f8; font: 510 0.85rem/1.4 system-ui, -apple-system, "Segoe UI", sans-serif; }
+.ph-lb-title { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; opacity: 0.92; }
+.ph-lb-counter { font-variant-numeric: tabular-nums; opacity: 0.7; }
+.ph-lb-btn { appearance: none; background: rgba(255,255,255,0.08); color: #f7f8f8; border: 1px solid rgba(255,255,255,0.18); border-radius: 6px; padding: 0.35rem 0.7rem; cursor: pointer; font: inherit; }
+.ph-lb-btn:hover { background: rgba(255,255,255,0.14); }
+.ph-lb-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+.ph-lb-nav { position: absolute; top: 50%; transform: translateY(-50%); width: 44px; height: 44px; border-radius: 50%; display: flex; align-items: center; justify-content: center; background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2); color: #f7f8f8; cursor: pointer; font-size: 1.4rem; user-select: none; }
+.ph-lb-nav:hover { background: rgba(255,255,255,0.18); }
+.ph-lb-nav[disabled] { opacity: 0.25; cursor: default; }
+.ph-lb-prev { left: 0.5rem; }
+.ph-lb-next { right: 0.5rem; }
+@media (max-width: 640px) { .ph-lb-nav { width: 36px; height: 36px; } }
+@media print { .ph-lb-overlay { display: none !important; } }
+</style>
+<div class="ph-lb-overlay" role="dialog" aria-modal="true" aria-label="Image preview">
+  <div class="ph-lb-stage">
+    <div class="ph-lb-bar">
+      <span class="ph-lb-title" id="ph-lb-title"></span>
+      <span class="ph-lb-counter" id="ph-lb-counter"></span>
+      <a class="ph-lb-btn" id="ph-lb-open-new" target="_blank" rel="noopener">Open in tab</a>
+      <button class="ph-lb-btn" id="ph-lb-close" type="button" aria-label="Close">Close (Esc)</button>
+    </div>
+    <div class="ph-lb-img-wrap">
+      <button class="ph-lb-nav ph-lb-prev" type="button" aria-label="Previous image">\u2039</button>
+      <img class="ph-lb-img" id="ph-lb-img" alt="">
+      <button class="ph-lb-nav ph-lb-next" type="button" aria-label="Next image">\u203A</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+  var IMG_EXT = /\\.(png|jpe?g|gif|webp|svg)(?:[?#]|$)/i;
+  var overlay, imgEl, titleEl, counterEl, openNewEl, prevEl, nextEl;
+  var gallery = [];
+  var idx = -1;
+  function collectAnchors() {
+    var links = document.querySelectorAll('a[href]');
+    var out = [];
+    for (var i = 0; i < links.length; i++) {
+      var a = links[i];
+      var h = a.getAttribute('href') || '';
+      // treat /asset?path=...png OR anything ending in image ext
+      if (/^\\/asset\\?/.test(h) && IMG_EXT.test(h) ) out.push(a);
+      else if (IMG_EXT.test(h) && !/^(https?:)/i.test(h)) out.push(a);
+    }
+    return out;
+  }
+  function show(n) {
+    if (!gallery.length) return;
+    idx = (n + gallery.length) % gallery.length;
+    var a = gallery[idx];
+    var href = a.getAttribute('href');
+    imgEl.src = href;
+    imgEl.alt = a.textContent.trim() || 'Screenshot';
+    titleEl.textContent = a.textContent.trim() || decodeURIComponent((href.split('path=')[1] || '').split('&')[0]).split('/').pop();
+    counterEl.textContent = (idx + 1) + ' / ' + gallery.length;
+    openNewEl.setAttribute('href', href);
+    prevEl.disabled = gallery.length < 2;
+    nextEl.disabled = gallery.length < 2;
+  }
+  function open(i) {
+    gallery = collectAnchors();
+    if (!gallery.length) return;
+    show(i);
+    overlay.setAttribute('data-open', '1');
+    document.body.style.overflow = 'hidden';
+  }
+  function close() {
+    overlay.removeAttribute('data-open');
+    document.body.style.overflow = '';
+    imgEl.src = '';
+  }
+  function findAnchor(el) {
+    while (el && el !== document.body) {
+      if (el.tagName === 'A' && el.href) {
+        var h = el.getAttribute('href') || '';
+        if ((IMG_EXT.test(h) && !/^https?:/i.test(h)) || /^\\/asset\\?/.test(h)) return el;
+      }
+      el = el.parentElement;
+    }
+    return null;
+  }
+  document.addEventListener('DOMContentLoaded', function(){
+    overlay = document.querySelector('.ph-lb-overlay');
+    imgEl = document.getElementById('ph-lb-img');
+    titleEl = document.getElementById('ph-lb-title');
+    counterEl = document.getElementById('ph-lb-counter');
+    openNewEl = document.getElementById('ph-lb-open-new');
+    prevEl = overlay.querySelector('.ph-lb-prev');
+    nextEl = overlay.querySelector('.ph-lb-next');
+    document.getElementById('ph-lb-close').addEventListener('click', close);
+    overlay.addEventListener('click', function(e){ if (e.target === overlay) close(); });
+    prevEl.addEventListener('click', function(){ show(idx - 1); });
+    nextEl.addEventListener('click', function(){ show(idx + 1); });
+    document.addEventListener('keydown', function(e){
+      if (!overlay.getAttribute('data-open')) return;
+      if (e.key === 'Escape') { e.preventDefault(); close(); }
+      else if (e.key === 'ArrowLeft') { e.preventDefault(); show(idx - 1); }
+      else if (e.key === 'ArrowRight') { e.preventDefault(); show(idx + 1); }
+    });
+    document.addEventListener('click', function(e){
+      var a = findAnchor(e.target);
+      if (!a) return;
+      e.preventDefault();
+      gallery = collectAnchors();
+      var i = gallery.indexOf(a);
+      open(i >= 0 ? i : 0);
+    }, true);
+  });
+})();
+</script>
+`;
+  if (/<\/body>/i.test(html)) return html.replace(/<\/body>/i, widget + "</body>");
+  return html + widget;
+}
 function injectPlanMeta(html, meta3) {
   if (!html || typeof html !== "string" || !meta3) return html;
   const json2 = JSON.stringify(meta3).replace(/</g, "\\u003c");
@@ -9944,6 +10091,91 @@ async function appendEvent2(file2, event) {
   await mkdir3(join3(file2, ".."), { recursive: true });
   await appendFile2(file2, JSON.stringify(event) + "\n", "utf8");
 }
+function decodeEntity(ent) {
+  const inner = ent.slice(1, -1);
+  if (inner.startsWith("#")) {
+    const code = inner.startsWith("#x") ? parseInt(inner.slice(2), 16) : parseInt(inner.slice(1), 10);
+    return Number.isFinite(code) ? String.fromCodePoint(code) : ent;
+  }
+  return ENT_NAMED[inner] ?? ent;
+}
+function normalizeSpaces(s) {
+  return (s || "").replace(/\s+/g, " ").trim();
+}
+function renderText(html) {
+  const text = [];
+  const map2 = [];
+  const charRawLen = [];
+  let lastWasSpace = true;
+  let i = 0;
+  while (i < html.length) {
+    const c = html[i];
+    if (c === "<") {
+      const end = html.indexOf(">", i);
+      if (end === -1) {
+        i++;
+        continue;
+      }
+      i = end + 1;
+      continue;
+    }
+    if (c === "&") {
+      const semi = html.indexOf(";", i);
+      if (semi !== -1 && semi - i <= 10) {
+        const ent = html.slice(i, semi + 1);
+        const decoded = decodeEntity(ent);
+        if (decoded !== ent) {
+          const raw = ent.length;
+          for (let j = 0; j < decoded.length; j++) {
+            const ch = decoded[j];
+            if (/\s/.test(ch)) {
+              if (!lastWasSpace) {
+                text.push(" ");
+                map2.push(i);
+                charRawLen.push(j === decoded.length - 1 ? raw : 0);
+                lastWasSpace = true;
+              }
+            } else {
+              text.push(ch);
+              map2.push(i);
+              charRawLen.push(j === decoded.length - 1 ? raw : 0);
+              lastWasSpace = false;
+            }
+          }
+          i += raw;
+          continue;
+        }
+      }
+      text.push("&");
+      map2.push(i);
+      charRawLen.push(1);
+      lastWasSpace = false;
+      i++;
+      continue;
+    }
+    if (/\s/.test(c)) {
+      if (!lastWasSpace) {
+        text.push(" ");
+        map2.push(i);
+        charRawLen.push(1);
+        lastWasSpace = true;
+      }
+      i++;
+      continue;
+    }
+    text.push(c);
+    map2.push(i);
+    charRawLen.push(1);
+    lastWasSpace = false;
+    i++;
+  }
+  while (text.length && text[text.length - 1] === " ") {
+    text.pop();
+    map2.pop();
+    charRawLen.pop();
+  }
+  return { text: text.join(""), map: map2, charRawLen };
+}
 function requireHost(actor) {
   if (!actor || actor.role !== "host") {
     throw new CommentError("FORBIDDEN", "revise flow is host-only", 403);
@@ -9984,13 +10216,24 @@ async function acceptProposal(workspaceRoot, scenario, doc, commentId, anchor, a
   if (!parsed) throw new CommentError("BAD_REQUEST", "proposal format unrecognized", 400);
   const htmlPath = docHtmlPath(workspaceRoot, scenario, doc);
   const html = await readFile3(htmlPath, "utf8");
-  if (anchor && anchor.exact && !html.includes(anchor.exact)) {
-    throw new CommentError("ANCHOR_DRIFT", "anchor no longer matches; reattach manually", 409);
+  const rendered = renderText(html);
+  if (anchor && anchor.exact) {
+    const a = normalizeSpaces(anchor.exact);
+    if (a && rendered.text.indexOf(a) === -1) {
+      throw new CommentError("ANCHOR_DRIFT", "anchor no longer matches; reattach manually", 409);
+    }
   }
-  if (!html.includes(parsed.from)) {
+  const needle = normalizeSpaces(parsed.from);
+  const nIdx = rendered.text.indexOf(needle);
+  if (nIdx === -1) {
     throw new CommentError("ANCHOR_DRIFT", "proposal target text not found in doc", 409);
   }
-  const next = html.replace(parsed.from, parsed.to);
+  if (rendered.text.indexOf(needle, nIdx + 1) !== -1) {
+    throw new CommentError("AMBIGUOUS_TARGET", "proposal target appears more than once; refine the anchor", 409);
+  }
+  const rawStart = rendered.map[nIdx];
+  const rawEnd = rendered.map[nIdx + needle.length - 1] + rendered.charRawLen[nIdx + needle.length - 1];
+  const next = html.slice(0, rawStart) + parsed.to + html.slice(rawEnd);
   await writeFile2(htmlPath, next, "utf8");
   const eventFile = commentFilePath2(workspaceRoot, scenario, doc);
   await appendEvent2(eventFile, {
@@ -10081,11 +10324,34 @@ function parseProposal(diff) {
   if (!m) return null;
   return { from: m[1], to: m[2] };
 }
-var DEFAULT_CONFIG;
+var DEFAULT_CONFIG, ENT_NAMED;
 var init_revise_dispatcher = __esm({
   "src/revise-dispatcher.js"() {
     init_comment_manager();
     DEFAULT_CONFIG = { reviseMode: "passive" };
+    ENT_NAMED = {
+      mdash: "\u2014",
+      ndash: "\u2013",
+      hellip: "\u2026",
+      lsquo: "\u2018",
+      rsquo: "\u2019",
+      ldquo: "\u201C",
+      rdquo: "\u201D",
+      nbsp: "\xA0",
+      amp: "&",
+      lt: "<",
+      gt: ">",
+      quot: '"',
+      apos: "'",
+      times: "\xD7",
+      check: "\u2713",
+      cross: "\u2717",
+      laquo: "\xAB",
+      raquo: "\xBB",
+      copy: "\xA9",
+      reg: "\xAE",
+      trade: "\u2122"
+    };
   }
 });
 
@@ -10195,6 +10461,10 @@ async function handleRequest(req, res) {
   if (pathname === "/view" && req.method === "GET") {
     const filePath = parsedUrl.searchParams.get("path");
     return serveHtmlFile(req, res, filePath, { fromLoopback });
+  }
+  if (pathname === "/asset" && req.method === "GET") {
+    const filePath = parsedUrl.searchParams.get("path");
+    return serveAssetFile(req, res, filePath);
   }
   if (pathname === "/api/scenarios" && req.method === "GET") {
     return serveApiScenarios(req, res);
@@ -10501,6 +10771,37 @@ async function serveScenarioDetail(req, res, scenarioName) {
   });
   res.end(html);
 }
+async function serveAssetFile(req, res, filePath) {
+  if (!filePath) {
+    res.writeHead(400, { "Content-Type": "text/plain" });
+    res.end('Missing "path" query parameter');
+    return;
+  }
+  const resolved = resolve3(filePath);
+  if (resolved !== workspaceRootPath && !resolved.startsWith(workspaceRootPath + sep4)) {
+    res.writeHead(403, { "Content-Type": "text/plain" });
+    res.end("Access denied: path is outside workspace root");
+    return;
+  }
+  const ext = extname2(resolved).toLowerCase();
+  const mime = ASSET_MIME[ext];
+  if (!mime) {
+    res.writeHead(415, { "Content-Type": "text/plain" });
+    res.end(`Unsupported asset type: ${ext}`);
+    return;
+  }
+  try {
+    const data = await readFile4(resolved);
+    res.writeHead(200, {
+      "Content-Type": mime,
+      "Cache-Control": "private, max-age=60"
+    });
+    res.end(data);
+  } catch (err) {
+    res.writeHead(err.code === "ENOENT" ? 404 : 500, { "Content-Type": "text/plain" });
+    res.end(err.code === "ENOENT" ? "Asset not found" : "Asset read error");
+  }
+}
 async function serveHtmlFile(req, res, filePath, ctx = {}) {
   if (!filePath) {
     res.writeHead(400, { "Content-Type": "text/plain" });
@@ -10542,7 +10843,9 @@ async function serveHtmlFile(req, res, filePath, ctx = {}) {
     };
     const withMeta = injectPlanMeta(withSectionIds, meta3);
     const withPanels = injectSidebarPanels(withMeta);
-    const injected = injectBreadcrumbIntoHtml(withPanels, resolved);
+    const withBreadcrumb = injectBreadcrumbIntoHtml(withPanels, resolved);
+    const withAssets = normalizeAssetLinks(withBreadcrumb, scenarioDir);
+    const injected = injectLightbox(withAssets);
     res.writeHead(200, {
       "Content-Type": "text/html; charset=utf-8",
       "Cache-Control": "no-cache"
@@ -10691,7 +10994,8 @@ async function scanScenarioDir(name, dirPath) {
     { type: "state-machine", suffixes: ["state-machine.html", "-state-machine.html", "-state-machines.html"] },
     { type: "test-cases", suffixes: ["test-cases.html", "-test-cases.html"] },
     { type: "implementation-plan", suffixes: ["implementation-plan.html", "-implementation-plan.html", "-impl-plan.html"] },
-    { type: "review-report", suffixes: ["review-report.html", "-review-report.html"] }
+    { type: "review-report", suffixes: ["review-report.html", "-review-report.html"] },
+    { type: "test-report", suffixes: ["test-report.html", "-test-report.html"] }
   ];
   let entries;
   try {
@@ -10766,7 +11070,8 @@ function groupFlatFilesIntoScenarios(fileNames, plansDir) {
     "-test-cases.html",
     "-impl-plan.html",
     "-implementation-plan.html",
-    "-review-report.html"
+    "-review-report.html",
+    "-test-report.html"
   ];
   const planTypeMap = {
     "-analysis.html": "analysis",
@@ -10779,7 +11084,8 @@ function groupFlatFilesIntoScenarios(fileNames, plansDir) {
     "-test-cases.html": "test-cases",
     "-impl-plan.html": "implementation-plan",
     "-implementation-plan.html": "implementation-plan",
-    "-review-report.html": "review-report"
+    "-review-report.html": "review-report",
+    "-test-report.html": "test-report"
   };
   const prefixMap = /* @__PURE__ */ new Map();
   for (const fileName of fileNames) {
@@ -11002,7 +11308,7 @@ async function handleLogin(req, res) {
   res.writeHead(302, { "Set-Cookie": cookie, Location: "/" });
   res.end();
 }
-var ICON_PATH, server, serverPort, workspaceRootPath, COOKIE_NAME;
+var ICON_PATH, server, serverPort, workspaceRootPath, COOKIE_NAME, ASSET_MIME;
 var init_web_server = __esm({
   "src/web-server.js"() {
     init_base();
@@ -11015,6 +11321,15 @@ var init_web_server = __esm({
     serverPort = null;
     workspaceRootPath = null;
     COOKIE_NAME = "plan_session";
+    ASSET_MIME = {
+      ".png": "image/png",
+      ".jpg": "image/jpeg",
+      ".jpeg": "image/jpeg",
+      ".gif": "image/gif",
+      ".webp": "image/webp",
+      ".svg": "image/svg+xml",
+      ".ico": "image/x-icon"
+    };
   }
 });
 
@@ -25079,6 +25394,7 @@ function planTypeFromName(fileName) {
     "test-plan": "test-plan",
     "state-machine": "state-machine",
     "test-cases": "test-cases",
+    "test-report": "test-report",
     "implementation-plan": "implementation-plan",
     dashboard: "dashboard",
     manifest: "manifest"
@@ -25139,7 +25455,8 @@ async function listScenarios(workspaceRoot) {
           hasTestCases: fileNames.includes("test-cases.html"),
           hasImplementationPlan: fileNames.includes("implementation-plan.html"),
           hasDashboard: fileNames.includes("dashboard.html"),
-          hasReviewReport: fileNames.includes("review-report.html")
+          hasReviewReport: fileNames.includes("review-report.html"),
+          hasTestReport: fileNames.includes("test-report.html")
         });
       }
     }

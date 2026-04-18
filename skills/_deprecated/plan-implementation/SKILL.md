@@ -1,7 +1,3 @@
----
-name: plan-implementation
-description: Generate a detailed implementation plan with file-level steps — dispatches full agent team
----
 
 # plan-implementation
 

@@ -1,7 +1,3 @@
----
-name: plan-design
-description: Generate a comprehensive design document for the selected scenario — dispatches architect, PM, and writer agent team
----
 
 # plan-design
 

@@ -1,7 +1,3 @@
----
-name: plan-test-plan
-description: Generate an E2E test plan with interactive scenarios — dispatches PM, tester, and writer agent team
----
 
 # plan-test-plan
 

@@ -1,7 +1,3 @@
----
-name: plan-analyze
-description: Deep codebase analysis — generates an interactive HTML document covering architecture, patterns, conventions, tech stack, and code health. Accepts a repo path or scenario name as argument.
----
 
 # plan-analyze
 

@@ -21,11 +21,11 @@ All of the following files in `{scenario-path}/`:
 |------|-------------|-------------|
 | `manifest.json` | `/plan-init` | Codebase context and scenario metadata |
 | `manifest.json` | `/plan-init` + updates | Scenario manifest with all file references |
-| `design.html` | `/plan-design` | Comprehensive design document |
-| `state-machine.html` | `/plan-state-machine` | Entity state diagrams and transitions |
-| `test-plan.html` | `/plan-test-plan` | E2E test scenarios with progress tracking |
-| `test-cases.html` | `/plan-test-cases` | Detailed test cases with interactive harness |
-| `implementation-plan.html` | `/plan-implementation` | File-level implementation steps |
+| `design.html` | `/plan-gen design` | Comprehensive design document |
+| `state-machine.html` | `/plan-gen state-machine` | Entity state diagrams and transitions |
+| `test-plan.html` | `/plan-gen test-plan` | E2E test scenarios with progress tracking |
+| `test-cases.html` | `/plan-gen test-cases` | Detailed test cases with interactive harness |
+| `implementation-plan.html` | `/plan-gen implementation` | File-level implementation steps |
 | `dashboard.html` | This skill | Index page linking all documents |
 
 ## Prerequisites
@@ -75,7 +75,7 @@ Update `manifest.json` with the enriched description.
 
 ### Phase 2: Generate Design Document
 
-Run the `/plan-design` workflow:
+Run the `/plan-gen design` workflow:
 
 1. Read `manifest.json` for context
 2. Dispatch the Architect agent (system design, data models, API contracts, architecture diagrams)
@@ -119,7 +119,7 @@ Proceed to Phase 3.
 
 ### Phase 3: Generate State Machine Document
 
-Run the `/plan-state-machine` workflow:
+Run the `/plan-gen state-machine` workflow:
 
 1. Read `manifest.json` and `design.html`
 2. Dispatch the Architect agent (extract entities, states, transitions)
@@ -134,7 +134,7 @@ State machine document generated with {n} entities and {n} state diagrams.
 
 ### Phase 4: Generate E2E Test Plan
 
-Run the `/plan-test-plan` workflow:
+Run the `/plan-gen test-plan` workflow:
 
 1. Read `manifest.json` and `design.html`
 2. Dispatch the PM agent (extract testable requirements)
@@ -150,7 +150,7 @@ E2E test plan generated with {n} scenarios (P0: {n}, P1: {n}, P2: {n}).
 
 ### Phase 5: Generate Test Cases
 
-Run the `/plan-test-cases` workflow:
+Run the `/plan-gen test-cases` workflow:
 
 1. Read `manifest.json`, `design.html`, and `test-plan.html`
 2. Dispatch the Tester agent (generate detailed test cases)
@@ -166,7 +166,7 @@ Test cases generated: {n} total (P0: {n}, P1: {n}, P2: {n}) across {n} categorie
 
 ### Phase 6: Generate Implementation Plan
 
-Run the `/plan-implementation` workflow:
+Run the `/plan-gen implementation` workflow:
 
 1. Read `manifest.json` and `design.html` (plus state-machine.html and test-plan.html if available)
 2. Dispatch ALL six agents:
@@ -265,7 +265,7 @@ Each HTML file is self-contained and can be:
   - Used as a living checklist during implementation
 
 To re-generate any individual document, run the corresponding skill:
-  /plan-design, /plan-state-machine, /plan-test-plan, /plan-test-cases, /plan-implementation
+  /plan-gen design, /plan-gen state-machine, /plan-gen test-plan, /plan-gen test-cases, /plan-gen implementation
 ```
 
 ## Iterative Feedback Loop
@@ -305,7 +305,7 @@ This skill orchestrates ALL other plan skills:
 /plan-init ──────> manifest.json
                          |
                          v
-/plan-design ────> design.html
+/plan-gen design ────> design.html
                          |
               ┌──────────┼──────────┐
               v          v          v
@@ -317,7 +317,7 @@ This skill orchestrates ALL other plan skills:
  machine.html  plan.html   cases.html
               \     |     /
                v    v    v
-         /plan-implementation
+         /plan-gen implementation
                   |
                   v
          implementation-plan.html
