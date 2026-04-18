@@ -53,6 +53,7 @@ const toSync = [
   'prompts',
   'contexts',
   'docs',
+  'assets',            // favicon + any other shipped binary assets
   '.claude-plugin',
   'README.md',
   'ROADMAP.md',

@@ -570,7 +570,10 @@ export function generateDashboard(scenarios, options = {}) {
   const totalTodos = scenarios.reduce((s, sc) => s + (sc.todos || 0), 0);
   const totalUnresolved = scenarios.reduce((s, sc) => s + (sc.unresolvedComments || 0), 0);
 
-  const planTypes = ['design', 'test-plan', 'state-machines', 'test-cases', 'impl-plan'];
+  // Must match the `type` keys emitted by scanScenarioDir in web-server.js.
+  // Mismatched names (e.g. 'state-machines' vs 'state-machine') silently
+  // render every card as missing even when the files exist.
+  const planTypes = ['design', 'test-plan', 'state-machine', 'test-cases', 'implementation-plan'];
 
   // Cards are omitted when their count is zero — honest signal, no dead chrome.
   // Scenarios + Plan Files are always shown because they can be zero only
@@ -675,12 +678,14 @@ function filterScenarios() {
  * @returns {string} Full self-contained HTML page.
  */
 export function generateScenarioDetail(scenario, options = {}) {
+  // Types must match the keys emitted by scanScenarioDir in web-server.js.
+  // Keep this list in sync with the planTypes array in generateDashboard above.
   const PLAN_DEFS = [
     { type: 'design', label: 'Design', blurb: 'Architecture, data model, API, UX, risks', skill: '/plan-design' },
     { type: 'test-plan', label: 'Test Plan', blurb: 'E2E scenarios, entry criteria, ownership', skill: '/plan-test-plan' },
-    { type: 'state-machines', label: 'State Machines', blurb: 'Entity states, transitions, invariants', skill: '/plan-state-machine' },
+    { type: 'state-machine', label: 'State Machine', blurb: 'Entity states, transitions, invariants', skill: '/plan-state-machine' },
     { type: 'test-cases', label: 'Test Cases', blurb: 'Priority-ranked cases with expected outcomes', skill: '/plan-test-cases' },
-    { type: 'impl-plan', label: 'Implementation', blurb: 'File-level steps, phases, dependencies', skill: '/plan-implementation' },
+    { type: 'implementation-plan', label: 'Implementation', blurb: 'File-level steps, phases, dependencies', skill: '/plan-implementation' },
   ];
 
   const files = scenario.files || [];

@@ -7281,7 +7281,7 @@ function generateDashboard(scenarios, options = {}) {
   const existingFiles = scenarios.reduce((s, sc) => s + (sc.files ? sc.files.filter((f) => f.exists).length : 0), 0);
   const totalTodos = scenarios.reduce((s, sc) => s + (sc.todos || 0), 0);
   const totalUnresolved = scenarios.reduce((s, sc) => s + (sc.unresolvedComments || 0), 0);
-  const planTypes = ["design", "test-plan", "state-machines", "test-cases", "impl-plan"];
+  const planTypes = ["design", "test-plan", "state-machine", "test-cases", "implementation-plan"];
   let summaryCards = `
 <div class="summary-grid">
   <div class="summary-card"><div class="summary-value">${totalScenarios}</div><div class="summary-label">Scenarios</div></div>
@@ -7362,9 +7362,9 @@ function generateScenarioDetail(scenario, options = {}) {
   const PLAN_DEFS = [
     { type: "design", label: "Design", blurb: "Architecture, data model, API, UX, risks", skill: "/plan-design" },
     { type: "test-plan", label: "Test Plan", blurb: "E2E scenarios, entry criteria, ownership", skill: "/plan-test-plan" },
-    { type: "state-machines", label: "State Machines", blurb: "Entity states, transitions, invariants", skill: "/plan-state-machine" },
+    { type: "state-machine", label: "State Machine", blurb: "Entity states, transitions, invariants", skill: "/plan-state-machine" },
     { type: "test-cases", label: "Test Cases", blurb: "Priority-ranked cases with expected outcomes", skill: "/plan-test-cases" },
-    { type: "impl-plan", label: "Implementation", blurb: "File-level steps, phases, dependencies", skill: "/plan-implementation" }
+    { type: "implementation-plan", label: "Implementation", blurb: "File-level steps, phases, dependencies", skill: "/plan-implementation" }
   ];
   const files = scenario.files || [];
   const byType = Object.fromEntries(files.map((f) => [f.type, f]));
