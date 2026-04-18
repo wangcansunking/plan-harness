@@ -729,10 +729,14 @@ export function generateScenarioDetail(scenario, options = {}) {
     const docUnresolved = (f && f.unresolvedComments) || 0;
     const hasOpen = docTodos + docUnresolved > 0;
     const state = !exists ? 'missing' : hasOpen ? 'partial' : 'complete';
+    // No state badge when a doc has open work — the count row already carries
+    // the signal. "Not generated" stays (file missing) and "Clear" stays
+    // (file exists with zero open items) since those are terminal states,
+    // not progress info.
     const stateBadge = !exists
       ? `<span class="doc-state doc-state-missing">Not generated</span>`
       : hasOpen
-        ? `<span class="doc-state doc-state-partial">${docTodos + docUnresolved} open</span>`
+        ? ''
         : `<span class="doc-state doc-state-complete">Clear</span>`;
 
     const primaryAction = exists
@@ -744,7 +748,7 @@ export function generateScenarioDetail(scenario, options = {}) {
     // already communicates the signal, so repeating "0 todo · 0 unresolved"
     // is just noise.
     const countParts = [];
-    if (docTodos > 0) countParts.push(`<span class="doc-count doc-count-todo" title="Open TODOs in this doc">${docTodos} todo</span>`);
+    if (docTodos > 0) countParts.push(`<span class="doc-count doc-count-todo" title="Open TODOs in this doc">${docTodos} TODOs</span>`);
     if (docUnresolved > 0) countParts.push(`<span class="doc-count doc-count-unresolved" title="Unresolved comments on this doc">${docUnresolved} unresolved</span>`);
     const countsRow = (exists && countParts.length > 0)
       ? `<div class="doc-counts">${countParts.join('')}</div>`
@@ -1725,6 +1729,94 @@ export function injectSidebarPanels(html) {
 .ph-proposal-foot button.ph-proposal-reject { background: var(--red); color: white; border-color: var(--red); }
 .ph-proposal-foot button:disabled { opacity: 0.5; cursor: not-allowed; }
 @media print { .ph-proposal-backdrop, .ph-orphan-group { display: none !important; } }
+
+/* Word-style thread side-panel (click a mark / comment row to open) */
+.ph-thread-panel {
+  position: fixed; top: 0; right: 0; bottom: 0; width: 380px; z-index: 10080;
+  background: var(--surface); border-left: 1px solid var(--border);
+  box-shadow: -8px 0 24px rgba(0,0,0,0.12);
+  display: none; flex-direction: column;
+  font: 510 0.82rem/1.4 'Inter Variable', Inter, system-ui, sans-serif;
+  transform: translateX(100%); transition: transform 0.18s ease-out;
+}
+.ph-thread-panel[data-open="1"] { display: flex; transform: translateX(0); }
+.ph-thread-head {
+  padding: 0.8rem 1rem; border-bottom: 1px solid var(--border);
+  display: flex; flex-direction: column; gap: 0.35rem;
+}
+.ph-thread-head-row { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; }
+.ph-thread-title { margin: 0; font-size: 0.95rem; font-weight: 700; color: var(--text); letter-spacing: -0.01em; }
+.ph-thread-close {
+  width: 28px; height: 28px; padding: 0; border: 0; background: transparent; color: var(--muted);
+  border-radius: 4px; cursor: pointer; display: inline-flex; align-items: center; justify-content: center;
+}
+.ph-thread-close:hover { background: var(--bg); color: var(--text); }
+.ph-thread-anchor {
+  font-size: 0.7rem; color: var(--muted);
+  padding: 0.35rem 0.55rem; border-left: 2px solid var(--accent);
+  background: var(--bg); border-radius: 3px;
+  overflow: hidden; text-overflow: ellipsis;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+}
+.ph-thread-body { flex: 1; overflow-y: auto; padding: 0.5rem 0.8rem 0.8rem; }
+.ph-thread-card {
+  padding: 0.55rem 0.7rem; margin: 0.4rem 0; border-radius: 6px;
+  background: var(--bg); border: 1px solid var(--border);
+}
+.ph-thread-card.ph-card-reply { margin-left: 1.4rem; background: var(--surface); }
+.ph-thread-card.ph-card-resolved { opacity: 0.65; }
+.ph-thread-card.ph-card-resolved .ph-card-body { text-decoration: line-through; }
+.ph-thread-card.ph-card-revise { border-left: 3px solid var(--purple, #7170ff); }
+.ph-thread-card.ph-card-todo-resolve { border-left: 3px solid var(--green, #1a7f37); }
+.ph-card-head { display: flex; align-items: center; gap: 0.45rem; margin-bottom: 0.25rem; }
+.ph-card-avatar {
+  width: 22px; height: 22px; border-radius: 50%;
+  background: var(--accent); color: white;
+  display: inline-flex; align-items: center; justify-content: center;
+  font: 700 0.7rem/1 inherit; flex-shrink: 0;
+}
+.ph-card-author { font-weight: 600; color: var(--text); font-size: 0.76rem; }
+.ph-card-time { color: var(--muted); font-size: 0.66rem; margin-left: auto; }
+.ph-card-chip {
+  font-size: 0.6rem; padding: 0.05rem 0.35rem; border-radius: 3px; font-weight: 600;
+  text-transform: uppercase; letter-spacing: 0.04em;
+}
+.ph-card-chip-revise { background: rgba(113,112,255,0.14); color: var(--purple, #7170ff); }
+.ph-card-chip-resolved { background: rgba(26,127,55,0.1); color: var(--green, #1a7f37); }
+.ph-card-body { color: var(--text); font-size: 0.8rem; white-space: pre-wrap; word-break: break-word; }
+.ph-card-actions {
+  display: flex; gap: 0.3rem; margin-top: 0.4rem; padding-top: 0.35rem;
+  border-top: 1px dashed var(--border);
+}
+.ph-card-actions button {
+  font: 600 0.65rem/1 inherit; padding: 0.25rem 0.5rem; border-radius: 3px;
+  border: 1px solid var(--border); background: var(--surface); color: var(--muted); cursor: pointer;
+}
+.ph-card-actions button:hover { border-color: var(--accent); color: var(--accent); }
+.ph-card-actions button.ph-act-resolve:hover { border-color: var(--green, #1a7f37); color: var(--green, #1a7f37); }
+.ph-card-actions button.ph-act-delete:hover { border-color: var(--red, #cf222e); color: var(--red, #cf222e); }
+.ph-thread-reply {
+  padding: 0.55rem 0.8rem; border-top: 1px solid var(--border); background: var(--bg);
+  display: flex; flex-direction: column; gap: 0.4rem;
+}
+.ph-thread-reply textarea {
+  width: 100%; min-height: 2.4rem; max-height: 10rem; resize: vertical; box-sizing: border-box;
+  padding: 0.35rem 0.5rem; border: 1px solid var(--border); border-radius: 4px;
+  font: 500 0.78rem/1.4 inherit; background: var(--surface); color: var(--text);
+}
+.ph-thread-reply textarea:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+.ph-thread-reply-row { display: flex; justify-content: space-between; align-items: center; gap: 0.3rem; }
+.ph-thread-reply-row .ph-thread-hint { font-size: 0.65rem; color: var(--muted); }
+.ph-thread-reply-row .ph-thread-err { color: var(--red, #cf222e); font-size: 0.68rem; }
+.ph-thread-reply button {
+  font: 600 0.72rem/1 inherit; padding: 0.3rem 0.7rem; border-radius: 4px; cursor: pointer;
+  border: 1px solid var(--accent, #5e6ad2); background: var(--accent, #5e6ad2); color: white;
+}
+.ph-thread-reply button:disabled { opacity: 0.5; cursor: not-allowed; }
+@media (max-width: 720px) {
+  .ph-thread-panel { width: 100%; }
+}
+@media print { .ph-thread-panel { display: none !important; } }
 .ph-side-panel > summary {
   cursor: pointer; padding: 0.55rem 1rem;
   font: 700 0.68rem/1 'Inter Variable', Inter, system-ui, sans-serif;
@@ -2028,6 +2120,357 @@ export function injectSidebarPanels(html) {
       document.removeEventListener('keydown', escCloseProposal);
     }
     function escCloseProposal(e){ if (e.key === 'Escape') closeProposalModal(); }
+
+    // ---- Word-style thread panel ----
+    // State: one panel at a time, keyed by thread root id. Opens from:
+    //   - click on a <mark class="ph-comment-mark"> (via data-cmt-id)
+    //   - click on a Comments panel item
+    //   - click on a TODO row thread chip
+    var threadState = { rootId: null, panel: null };
+    var cachedComments = [];
+
+    function findComment(list, id){
+      for (var i = 0; i < list.length; i++) {
+        if (list[i].id === id) return list[i];
+        if (list[i].replies) {
+          var r = findComment(list[i].replies, id);
+          if (r) return r;
+        }
+      }
+      return null;
+    }
+    function flattenThread(comments, threadRootId){
+      // Return every comment that belongs to this thread (root + all replies).
+      var out = [];
+      function walk(list){
+        list.forEach(function(c){
+          if (c.threadId === threadRootId || c.id === threadRootId) out.push(c);
+          if (c.replies) walk(c.replies);
+        });
+      }
+      walk(comments);
+      return out.sort(function(a, b){ return String(a.createdAt).localeCompare(String(b.createdAt)); });
+    }
+
+    function escHtml(s){
+      return String(s == null ? '' : s).replace(/[&<>"']/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; });
+    }
+    function initials(name){
+      return String(name || '?').trim().split(/\s+/).map(function(p){return p[0];}).slice(0, 2).join('').toUpperCase() || '?';
+    }
+    function relTime(iso){
+      if (!iso) return '';
+      var then = Date.parse(iso); if (!then) return '';
+      var delta = Math.max(0, Date.now() - then);
+      var m = delta / 60000, h = m / 60, d = h / 24;
+      if (m < 1) return 'just now';
+      if (m < 60) return Math.floor(m) + 'm ago';
+      if (h < 24) return Math.floor(h) + 'h ago';
+      if (d < 7) return Math.floor(d) + 'd ago';
+      return new Date(iso).toLocaleDateString();
+    }
+
+    function closeThreadPanel(){
+      if (threadState.panel) threadState.panel.remove();
+      threadState = { rootId: null, panel: null };
+      document.removeEventListener('keydown', escCloseThread);
+    }
+    function escCloseThread(e){ if (e.key === 'Escape') closeThreadPanel(); }
+
+    function openThread(commentId){
+      // Resolve which root we need and render. Re-entrant safe: re-opening
+      // the same thread refreshes it; opening a different one replaces.
+      var target = findComment(cachedComments, commentId);
+      if (!target) {
+        // Cache might be stale — force a refresh + retry once.
+        return refreshAll().then(function(){
+          var again = findComment(cachedComments, commentId);
+          if (again) openThread(again.threadId || again.id);
+        });
+      }
+      var rootId = target.threadId || target.id;
+      var root = findComment(cachedComments, rootId) || target;
+      threadState.rootId = rootId;
+
+      var thread = flattenThread(cachedComments, rootId);
+      if (!threadState.panel) {
+        threadState.panel = document.createElement('aside');
+        threadState.panel.className = 'ph-thread-panel';
+        threadState.panel.setAttribute('data-open', '1');
+        document.body.appendChild(threadState.panel);
+        document.addEventListener('keydown', escCloseThread);
+      }
+      renderThreadPanel(root, thread);
+    }
+
+    function renderThreadPanel(root, thread){
+      var panel = threadState.panel;
+      var anchor = root.anchor || {};
+      var role = meta.role || 'reviewer';
+      var me = meta.user || '';
+
+      panel.innerHTML = '';
+      // Header
+      var head = document.createElement('header');
+      head.className = 'ph-thread-head';
+      var titleChip = root.intent === 'revise'
+        ? '<span class="ph-card-chip ph-card-chip-revise">' + escHtml(root.reviseStatus || 'revise') + '</span>'
+        : root.todoResolves ? '<span class="ph-card-chip ph-card-chip-resolved">TODO resolve</span>' : '';
+      head.innerHTML =
+        '<div class="ph-thread-head-row">' +
+          '<h3 class="ph-thread-title">Thread ' + titleChip + '</h3>' +
+          '<button type="button" class="ph-thread-close" aria-label="Close">✕</button>' +
+        '</div>' +
+        (anchor.exact ? '<div class="ph-thread-anchor">' + escHtml(anchor.exact) + '</div>' : '');
+      panel.appendChild(head);
+      head.querySelector('.ph-thread-close').addEventListener('click', closeThreadPanel);
+
+      // Body — card per comment. Root first, then replies in createdAt order.
+      var body = document.createElement('div');
+      body.className = 'ph-thread-body';
+      thread.forEach(function(c){
+        body.appendChild(renderThreadCard(c, root, role, me));
+      });
+      panel.appendChild(body);
+
+      // Reply composer at the bottom.
+      var replyWrap = document.createElement('div');
+      replyWrap.className = 'ph-thread-reply';
+      replyWrap.innerHTML =
+        '<textarea placeholder="Reply…" rows="2"></textarea>' +
+        '<div class="ph-thread-reply-row">' +
+          '<span class="ph-thread-hint">Ctrl+Enter to post</span>' +
+          '<span class="ph-thread-err" aria-live="polite"></span>' +
+          '<button type="button">Reply</button>' +
+        '</div>';
+      panel.appendChild(replyWrap);
+      var replyTa = replyWrap.querySelector('textarea');
+      var replyBtn = replyWrap.querySelector('button');
+      var replyErr = replyWrap.querySelector('.ph-thread-err');
+      function doReply(){
+        var val = replyTa.value;
+        if (!val || !val.trim()) { replyErr.textContent = 'Required.'; return; }
+        replyBtn.disabled = true;
+        replyErr.textContent = '';
+        postComment(
+          { sectionId: anchor.sectionId, exact: anchor.exact, prefix: anchor.prefix || '', suffix: anchor.suffix || '' },
+          { body: val, replyTo: root.id }
+        ).then(function(){
+          replyTa.value = '';
+          replyBtn.disabled = false;
+          refreshAll().then(function(){ openThread(root.id); });
+        }).catch(function(err){
+          replyErr.textContent = String(err.message || err);
+          replyBtn.disabled = false;
+        });
+      }
+      replyBtn.addEventListener('click', doReply);
+      replyTa.addEventListener('keydown', function(e){
+        if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); doReply(); }
+        else if (e.key === 'Escape') { closeThreadPanel(); }
+      });
+    }
+
+    function renderThreadCard(c, root, role, me){
+      var card = document.createElement('div');
+      var classes = 'ph-thread-card';
+      if (c.id !== root.id) classes += ' ph-card-reply';
+      if (c.resolved) classes += ' ph-card-resolved';
+      if (c.intent === 'revise') classes += ' ph-card-revise';
+      if (c.todoResolves) classes += ' ph-card-todo-resolve';
+      card.className = classes;
+
+      var chip = '';
+      if (c.intent === 'revise' && c.reviseStatus) {
+        chip = '<span class="ph-card-chip ph-card-chip-revise">' + escHtml(c.reviseStatus) + '</span>';
+      } else if (c.resolved) {
+        chip = '<span class="ph-card-chip ph-card-chip-resolved">Resolved</span>';
+      } else if (c.todoResolves) {
+        chip = '<span class="ph-card-chip ph-card-chip-resolved">TODO resolve</span>';
+      }
+
+      var head = document.createElement('div');
+      head.className = 'ph-card-head';
+      head.innerHTML =
+        '<span class="ph-card-avatar">' + escHtml(initials(c.author)) + '</span>' +
+        '<span class="ph-card-author">' + escHtml(c.author || '?') + '</span>' +
+        (chip ? chip : '') +
+        '<span class="ph-card-time">' + escHtml(relTime(c.createdAt)) + (c.editedAt ? ' · edited' : '') + '</span>';
+      card.appendChild(head);
+
+      var body = document.createElement('div');
+      body.className = 'ph-card-body';
+      body.textContent = c.deleted ? '[deleted]' : (c.body || '');
+      card.appendChild(body);
+
+      // Actions row (skip if the comment is deleted — there's nothing to act on).
+      if (!c.deleted) {
+        var actions = document.createElement('div');
+        actions.className = 'ph-card-actions';
+        appendCardActions(actions, c, root, role, me);
+        if (actions.childNodes.length > 0) card.appendChild(actions);
+      }
+      return card;
+    }
+
+    function appendCardActions(actions, c, root, role, me){
+      var isAuthor = c.author && me && c.author === me;
+      var canEdit = isAuthor && !c.resolved && c.createdAt && (Date.now() - Date.parse(c.createdAt)) < 10 * 60 * 1000;
+      var canDelete = isAuthor || role === 'host';
+      var canResolve = role === 'host';
+
+      if (c.id === root.id && !c.resolved && c.intent !== 'revise' && !c.todoResolves) {
+        // Reply button handled by the bottom composer.
+      }
+
+      // Resolve / Unresolve on the root-level comment (Word-like: resolve applies to the thread).
+      if (canResolve && c.id === root.id && c.intent !== 'revise' && !c.todoResolves) {
+        var btnR = document.createElement('button');
+        btnR.type = 'button';
+        btnR.className = 'ph-act-resolve';
+        btnR.textContent = c.resolved ? 'Unresolve' : 'Resolve';
+        btnR.addEventListener('click', function(){
+          patchComment(c.id, { resolved: !c.resolved }).then(function(){
+            refreshAll().then(function(){ openThread(root.id); });
+          });
+        });
+        actions.appendChild(btnR);
+      }
+
+      // Revise-specific actions.
+      if (c.intent === 'revise' && role === 'host') {
+        if (c.reviseStatus === 'pending') {
+          var btnDisp = document.createElement('button');
+          btnDisp.type = 'button';
+          btnDisp.textContent = 'Dispatch now';
+          btnDisp.addEventListener('click', function(){
+            fetch('/api/comments/' + encodeURIComponent(meta.scenario) + '/' + encodeURIComponent(meta.doc) + '/' + encodeURIComponent(c.id) + '/revise-dispatch', { method: 'POST', credentials: 'same-origin' })
+              .then(function(){ refreshAll().then(function(){ openThread(root.id); }); });
+          });
+          actions.appendChild(btnDisp);
+        }
+        if (c.reviseStatus === 'proposed') {
+          var btnView = document.createElement('button');
+          btnView.type = 'button';
+          btnView.textContent = 'View proposal';
+          btnView.addEventListener('click', function(){
+            openProposalModal(c.id, c.body, c.anchor && c.anchor.exact);
+          });
+          actions.appendChild(btnView);
+          var btnRej = document.createElement('button');
+          btnRej.type = 'button';
+          btnRej.className = 'ph-act-delete';
+          btnRej.textContent = 'Reject';
+          btnRej.addEventListener('click', function(){
+            if (!confirm('Reject this proposal? The comment stays so you can follow up with another revise.')) return;
+            fetch('/api/comments/' + encodeURIComponent(meta.scenario) + '/' + encodeURIComponent(meta.doc) + '/' + encodeURIComponent(c.id) + '/revise-reject', { method: 'POST', credentials: 'same-origin' })
+              .then(function(){ refreshAll().then(function(){ openThread(root.id); }); });
+          });
+          actions.appendChild(btnRej);
+        }
+        if (c.reviseStatus === 'rejected') {
+          var btnRe = document.createElement('button');
+          btnRe.type = 'button';
+          btnRe.textContent = 'Re-dispatch';
+          btnRe.title = 'Try again — flips the status back to pending so /plan-revise picks it up';
+          btnRe.addEventListener('click', function(){
+            // Rolling back a reject = append a new 'revise' event with status=pending.
+            fetch('/api/comments/' + encodeURIComponent(meta.scenario) + '/' + encodeURIComponent(meta.doc) + '/' + encodeURIComponent(c.id) + '/revise-dispatch', { method: 'POST', credentials: 'same-origin' })
+              .then(function(){ refreshAll().then(function(){ openThread(root.id); }); });
+          });
+          actions.appendChild(btnRe);
+        }
+      }
+
+      if (canEdit) {
+        var btnE = document.createElement('button');
+        btnE.type = 'button';
+        btnE.textContent = 'Edit';
+        btnE.addEventListener('click', function(){
+          mountInlineEdit(c, root);
+        });
+        actions.appendChild(btnE);
+      }
+
+      if (canDelete) {
+        var btnD = document.createElement('button');
+        btnD.type = 'button';
+        btnD.className = 'ph-act-delete';
+        btnD.textContent = 'Delete';
+        btnD.addEventListener('click', function(){
+          if (!confirm('Delete this comment? This soft-deletes it; the event stays in the log.')) return;
+          fetch('/api/comments/' + encodeURIComponent(meta.scenario) + '/' + encodeURIComponent(meta.doc) + '/' + encodeURIComponent(c.id), { method: 'DELETE', credentials: 'same-origin' })
+            .then(function(){ refreshAll().then(function(){ openThread(root.id); }); });
+        });
+        actions.appendChild(btnD);
+      }
+    }
+
+    function patchComment(id, patch){
+      return fetch('/api/comments/' + encodeURIComponent(meta.scenario) + '/' + encodeURIComponent(meta.doc) + '/' + encodeURIComponent(id), {
+        method: 'PATCH', credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(patch)
+      }).then(function(r){ if (!r.ok) return r.text().then(function(t){ throw new Error(t); }); return r.json(); });
+    }
+
+    function mountInlineEdit(c, root){
+      // Replace the card body with a textarea + Save/Cancel row.
+      var card = document.querySelector('.ph-thread-card .ph-card-body'); // placeholder selector
+      // Safer: rebuild with edit mode flag.
+      var wrap = document.createElement('div');
+      wrap.style.cssText = 'display:flex;flex-direction:column;gap:0.3rem;';
+      var ta = document.createElement('textarea');
+      ta.value = c.body;
+      ta.rows = 3;
+      ta.style.cssText = 'width:100%;box-sizing:border-box;padding:0.3rem 0.5rem;border:1px solid var(--border);border-radius:4px;font:500 0.78rem/1.4 inherit;background:var(--surface);color:var(--text);';
+      var row = document.createElement('div');
+      row.style.cssText = 'display:flex;justify-content:flex-end;gap:0.3rem;';
+      var save = document.createElement('button');
+      save.type = 'button'; save.textContent = 'Save'; save.className = 'ph-act-resolve';
+      save.style.cssText = 'font:600 0.65rem/1 inherit;padding:0.25rem 0.5rem;border-radius:3px;border:1px solid var(--accent);background:var(--accent);color:white;cursor:pointer;';
+      var cancel = document.createElement('button');
+      cancel.type = 'button'; cancel.textContent = 'Cancel';
+      cancel.style.cssText = 'font:600 0.65rem/1 inherit;padding:0.25rem 0.5rem;border-radius:3px;border:1px solid var(--border);background:var(--surface);color:var(--muted);cursor:pointer;';
+      var err = document.createElement('span');
+      err.style.cssText = 'color:var(--red);font-size:0.68rem;align-self:center;flex:1;';
+      row.appendChild(err); row.appendChild(cancel); row.appendChild(save);
+      wrap.appendChild(ta); wrap.appendChild(row);
+
+      // Swap in
+      var targetCard = threadState.panel.querySelector('[data-card-id="' + c.id + '"]');
+      // (We don't tag cards yet — fall back to finding the card by body text match.)
+      // Simplest: re-render with a single editing flag — but we don't have that
+      // flag. For MVP, alert and open the composer-below flow.
+      // Full edit requires more plumbing; defer if this path's rare.
+      var bodies = threadState.panel.querySelectorAll('.ph-card-body');
+      for (var i = 0; i < bodies.length; i++) {
+        if (bodies[i].textContent === c.body) { bodies[i].replaceWith(wrap); break; }
+      }
+      setTimeout(function(){ ta.focus(); ta.select(); }, 0);
+
+      function doSave(){
+        err.textContent = '';
+        patchComment(c.id, { body: ta.value })
+          .then(function(){ refreshAll().then(function(){ openThread(root.id); }); })
+          .catch(function(e){ err.textContent = String(e.message || e); });
+      }
+      save.addEventListener('click', doSave);
+      cancel.addEventListener('click', function(){ refreshAll().then(function(){ openThread(root.id); }); });
+      ta.addEventListener('keydown', function(e){
+        if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); doSave(); }
+        else if (e.key === 'Escape') { refreshAll().then(function(){ openThread(root.id); }); }
+      });
+    }
+
+    // Dismiss thread panel on outside click (but not on doc marks or sidebar).
+    document.addEventListener('mousedown', function(e){
+      if (!threadState.panel) return;
+      if (threadState.panel.contains(e.target)) return;
+      if (e.target.closest('mark.ph-comment-mark, .ph-side-panel, .ph-injected-breadcrumb, .ph-proposal-backdrop')) return;
+      // Outside → close.
+      closeThreadPanel();
+    });
 
     // ---- TODOs ----
     // Build a stable {sectionId, exact} anchor from a TODO target element.
