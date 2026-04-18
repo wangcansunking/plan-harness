@@ -2893,16 +2893,18 @@ export function injectSidebarPanels(html) {
       });
     }
 
-    // Click any <mark> to scroll the Comments panel into view and flash the
-    // matching entry. Delegated so new marks don't need re-binding.
+    // Click any <mark> → open the thread panel for that comment's root.
+    // Also flashes the mark and ensures the Comments panel is open so the
+    // reader can see the source entry alongside the thread.
     document.addEventListener('click', function(e){
       var mark = e.target.closest && e.target.closest('mark.ph-comment-mark');
       if (!mark) return;
+      var cmtId = mark.getAttribute('data-cmt-id');
       commentPanel.open = true;
       localStorage.setItem(prefKey + ':comments', '1');
-      commentPanel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
       mark.classList.add('ph-flash');
       setTimeout(function(){ mark.classList.remove('ph-flash'); }, 1200);
+      if (cmtId) openThread(cmtId);
     });
 
     // ---- Selection detector + floating Comment CTA (Phase 4) ----
@@ -3073,6 +3075,10 @@ export function injectSidebarPanels(html) {
           var comments = (data && data.comments) || [];
           var flatList = [];
           (function walk(list){ list.forEach(function(c){ flatList.push(c); if (c.replies) walk(c.replies); }); })(comments);
+          // Cache the tree for openThread — it walks cachedComments to find
+          // the root by id. Without this assignment the thread panel never
+          // mounts after a Comments-panel click.
+          cachedComments = comments;
           todoCommentIndex = indexCommentsByTodoAnchor(comments);
           renderTodoPanel();
           // Split: orphaned comments get the pinned group at the top; the
