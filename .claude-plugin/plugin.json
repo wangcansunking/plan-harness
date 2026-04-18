@@ -2,6 +2,7 @@
   "name": "plan-harness",
   "version": "1.0.0",
   "description": "Project planning harness — generates interconnected design docs, test plans, state machines, test cases, and implementation plans as interactive HTML. Includes MCP tools for plan management and a local dashboard for viewing/navigating plans.",
+  "icon": "./assets/icon.png",
   "author": {
     "name": "DevX Platform team",
     "email": "substrateportalteam@service.microsoft.com"

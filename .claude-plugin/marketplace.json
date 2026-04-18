@@ -11,6 +11,7 @@
       "description": "Structured project planning with agent teams — generates interconnected design docs, test plans, state machines, test cases, and implementation plans as interactive HTML",
       "version": "1.0.0",
       "source": "./",
+      "icon": "./assets/icon.png",
       "category": "planning",
       "tags": [
         "planning",

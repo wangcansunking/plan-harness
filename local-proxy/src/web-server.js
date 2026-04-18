@@ -4,8 +4,10 @@
 
 import { createServer } from 'node:http';
 import { readdir, readFile, stat } from 'node:fs/promises';
-import { join, basename, extname, resolve, sep } from 'node:path';
-import { URL } from 'node:url';
+import { join, basename, extname, resolve, sep, dirname } from 'node:path';
+import { URL, fileURLToPath } from 'node:url';
+
+const ICON_PATH = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', 'assets', 'icon.png');
 import {
   generateDashboard,
   generateScenarioDetail,
@@ -146,6 +148,11 @@ async function handleRequest(req, res) {
   // can always submit successfully.
   if (auth.isEnabled() && pathname === '/_auth/login' && req.method === 'POST') {
     return handleLogin(req, res);
+  }
+
+  // Public: icon is served before auth so the login page favicon resolves.
+  if ((pathname === '/favicon.ico' || pathname === '/icon.png') && req.method === 'GET') {
+    return serveIcon(req, res);
   }
 
   if (auth.isEnabled() && !fromLoopback) {
@@ -396,6 +403,20 @@ function handleCommentStream(req, res, { scenario, doc }) {
 
 function getWorkspaceName() {
   return workspaceRootPath ? basename(workspaceRootPath) : 'workspace';
+}
+
+async function serveIcon(req, res) {
+  try {
+    const png = await readFile(ICON_PATH);
+    res.writeHead(200, {
+      'Content-Type': 'image/png',
+      'Cache-Control': 'public, max-age=86400',
+    });
+    res.end(png);
+  } catch {
+    res.writeHead(404, { 'Content-Type': 'text/plain' });
+    res.end('Icon not found');
+  }
 }
 
 async function serveDashboard(req, res) {
@@ -899,6 +920,7 @@ function serveLoginPage(req, res) {
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Plan Dashboard — Sign in</title>
+<link rel="icon" type="image/png" href="/icon.png">
 <script>
 (function(){
   try {
