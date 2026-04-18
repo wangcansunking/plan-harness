@@ -7518,6 +7518,69 @@ function injectSidebarPanels(html) {
 .ph-side-panel { border-top: 1px solid var(--border, #e0e0e0); margin: 0; padding: 0; background: transparent; border-left: 0; border-right: 0; border-bottom: 0; border-radius: 0; overflow: visible; }
 .ph-side-panel > .ph-panel-body { display: none; }
 .ph-side-panel[open] > .ph-panel-body { display: block; }
+.ph-subsection { margin-top: 0.4rem; }
+.ph-subsection > summary {
+  cursor: pointer; padding: 0.25rem 0.55rem; font-size: 0.66rem; font-weight: 600;
+  text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted, #62666d);
+  list-style: none; user-select: none;
+}
+.ph-subsection > summary::-webkit-details-marker { display: none; }
+.ph-subsection > summary::before {
+  content: '\u25B8'; font-size: 0.55rem; margin-right: 0.3rem; display: inline-block; transition: transform 0.15s;
+}
+.ph-subsection[open] > summary::before { transform: rotate(90deg); }
+.ph-todo-row { position: relative; border-left: 2px solid transparent; border-radius: 4px; transition: background 0.12s, border-color 0.12s; }
+.ph-todo-row:hover { background: var(--bg, #f7f8f8); border-left-color: var(--accent, #5e6ad2); }
+.ph-todo-row.ph-done .ph-todo-main .ph-item-label { text-decoration: line-through; opacity: 0.55; }
+.ph-todo-main { display: flex; align-items: flex-start; gap: 0.3rem; padding: 0.4rem 0.55rem; cursor: pointer; }
+.ph-todo-main:focus-visible { outline: 2px solid var(--accent, #5e6ad2); outline-offset: -2px; border-radius: 4px; }
+.ph-todo-text { flex: 1; min-width: 0; }
+.ph-todo-chip {
+  font-size: 0.6rem; padding: 0.05rem 0.35rem; border-radius: 3px; font-weight: 600;
+  text-transform: uppercase; letter-spacing: 0.04em; white-space: nowrap;
+  margin-left: 0.3rem; align-self: flex-start; margin-top: 0.1rem;
+}
+.ph-todo-chip-revise { background: rgba(113,112,255,0.14); color: var(--purple, #7170ff); }
+.ph-todo-chip-thread { background: var(--code-bg, #eeeff1); color: var(--muted, #62666d); }
+.ph-todo-actions {
+  display: none; gap: 0.15rem; padding: 0 0.3rem 0.3rem 0.5rem; align-items: center;
+}
+.ph-todo-row:hover .ph-todo-actions,
+.ph-todo-row:focus-within .ph-todo-actions { display: flex; }
+.ph-todo-action {
+  width: 22px; height: 22px; padding: 0; border: 1px solid transparent; background: transparent;
+  color: var(--muted, #62666d); border-radius: 4px; cursor: pointer;
+  display: inline-flex; align-items: center; justify-content: center;
+  transition: background 0.12s, color 0.12s, border-color 0.12s;
+}
+.ph-todo-action:hover { background: var(--surface, #f3f4f5); color: var(--accent, #5e6ad2); border-color: var(--border, #d0d6e0); }
+.ph-todo-action:focus-visible { outline: 2px solid var(--accent, #5e6ad2); outline-offset: 1px; }
+.ph-todo-action svg { width: 13px; height: 13px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.ph-todo-action[data-action="resolve"]:hover { color: var(--green, #1a7f37); }
+.ph-todo-action[data-action="revise"]:hover { color: var(--purple, #7170ff); }
+.ph-composer {
+  margin: 0 0.5rem 0.5rem; padding: 0.5rem; border: 1px solid var(--border, #d0d6e0);
+  border-radius: 6px; background: var(--surface, #f3f4f5);
+  display: none; flex-direction: column; gap: 0.4rem;
+}
+.ph-composer[data-open="1"] { display: flex; }
+.ph-composer textarea {
+  width: 100%; min-height: 3rem; max-height: 10rem; resize: vertical; box-sizing: border-box;
+  padding: 0.35rem 0.5rem; border: 1px solid var(--border, #d0d6e0); border-radius: 4px;
+  font: 500 0.78rem/1.35 inherit; background: var(--bg, #f7f8f8); color: var(--text, #08090a);
+}
+.ph-composer textarea:focus { outline: 2px solid var(--accent, #5e6ad2); outline-offset: -1px; }
+.ph-composer-meta { font-size: 0.65rem; color: var(--muted, #62666d); }
+.ph-composer-row { display: flex; justify-content: space-between; align-items: center; gap: 0.4rem; }
+.ph-composer button {
+  font: 600 0.72rem/1 inherit; padding: 0.3rem 0.7rem; border-radius: 4px; cursor: pointer;
+  border: 1px solid var(--border, #d0d6e0); background: var(--bg, #f7f8f8); color: var(--text, #08090a);
+  transition: background 0.12s, color 0.12s;
+}
+.ph-composer button.ph-composer-submit { background: var(--accent, #5e6ad2); color: var(--bg, #fff); border-color: var(--accent, #5e6ad2); }
+.ph-composer button.ph-composer-submit:hover { opacity: 0.9; }
+.ph-composer button:disabled { opacity: 0.5; cursor: not-allowed; }
+.ph-composer-error { color: var(--red, #cf222e); font-size: 0.7rem; }
 .ph-side-panel > summary {
   cursor: pointer; padding: 0.55rem 1rem;
   font: 700 0.68rem/1 'Inter Variable', Inter, system-ui, sans-serif;
@@ -7645,13 +7708,11 @@ function injectSidebarPanels(html) {
       panel.style.display = hasItems ? '' : 'none';
     }
 
-    function renderList(panel, items){
+    // ---- Comments panel (simple list) ----
+    function renderCommentList(panel, items){
       var body = panel.querySelector('.ph-panel-body');
       body.innerHTML = '';
-      if (!items.length) {
-        setVisibility(panel, false);
-        return;
-      }
+      if (!items.length) { setVisibility(panel, false); return; }
       setVisibility(panel, true);
       var ul = document.createElement('ul');
       ul.className = 'ph-panel-list';
@@ -7679,15 +7740,28 @@ function injectSidebarPanels(html) {
     }
 
     // ---- TODOs ----
+    // Build a stable {sectionId, exact} anchor from a TODO target element.
+    // sectionId = nearest [data-section-id] (heading); exact = trimmed, 200-char
+    // slice of the element's textContent. Same pair that a 'todoResolves'
+    // comment carries, so we can cross-reference on load.
+    function todoAnchor(target){
+      if (!target) return { sectionId: null, exact: '' };
+      var heading = findAnchorHeading(target);
+      var exact = (target.textContent || '').replace(/\\s+/g, ' ').trim().slice(0, 200);
+      return {
+        sectionId: heading ? heading.getAttribute('data-section-id') : null,
+        exact: exact
+      };
+    }
+
     function scanTodos(){
       var found = [];
       var seenTargets = new WeakSet();
       var add = function(item){
         if (!item.target) return;
-        // Dedup by target element so the same TODO picked up by both the
-        // text walker and the .todo class selector doesn't show twice.
         if (seenTargets.has(item.target)) return;
         seenTargets.add(item.target);
+        item.anchor = todoAnchor(item.target);
         found.push(item);
       };
 
@@ -7740,28 +7814,268 @@ function injectSidebarPanels(html) {
       return found;
     }
 
+    // ---- Comment index keyed by TODO anchor ----
+    // Returns { byKey: Map<sid::exact, {resolved: Comment|null, thread: Comment[], revising: Comment|null}> }
+    function indexCommentsByTodoAnchor(comments){
+      var byKey = new Map();
+      function flat(list){
+        var out = [];
+        function walk(arr){
+          arr.forEach(function(c){
+            out.push(c);
+            if (c.replies) walk(c.replies);
+          });
+        }
+        walk(list);
+        return out;
+      }
+      flat(comments).forEach(function(c){
+        if (!c.anchor || !c.anchor.sectionId || !c.anchor.exact) return;
+        var key = c.anchor.sectionId + '::' + c.anchor.exact;
+        var bucket = byKey.get(key);
+        if (!bucket) { bucket = { resolved: null, thread: [], revising: null }; byKey.set(key, bucket); }
+        bucket.thread.push(c);
+        if (c.todoResolves) bucket.resolved = c;
+        if (c.intent === 'revise' && c.reviseStatus && c.reviseStatus !== 'rejected' && !c.deleted) {
+          bucket.revising = c;
+        }
+      });
+      return byKey;
+    }
+
+    // ---- Composer helpers ----
+    var SVG_ICONS = {
+      reply: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>',
+      resolve: '<svg viewBox="0 0 24 24" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>',
+      revise: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M23 4v6h-6"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>'
+    };
+
+    var ACTION_PROFILES = {
+      reply:   { icon: SVG_ICONS.reply,   title: 'Reply',            placeholder: 'Reply\u2026',                        submit: 'Post',         hostOnly: false, send: function(body){ return { body: body, intent: 'comment' }; } },
+      resolve: { icon: SVG_ICONS.resolve, title: 'Resolve TODO',     placeholder: 'Note (optional)',               submit: 'Resolve',      hostOnly: true,  send: function(body){ return { body: body && body.trim() ? body : 'Resolved.', todoResolves: true }; } },
+      revise:  { icon: SVG_ICONS.revise,  title: 'Ask agent to update', placeholder: 'What should the agent change?', submit: 'Request update', hostOnly: true,  send: function(body){ return { body: body, intent: 'revise' }; } }
+    };
+
+    function postComment(anchor, payload){
+      var url = '/api/comments/' + encodeURIComponent(meta.scenario) + '/' + encodeURIComponent(meta.doc);
+      var body = Object.assign({ anchor: { sectionId: anchor.sectionId, exact: anchor.exact, prefix: '', suffix: '' } }, payload);
+      return fetch(url, {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      }).then(function(r){
+        if (!r.ok) return r.text().then(function(t){ throw new Error((r.status + ' ' + (t || r.statusText)).slice(0, 200)); });
+        return r.json();
+      });
+    }
+
+    function mountComposer(row, action, todo, onSuccess){
+      var existing = row.querySelector('.ph-composer');
+      if (existing) { existing.remove(); return; }
+      // Close any other open composer in the same panel.
+      Array.prototype.forEach.call(row.parentElement.querySelectorAll('.ph-composer'), function(c){ c.remove(); });
+
+      var profile = ACTION_PROFILES[action];
+      var composer = document.createElement('div');
+      composer.className = 'ph-composer';
+      composer.setAttribute('data-open', '1');
+      composer.innerHTML =
+        '<div class="ph-composer-meta">' + profile.title + '</div>' +
+        '<textarea placeholder="' + profile.placeholder + '" rows="2"></textarea>' +
+        '<div class="ph-composer-row">' +
+          '<span class="ph-composer-error" aria-live="polite"></span>' +
+          '<span style="display:flex;gap:0.3rem;">' +
+            '<button type="button" class="ph-composer-cancel">Cancel</button>' +
+            '<button type="button" class="ph-composer-submit">' + profile.submit + '</button>' +
+          '</span>' +
+        '</div>';
+      row.appendChild(composer);
+
+      var ta = composer.querySelector('textarea');
+      var submit = composer.querySelector('.ph-composer-submit');
+      var cancel = composer.querySelector('.ph-composer-cancel');
+      var errBox = composer.querySelector('.ph-composer-error');
+      setTimeout(function(){ ta.focus(); }, 0);
+
+      function close(){ composer.remove(); }
+
+      function doSubmit(){
+        errBox.textContent = '';
+        var val = ta.value;
+        if (action !== 'resolve' && (!val || !val.trim())) {
+          errBox.textContent = 'Required.';
+          return;
+        }
+        submit.disabled = true;
+        postComment(todo.anchor, profile.send(val))
+          .then(function(comment){ onSuccess(comment); close(); })
+          .catch(function(err){ errBox.textContent = String(err.message || err); submit.disabled = false; });
+      }
+
+      submit.addEventListener('click', doSubmit);
+      cancel.addEventListener('click', close);
+      ta.addEventListener('keydown', function(e){
+        if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); doSubmit(); }
+        else if (e.key === 'Escape') { e.preventDefault(); close(); }
+      });
+    }
+
+    // ---- TODO list renderer (with actions + resolved subsection) ----
+    var todoCommentIndex = new Map();
+
+    function renderTodoRow(todo){
+      var key = (todo.anchor.sectionId || '') + '::' + todo.anchor.exact;
+      var bucket = todoCommentIndex.get(key);
+      var resolvedBy = bucket && bucket.resolved;
+      var threadLen = bucket ? bucket.thread.length : 0;
+      var revising = bucket && bucket.revising;
+      todo.done = !!resolvedBy;
+
+      var li = document.createElement('li');
+      li.className = 'ph-todo-row' + (todo.done ? ' ph-done' : '');
+      li.setAttribute('data-todo-key', key);
+
+      var main = document.createElement('div');
+      main.className = 'ph-todo-main';
+      main.tabIndex = 0;
+      main.setAttribute('role', 'button');
+      main.setAttribute('aria-label', 'Scroll to TODO: ' + todo.label);
+      var text = document.createElement('div');
+      text.className = 'ph-todo-text';
+      var lbl = document.createElement('span');
+      lbl.className = 'ph-item-label';
+      lbl.textContent = todo.label;
+      text.appendChild(lbl);
+      if (todo.meta) {
+        var metaSpan = document.createElement('span');
+        metaSpan.className = 'ph-item-meta';
+        metaSpan.textContent = todo.meta;
+        text.appendChild(metaSpan);
+      }
+      main.appendChild(text);
+      if (revising) {
+        var chip = document.createElement('span');
+        chip.className = 'ph-todo-chip ph-todo-chip-revise';
+        chip.textContent = revising.reviseStatus;
+        main.appendChild(chip);
+      } else if (threadLen > 0 && !todo.done) {
+        var tc = document.createElement('span');
+        tc.className = 'ph-todo-chip ph-todo-chip-thread';
+        tc.textContent = threadLen + '\u{1F4AC}';
+        main.appendChild(tc);
+      }
+      main.addEventListener('click', function(){ scrollTo(todo.target); });
+      main.addEventListener('keydown', function(e){
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); scrollTo(todo.target); }
+      });
+      li.appendChild(main);
+
+      // Action bar \u2014 reveals on hover/focus.
+      var role = meta.role || 'reviewer';
+      var actions = document.createElement('div');
+      actions.className = 'ph-todo-actions';
+      var toShow = ['reply'];
+      if (role === 'host' && !todo.done) toShow.push('resolve');
+      if (role === 'host') toShow.push('revise');
+      toShow.forEach(function(key){
+        var prof = ACTION_PROFILES[key];
+        var btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'ph-todo-action';
+        btn.setAttribute('data-action', key);
+        btn.setAttribute('title', prof.title);
+        btn.setAttribute('aria-label', prof.title);
+        btn.innerHTML = prof.icon;
+        btn.addEventListener('click', function(ev){
+          ev.stopPropagation();
+          if (!todo.anchor.sectionId) {
+            alert('No section anchor for this TODO \u2014 cannot attach comment.');
+            return;
+          }
+          mountComposer(li, key, todo, function(comment){
+            // Update local index so the UI reflects the change without a refetch.
+            var b = todoCommentIndex.get(key);
+            if (!b) { b = { resolved: null, thread: [], revising: null }; todoCommentIndex.set(key, b); }
+            b.thread.push(comment);
+            if (comment.todoResolves) b.resolved = comment;
+            if (comment.intent === 'revise') b.revising = comment;
+            // Re-render the whole TODO panel so resolved items move to the
+            // subsection and chips reflect the new state.
+            renderTodoPanel();
+          });
+        });
+        actions.appendChild(btn);
+      });
+      li.appendChild(actions);
+
+      return li;
+    }
+
+    var allTodos = [];
+    function renderTodoPanel(){
+      var panel = todoPanel;
+      var body = panel.querySelector('.ph-panel-body');
+      body.innerHTML = '';
+
+      var open = [];
+      var resolved = [];
+      allTodos.forEach(function(t){
+        var key = (t.anchor.sectionId || '') + '::' + t.anchor.exact;
+        var bucket = todoCommentIndex.get(key);
+        if (bucket && bucket.resolved) resolved.push(t);
+        else open.push(t);
+      });
+
+      setCount(panel, open.length);
+      if (open.length + resolved.length === 0) { setVisibility(panel, false); return; }
+      setVisibility(panel, true);
+
+      if (open.length) {
+        var ul = document.createElement('ul');
+        ul.className = 'ph-panel-list';
+        open.forEach(function(t){ ul.appendChild(renderTodoRow(t)); });
+        body.appendChild(ul);
+      }
+
+      if (resolved.length) {
+        var sub = document.createElement('details');
+        sub.className = 'ph-subsection';
+        sub.innerHTML = '<summary>Resolved (' + resolved.length + ')</summary>';
+        var subBody = document.createElement('div');
+        var ul2 = document.createElement('ul');
+        ul2.className = 'ph-panel-list';
+        resolved.forEach(function(t){ ul2.appendChild(renderTodoRow(t)); });
+        subBody.appendChild(ul2);
+        sub.appendChild(subBody);
+        body.appendChild(sub);
+      }
+    }
+
     // ---- Build panels ----
     var todoPanel = makePanel('todos', 'TODOs');
-    todoPanel.dataset.empty = 'No open TODOs on this page.';
     var commentPanel = makePanel('comments', 'Comments');
-    commentPanel.dataset.empty = 'No comments yet.';
     sideNav.appendChild(todoPanel);
     sideNav.appendChild(commentPanel);
 
-    var todos = scanTodos();
-    setCount(todoPanel, todos.length);
-    renderList(todoPanel, todos);
+    allTodos = scanTodos();
 
-    // Comments \u2014 API may not exist yet (Phase 2). Graceful stub.
+    // Empty early-exit before hitting the API.
+    if (allTodos.length === 0 && (!meta.scenario || !meta.doc)) return;
     if (!meta.scenario || !meta.doc) {
-      setCount(commentPanel, 0);
-      renderList(commentPanel, []);
+      renderTodoPanel();
       return;
     }
+
     fetch('/api/comments/' + encodeURIComponent(meta.scenario) + '/' + encodeURIComponent(meta.doc), { credentials: 'same-origin' })
       .then(function(r){ if (!r.ok) throw 0; return r.json(); })
       .then(function(data){
         var comments = (data && data.comments) || [];
+        todoCommentIndex = indexCommentsByTodoAnchor(comments);
+        renderTodoPanel();
+
+        // Comments panel shows ALL comments; TODO-scoped ones still appear,
+        // which is useful when the reader wants a flat chronological view.
         setCount(commentPanel, comments.length);
         var items = comments.map(function(c){
           var anchor = c.anchor || {};
@@ -7770,14 +8084,14 @@ function injectSidebarPanels(html) {
             label: truncate(c.body || '(empty)', 70),
             meta: (c.author || '?') + ' \xB7 ' + truncate(anchor.exact || '', 40),
             target: target,
-            done: !!c.resolved
+            done: !!c.resolved || !!c.todoResolves
           };
         });
-        renderList(commentPanel, items);
+        renderCommentList(commentPanel, items);
       })
       .catch(function(){
-        // API not yet implemented / reachable. Keep the panel hidden \u2014
-        // dead chrome adds friction without signal.
+        // API unreachable \u2014 render TODOs without resolve overlay; hide comments.
+        renderTodoPanel();
         setVisibility(commentPanel, false);
       });
   }
@@ -7793,6 +8107,28 @@ function injectSidebarPanels(html) {
     return html.replace(/<\/body>/i, block + "</body>");
   }
   return html + block;
+}
+function normalizePlanTabs(html, existingSiblings) {
+  if (!html || typeof html !== "string" || !existingSiblings || existingSiblings.size === 0) return html;
+  return html.replace(
+    /<nav\b[^>]*class=["'][^"']*\bplan-tabs\b[^"']*["'][^>]*>([\s\S]*?)<\/nav>/gi,
+    function(match, inner) {
+      const newInner = inner.replace(
+        /<a\b([^>]*)>([\s\S]*?)<\/a>/gi,
+        function(aMatch, attrs, body) {
+          const hrefMatch = attrs.match(/\bhref\s*=\s*["']([^"']+)["']/i);
+          if (!hrefMatch) return aMatch;
+          const href = hrefMatch[1];
+          const basename3 = href.split(/[\\/]/).pop().split(/[#?]/)[0];
+          if (!existingSiblings.has(basename3)) return aMatch;
+          let newAttrs = attrs.replace(/\s+aria-disabled\s*=\s*["'][^"']*["']/gi, "");
+          const newBody = body.replace(/<span\b[^>]*class=["'][^"']*\bsoon\b[^"']*["'][^>]*>[\s\S]*?<\/span>/gi, "").trim();
+          return "<a" + newAttrs + ">" + newBody + "</a>";
+        }
+      );
+      return match.replace(inner, newInner);
+    }
+  );
 }
 function injectPlanMeta(html, meta3) {
   if (!html || typeof html !== "string" || !meta3) return html;
@@ -8011,6 +8347,16 @@ function validateIntent(intent, role) {
   }
   throw new CommentError("BAD_REQUEST", 'intent must be "comment" or "revise"', 400);
 }
+function validateTodoResolves(flag, role) {
+  if (flag == null || flag === false) return false;
+  if (flag !== true) {
+    throw new CommentError("BAD_REQUEST", "todoResolves must be a boolean", 400);
+  }
+  if (role !== "host") {
+    throw new CommentError("FORBIDDEN", "resolving a TODO requires host role", 403);
+  }
+  return true;
+}
 async function readEvents(file2) {
   try {
     const text = await readFile2(file2, "utf8");
@@ -8049,6 +8395,7 @@ function collapse(events) {
         threadId: ev.threadId || ev.id,
         replyTo: ev.replyTo || null,
         intent: ev.intent || "comment",
+        todoResolves: ev.todoResolves === true,
         resolved: false,
         resolvedBy: null,
         resolvedAt: null,
@@ -8120,6 +8467,7 @@ async function appendComment(workspaceRoot, scenario, doc, payload, actor) {
   const body = validateBody(payload.body);
   const anchor = validateAnchor(payload.anchor);
   const intent = validateIntent(payload.intent, actor.role);
+  const todoResolves = validateTodoResolves(payload.todoResolves, actor.role);
   let threadId = null;
   let replyTo = null;
   if (payload.replyTo != null) {
@@ -8147,6 +8495,7 @@ async function appendComment(workspaceRoot, scenario, doc, payload, actor) {
     replyTo,
     intent
   };
+  if (todoResolves) event.todoResolves = true;
   const file2 = commentFilePath(workspaceRoot, scenario, doc);
   await appendEvent(file2, event);
   return {
@@ -8158,6 +8507,7 @@ async function appendComment(workspaceRoot, scenario, doc, payload, actor) {
     threadId: event.threadId,
     replyTo,
     intent,
+    todoResolves,
     resolved: false,
     resolvedBy: null,
     resolvedAt: null,
@@ -8667,7 +9017,15 @@ async function serveHtmlFile(req, res, filePath, ctx = {}) {
   }
   try {
     const raw = await readFile3(resolved, "utf-8");
-    const withSectionIds = injectSectionIds(raw);
+    const scenarioDir = resolved.substring(0, resolved.lastIndexOf(sep3));
+    let siblingSet = /* @__PURE__ */ new Set();
+    try {
+      const siblingEntries = await readdir2(scenarioDir);
+      siblingSet = new Set(siblingEntries.filter((e) => /\.html?$/i.test(e)));
+    } catch {
+    }
+    const withTabsFixed = normalizePlanTabs(raw, siblingSet);
+    const withSectionIds = injectSectionIds(withTabsFixed);
     const { scenarioName, docLabel } = parseScenarioFromPath(resolved);
     const fromLoopback = !!ctx.fromLoopback;
     const meta3 = {

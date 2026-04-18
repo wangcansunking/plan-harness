@@ -9,7 +9,9 @@
     "sync": "node scripts/sync-to-cache.mjs",
     "dev": "npm run build && npm run sync",
     "dev:watch": "node scripts/dev-watch.mjs",
-    "prepare-release": "npm install --no-fund --no-audit && npm run build"
+    "smoke": "node scripts/smoke-test.mjs",
+    "test": "npm run smoke",
+    "prepare-release": "npm install --no-fund --no-audit && npm run build && npm run smoke"
   },
   "devDependencies": {
     "@modelcontextprotocol/sdk": "^1.12.0",

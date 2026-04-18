@@ -13,7 +13,8 @@ import {
   generateScenarioDetail,
   injectSectionIds,
   injectPlanMeta,
-  injectSidebarPanels
+  injectSidebarPanels,
+  normalizePlanTabs
 } from './templates/base.js';
 import * as auth from './auth.js';
 import * as commentMgr from './comment-manager.js';
@@ -487,8 +488,19 @@ async function serveHtmlFile(req, res, filePath, ctx = {}) {
   try {
     const raw = await readFile(resolved, 'utf-8');
 
+    // 0. Un-stick 'SOON' / aria-disabled from plan-tab links whose target file
+    //    now exists on disk. Writer bakes these markers at generation time when
+    //    siblings are missing; they go stale once siblings land.
+    const scenarioDir = resolved.substring(0, resolved.lastIndexOf(sep));
+    let siblingSet = new Set();
+    try {
+      const siblingEntries = await readdir(scenarioDir);
+      siblingSet = new Set(siblingEntries.filter(e => /\.html?$/i.test(e)));
+    } catch { /* best-effort; if readdir fails, skip normalization */ }
+    const withTabsFixed = normalizePlanTabs(raw, siblingSet);
+
     // 1. Stable content-anchors for the future comment widget (idempotent).
-    const withSectionIds = injectSectionIds(raw);
+    const withSectionIds = injectSectionIds(withTabsFixed);
 
     // 2. Server-supplied context for the widget so it doesn't round-trip /api/me
     //    on every open. `role` today is loopback-or-not; once the auth layer

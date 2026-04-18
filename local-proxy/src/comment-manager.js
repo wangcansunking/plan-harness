@@ -106,6 +106,17 @@ function validateIntent(intent, role) {
   throw new CommentError('BAD_REQUEST', 'intent must be "comment" or "revise"', 400);
 }
 
+function validateTodoResolves(flag, role) {
+  if (flag == null || flag === false) return false;
+  if (flag !== true) {
+    throw new CommentError('BAD_REQUEST', 'todoResolves must be a boolean', 400);
+  }
+  if (role !== 'host') {
+    throw new CommentError('FORBIDDEN', 'resolving a TODO requires host role', 403);
+  }
+  return true;
+}
+
 // ---- Disk I/O -------------------------------------------------------------
 
 async function readEvents(file) {
@@ -156,6 +167,7 @@ function collapse(events) {
         threadId: ev.threadId || ev.id,
         replyTo: ev.replyTo || null,
         intent: ev.intent || 'comment',
+        todoResolves: ev.todoResolves === true,
         resolved: false,
         resolvedBy: null,
         resolvedAt: null,
@@ -241,6 +253,7 @@ export async function appendComment(workspaceRoot, scenario, doc, payload, actor
   const body = validateBody(payload.body);
   const anchor = validateAnchor(payload.anchor);
   const intent = validateIntent(payload.intent, actor.role);
+  const todoResolves = validateTodoResolves(payload.todoResolves, actor.role);
 
   let threadId = null;
   let replyTo = null;
@@ -270,6 +283,7 @@ export async function appendComment(workspaceRoot, scenario, doc, payload, actor
     replyTo,
     intent,
   };
+  if (todoResolves) event.todoResolves = true;
   const file = commentFilePath(workspaceRoot, scenario, doc);
   await appendEvent(file, event);
 
@@ -282,6 +296,7 @@ export async function appendComment(workspaceRoot, scenario, doc, payload, actor
     threadId: event.threadId,
     replyTo,
     intent,
+    todoResolves,
     resolved: false,
     resolvedBy: null,
     resolvedAt: null,
