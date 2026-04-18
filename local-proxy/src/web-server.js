@@ -20,6 +20,7 @@ import {
 import * as auth from './auth.js';
 import * as commentMgr from './comment-manager.js';
 import { CommentError } from './comment-manager.js';
+import * as reviseMgr from './revise-dispatcher.js';
 
 let server = null;
 let serverPort = null;
@@ -260,6 +261,19 @@ async function handleRequest(req, res) {
     });
   }
 
+  // ---- Revise action routes (Phase 8) — all host-only ----
+  const reviseMatch = pathname.match(/^\/api\/comments\/([^/]+)\/([^/]+)\/([^/]+)\/revise-(dispatch|accept|reject|proposal)$/);
+  if (reviseMatch && (req.method === 'POST' || (req.method === 'GET' && reviseMatch[4] === 'proposal'))) {
+    return handleReviseAction(req, res, {
+      scenario: reviseMatch[1],
+      doc: reviseMatch[2],
+      id: reviseMatch[3],
+      action: reviseMatch[4],
+      method: req.method,
+      actor: resolveActor(req, fromLoopback),
+    });
+  }
+
   // 404
   res.writeHead(404, { 'Content-Type': 'text/plain' });
   res.end('Not Found');
@@ -335,8 +349,13 @@ async function handleCommentCreate(req, res, { scenario, doc, actor }) {
     }
     const body = await readJsonBody(req);
     const comment = await commentMgr.appendComment(workspaceRootPath, scenario, doc, body, actor);
+    // Active-mode auto-dispatch (Phase 8). Under passive mode this is a no-op.
+    if (comment.intent === 'revise') {
+      const status = await reviseMgr.maybeAutoDispatch(workspaceRootPath, scenario, doc, comment.id, actor);
+      if (status.dispatched) comment.reviseStatus = 'dispatched';
+    }
     commentMgr.broadcastCommentEvent(scenario, doc, 'create', comment);
-    console.error(`[comments] POST ${scenario}/${doc} author=${actor.name} id=${comment.id} intent=${comment.intent}`);
+    console.error(`[comments] POST ${scenario}/${doc} author=${actor.name} id=${comment.id} intent=${comment.intent}${comment.todoResolves ? ' todoResolves' : ''}`);
     sendJson(res, 201, comment);
   } catch (err) {
     sendCommentError(res, err);
@@ -373,6 +392,63 @@ async function handleCommentDelete(req, res, { scenario, doc, id, actor }) {
     console.error(`[comments] DELETE ${scenario}/${doc} id=${id} actor=${actor.name}`);
     res.writeHead(204);
     res.end();
+  } catch (err) {
+    sendCommentError(res, err);
+  }
+}
+
+// ---- Revise actions (Phase 8) ----
+
+async function loadCommentById(scenario, doc, id) {
+  const data = await commentMgr.listComments(workspaceRootPath, scenario, doc);
+  let found = null;
+  (function walk(list) {
+    for (const c of list) {
+      if (c.id === id) { found = c; return; }
+      if (c.replies) walk(c.replies);
+    }
+  })(data.comments || []);
+  return found;
+}
+
+async function handleReviseAction(req, res, { scenario, doc, id, action, method, actor }) {
+  try {
+    if (actor.role !== 'host') {
+      return sendJson(res, 403, { error: 'FORBIDDEN', message: 'revise flow is host-only' });
+    }
+    const comment = await loadCommentById(scenario, doc, id);
+    if (!comment) {
+      return sendJson(res, 404, { error: 'NOT_FOUND', message: 'comment not found' });
+    }
+    if (comment.intent !== 'revise' && action !== 'proposal') {
+      return sendJson(res, 400, { error: 'BAD_REQUEST', message: 'comment is not a revise intent' });
+    }
+
+    if (action === 'dispatch' && method === 'POST') {
+      await reviseMgr.dispatchRevise(workspaceRootPath, scenario, doc, id, actor);
+      commentMgr.broadcastCommentEvent(scenario, doc, 'revise-dispatch', { id });
+      console.error(`[comments] REVISE dispatch ${scenario}/${doc} id=${id} actor=${actor.name}`);
+      return sendJson(res, 202, { ok: true });
+    }
+    if (action === 'accept' && method === 'POST') {
+      await reviseMgr.acceptProposal(workspaceRootPath, scenario, doc, id, comment.anchor, actor);
+      commentMgr.broadcastCommentEvent(scenario, doc, 'revise-accept', { id });
+      console.error(`[comments] REVISE accept ${scenario}/${doc} id=${id} actor=${actor.name}`);
+      return sendJson(res, 200, { ok: true });
+    }
+    if (action === 'reject' && method === 'POST') {
+      await reviseMgr.rejectProposal(workspaceRootPath, scenario, doc, id, actor);
+      commentMgr.broadcastCommentEvent(scenario, doc, 'revise-reject', { id });
+      console.error(`[comments] REVISE reject ${scenario}/${doc} id=${id} actor=${actor.name}`);
+      return sendJson(res, 200, { ok: true });
+    }
+    if (action === 'proposal' && method === 'GET') {
+      const diff = await reviseMgr.readProposal(workspaceRootPath, scenario, doc, id);
+      if (diff == null) return sendJson(res, 404, { error: 'NOT_FOUND', message: 'no proposal on disk yet' });
+      res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
+      return res.end(diff);
+    }
+    return sendJson(res, 400, { error: 'BAD_REQUEST', message: 'unsupported revise action' });
   } catch (err) {
     sendCommentError(res, err);
   }

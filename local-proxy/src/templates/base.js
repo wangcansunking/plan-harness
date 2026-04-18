@@ -2418,6 +2418,26 @@ export function injectSidebarPanels(html) {
     }
 
     refreshAll();
+
+    // ---- Phase 6: SSE live updates ----
+    // Subscribe to the per-doc stream so posts from another tab / reviewer
+    // appear without a reload. EventSource handles reconnect; the 30s ping
+    // from comment-manager keeps the devtunnel connection open. We debounce
+    // refreshAll so a burst of events (e.g. migrated anchors after re-anchor)
+    // collapses into a single rebuild.
+    try {
+      var sse = new EventSource('/api/comments/' + encodeURIComponent(meta.scenario) + '/' + encodeURIComponent(meta.doc) + '/stream');
+      var refreshTimer = null;
+      function debouncedRefresh(){
+        if (refreshTimer) return;
+        refreshTimer = setTimeout(function(){ refreshTimer = null; refreshAll(); }, 120);
+      }
+      sse.addEventListener('comment', debouncedRefresh);
+      sse.addEventListener('error', function(){ /* EventSource will auto-retry */ });
+    } catch (e) {
+      // SSE unavailable (very old browser or blocked) — fall back to no live
+      // updates. The widget still works, it just won't auto-pick-up remote posts.
+    }
   }
 
   if (document.readyState === 'loading') {

@@ -2982,7 +2982,7 @@ var require_compile = __commonJS({
       const schOrFunc = root.refs[ref];
       if (schOrFunc)
         return schOrFunc;
-      let _sch = resolve3.call(this, root, ref);
+      let _sch = resolve4.call(this, root, ref);
       if (_sch === void 0) {
         const schema = (_a2 = root.localRefs) === null || _a2 === void 0 ? void 0 : _a2[ref];
         const { schemaId } = this.opts;
@@ -3009,7 +3009,7 @@ var require_compile = __commonJS({
     function sameSchemaEnv(s1, s2) {
       return s1.schema === s2.schema && s1.root === s2.root && s1.baseId === s2.baseId;
     }
-    function resolve3(root, ref) {
+    function resolve4(root, ref) {
       let sch;
       while (typeof (sch = this.refs[ref]) == "string")
         ref = sch;
@@ -3584,7 +3584,7 @@ var require_fast_uri = __commonJS({
       }
       return uri;
     }
-    function resolve3(baseURI, relativeURI, options) {
+    function resolve4(baseURI, relativeURI, options) {
       const schemelessOptions = options ? Object.assign({ scheme: "null" }, options) : { scheme: "null" };
       const resolved = resolveComponent(parse3(baseURI, schemelessOptions), parse3(relativeURI, schemelessOptions), schemelessOptions, true);
       schemelessOptions.skipEscape = true;
@@ -3811,7 +3811,7 @@ var require_fast_uri = __commonJS({
     var fastUri = {
       SCHEMES,
       normalize,
-      resolve: resolve3,
+      resolve: resolve4,
       resolveComponent,
       equal,
       serialize,
@@ -8413,6 +8413,26 @@ function injectSidebarPanels(html) {
     }
 
     refreshAll();
+
+    // ---- Phase 6: SSE live updates ----
+    // Subscribe to the per-doc stream so posts from another tab / reviewer
+    // appear without a reload. EventSource handles reconnect; the 30s ping
+    // from comment-manager keeps the devtunnel connection open. We debounce
+    // refreshAll so a burst of events (e.g. migrated anchors after re-anchor)
+    // collapses into a single rebuild.
+    try {
+      var sse = new EventSource('/api/comments/' + encodeURIComponent(meta.scenario) + '/' + encodeURIComponent(meta.doc) + '/stream');
+      var refreshTimer = null;
+      function debouncedRefresh(){
+        if (refreshTimer) return;
+        refreshTimer = setTimeout(function(){ refreshTimer = null; refreshAll(); }, 120);
+      }
+      sse.addEventListener('comment', debouncedRefresh);
+      sse.addEventListener('error', function(){ /* EventSource will auto-retry */ });
+    } catch (e) {
+      // SSE unavailable (very old browser or blocked) \u2014 fall back to no live
+      // updates. The widget still works, it just won't auto-pick-up remote posts.
+    }
   }
 
   if (document.readyState === 'loading') {
@@ -9006,6 +9026,153 @@ var init_comment_manager = __esm({
   }
 });
 
+// src/revise-dispatcher.js
+import { appendFile as appendFile2, mkdir as mkdir3, readFile as readFile3, writeFile as writeFile2 } from "node:fs/promises";
+import { join as join3, resolve as resolve2, sep as sep3 } from "node:path";
+async function readConfig(workspaceRoot, scenario) {
+  const file2 = resolve2(workspaceRoot, "plans", scenario, ".comment-config.json");
+  try {
+    const text = await readFile3(file2, "utf8");
+    const parsed = JSON.parse(text);
+    const mode = parsed && parsed.reviseMode === "active" ? "active" : "passive";
+    return { reviseMode: mode };
+  } catch {
+    return { ...DEFAULT_CONFIG };
+  }
+}
+function assertName2(value, label) {
+  if (typeof value !== "string" || !/^[a-zA-Z0-9_-]+$/.test(value) || value.length > 80) {
+    throw new CommentError("BAD_REQUEST", `invalid ${label}`, 400);
+  }
+}
+function proposalPath(workspaceRoot, scenario, doc, commentId) {
+  assertName2(scenario, "scenario");
+  assertName2(doc, "doc");
+  if (!/^cmt_[a-f0-9]{6}$/.test(commentId)) {
+    throw new CommentError("BAD_REQUEST", "invalid comment id", 400);
+  }
+  const plansRoot = resolve2(workspaceRoot, "plans");
+  const file2 = resolve2(plansRoot, scenario, ".comments", `${doc}.proposals`, `${commentId}.diff`);
+  if (!file2.startsWith(plansRoot + sep3)) {
+    throw new CommentError("BAD_REQUEST", "path traversal rejected", 400);
+  }
+  return file2;
+}
+function commentFilePath2(workspaceRoot, scenario, doc) {
+  assertName2(scenario, "scenario");
+  assertName2(doc, "doc");
+  const plansRoot = resolve2(workspaceRoot, "plans");
+  const file2 = resolve2(plansRoot, scenario, ".comments", `${doc}.jsonl`);
+  if (!file2.startsWith(plansRoot + sep3)) {
+    throw new CommentError("BAD_REQUEST", "path traversal rejected", 400);
+  }
+  return file2;
+}
+function docHtmlPath(workspaceRoot, scenario, doc) {
+  assertName2(scenario, "scenario");
+  assertName2(doc, "doc");
+  const plansRoot = resolve2(workspaceRoot, "plans");
+  const file2 = resolve2(plansRoot, scenario, `${doc}.html`);
+  if (!file2.startsWith(plansRoot + sep3)) {
+    throw new CommentError("BAD_REQUEST", "path traversal rejected", 400);
+  }
+  return file2;
+}
+async function appendEvent2(file2, event) {
+  await mkdir3(join3(file2, ".."), { recursive: true });
+  await appendFile2(file2, JSON.stringify(event) + "\n", "utf8");
+}
+function requireHost(actor) {
+  if (!actor || actor.role !== "host") {
+    throw new CommentError("FORBIDDEN", "revise flow is host-only", 403);
+  }
+}
+async function dispatchRevise(workspaceRoot, scenario, doc, commentId, actor) {
+  requireHost(actor);
+  const file2 = commentFilePath2(workspaceRoot, scenario, doc);
+  await appendEvent2(file2, {
+    op: "revise",
+    id: commentId,
+    reviseStatus: "dispatched",
+    at: (/* @__PURE__ */ new Date()).toISOString(),
+    by: actor.name
+  });
+}
+async function acceptProposal(workspaceRoot, scenario, doc, commentId, anchor, actor) {
+  requireHost(actor);
+  const propFile = proposalPath(workspaceRoot, scenario, doc, commentId);
+  const diff = await readFile3(propFile, "utf8");
+  const parsed = parseProposal(diff);
+  if (!parsed) throw new CommentError("BAD_REQUEST", "proposal format unrecognized", 400);
+  const htmlPath = docHtmlPath(workspaceRoot, scenario, doc);
+  const html = await readFile3(htmlPath, "utf8");
+  if (anchor && anchor.exact && !html.includes(anchor.exact)) {
+    throw new CommentError("ANCHOR_DRIFT", "anchor no longer matches; reattach manually", 409);
+  }
+  if (!html.includes(parsed.from)) {
+    throw new CommentError("ANCHOR_DRIFT", "proposal target text not found in doc", 409);
+  }
+  const next = html.replace(parsed.from, parsed.to);
+  await writeFile2(htmlPath, next, "utf8");
+  const eventFile = commentFilePath2(workspaceRoot, scenario, doc);
+  await appendEvent2(eventFile, {
+    op: "revise",
+    id: commentId,
+    reviseStatus: "accepted",
+    at: (/* @__PURE__ */ new Date()).toISOString(),
+    by: actor.name
+  });
+  await appendEvent2(eventFile, {
+    op: "resolve",
+    id: commentId,
+    resolved: true,
+    at: (/* @__PURE__ */ new Date()).toISOString(),
+    by: actor.name
+  });
+}
+async function rejectProposal(workspaceRoot, scenario, doc, commentId, actor) {
+  requireHost(actor);
+  const eventFile = commentFilePath2(workspaceRoot, scenario, doc);
+  await appendEvent2(eventFile, {
+    op: "revise",
+    id: commentId,
+    reviseStatus: "rejected",
+    at: (/* @__PURE__ */ new Date()).toISOString(),
+    by: actor.name
+  });
+}
+async function readProposal(workspaceRoot, scenario, doc, commentId) {
+  const file2 = proposalPath(workspaceRoot, scenario, doc, commentId);
+  try {
+    return await readFile3(file2, "utf8");
+  } catch (err) {
+    if (err.code === "ENOENT") return null;
+    throw err;
+  }
+}
+async function maybeAutoDispatch(workspaceRoot, scenario, doc, commentId, actor) {
+  const cfg = await readConfig(workspaceRoot, scenario);
+  if (cfg.reviseMode !== "active") return { mode: "passive", dispatched: false };
+  try {
+    await dispatchRevise(workspaceRoot, scenario, doc, commentId, actor);
+    return { mode: "active", dispatched: true };
+  } catch {
+    return { mode: "active", dispatched: false };
+  }
+}
+function parseProposal(diff) {
+  const m = /^REPLACE:\s*\n([\s\S]*?)\nWITH:\s*\n([\s\S]*)$/m.exec(String(diff || ""));
+  if (!m) return null;
+  return { from: m[1], to: m[2] };
+}
+var DEFAULT_CONFIG;
+var init_revise_dispatcher = __esm({
+  "src/revise-dispatcher.js"() {
+    init_comment_manager();
+    DEFAULT_CONFIG = { reviseMode: "passive" };
+  }
+});
+
 // src/web-server.js
 var web_server_exports = {};
 __export(web_server_exports, {
@@ -9018,14 +9185,14 @@ __export(web_server_exports, {
   stopDashboard: () => stopDashboard
 });
 import { createServer } from "node:http";
-import { readdir as readdir2, readFile as readFile3, stat as stat2 } from "node:fs/promises";
-import { join as join3, basename as basename2, extname as extname2, resolve as resolve2, sep as sep3, dirname } from "node:path";
+import { readdir as readdir2, readFile as readFile4, stat as stat2 } from "node:fs/promises";
+import { join as join4, basename as basename2, extname as extname2, resolve as resolve3, sep as sep4, dirname } from "node:path";
 import { URL as URL2, fileURLToPath } from "node:url";
 async function startDashboard(workspaceRoot, port = 3847) {
   if (server) {
     return getDashboardUrl();
   }
-  workspaceRootPath = resolve2(workspaceRoot);
+  workspaceRootPath = resolve3(workspaceRoot);
   return new Promise((resolvePromise, rejectPromise) => {
     server = createServer(async (req, res) => {
       try {
@@ -9170,6 +9337,17 @@ async function handleRequest(req, res) {
       actor: resolveActor(req, fromLoopback)
     });
   }
+  const reviseMatch = pathname.match(/^\/api\/comments\/([^/]+)\/([^/]+)\/([^/]+)\/revise-(dispatch|accept|reject|proposal)$/);
+  if (reviseMatch && (req.method === "POST" || req.method === "GET" && reviseMatch[4] === "proposal")) {
+    return handleReviseAction(req, res, {
+      scenario: reviseMatch[1],
+      doc: reviseMatch[2],
+      id: reviseMatch[3],
+      action: reviseMatch[4],
+      method: req.method,
+      actor: resolveActor(req, fromLoopback)
+    });
+  }
   res.writeHead(404, { "Content-Type": "text/plain" });
   res.end("Not Found");
 }
@@ -9235,8 +9413,12 @@ async function handleCommentCreate(req, res, { scenario, doc, actor }) {
     }
     const body = await readJsonBody(req);
     const comment = await appendComment(workspaceRootPath, scenario, doc, body, actor);
+    if (comment.intent === "revise") {
+      const status = await maybeAutoDispatch(workspaceRootPath, scenario, doc, comment.id, actor);
+      if (status.dispatched) comment.reviseStatus = "dispatched";
+    }
     broadcastCommentEvent(scenario, doc, "create", comment);
-    console.error(`[comments] POST ${scenario}/${doc} author=${actor.name} id=${comment.id} intent=${comment.intent}`);
+    console.error(`[comments] POST ${scenario}/${doc} author=${actor.name} id=${comment.id} intent=${comment.intent}${comment.todoResolves ? " todoResolves" : ""}`);
     sendJson(res, 201, comment);
   } catch (err) {
     sendCommentError(res, err);
@@ -9275,6 +9457,61 @@ async function handleCommentDelete(req, res, { scenario, doc, id, actor }) {
     sendCommentError(res, err);
   }
 }
+async function loadCommentById(scenario, doc, id) {
+  const data = await listComments(workspaceRootPath, scenario, doc);
+  let found = null;
+  (function walk(list) {
+    for (const c of list) {
+      if (c.id === id) {
+        found = c;
+        return;
+      }
+      if (c.replies) walk(c.replies);
+    }
+  })(data.comments || []);
+  return found;
+}
+async function handleReviseAction(req, res, { scenario, doc, id, action, method, actor }) {
+  try {
+    if (actor.role !== "host") {
+      return sendJson(res, 403, { error: "FORBIDDEN", message: "revise flow is host-only" });
+    }
+    const comment = await loadCommentById(scenario, doc, id);
+    if (!comment) {
+      return sendJson(res, 404, { error: "NOT_FOUND", message: "comment not found" });
+    }
+    if (comment.intent !== "revise" && action !== "proposal") {
+      return sendJson(res, 400, { error: "BAD_REQUEST", message: "comment is not a revise intent" });
+    }
+    if (action === "dispatch" && method === "POST") {
+      await dispatchRevise(workspaceRootPath, scenario, doc, id, actor);
+      broadcastCommentEvent(scenario, doc, "revise-dispatch", { id });
+      console.error(`[comments] REVISE dispatch ${scenario}/${doc} id=${id} actor=${actor.name}`);
+      return sendJson(res, 202, { ok: true });
+    }
+    if (action === "accept" && method === "POST") {
+      await acceptProposal(workspaceRootPath, scenario, doc, id, comment.anchor, actor);
+      broadcastCommentEvent(scenario, doc, "revise-accept", { id });
+      console.error(`[comments] REVISE accept ${scenario}/${doc} id=${id} actor=${actor.name}`);
+      return sendJson(res, 200, { ok: true });
+    }
+    if (action === "reject" && method === "POST") {
+      await rejectProposal(workspaceRootPath, scenario, doc, id, actor);
+      broadcastCommentEvent(scenario, doc, "revise-reject", { id });
+      console.error(`[comments] REVISE reject ${scenario}/${doc} id=${id} actor=${actor.name}`);
+      return sendJson(res, 200, { ok: true });
+    }
+    if (action === "proposal" && method === "GET") {
+      const diff = await readProposal(workspaceRootPath, scenario, doc, id);
+      if (diff == null) return sendJson(res, 404, { error: "NOT_FOUND", message: "no proposal on disk yet" });
+      res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8" });
+      return res.end(diff);
+    }
+    return sendJson(res, 400, { error: "BAD_REQUEST", message: "unsupported revise action" });
+  } catch (err) {
+    sendCommentError(res, err);
+  }
+}
 function handleCommentStream(req, res, { scenario, doc }) {
   try {
     listComments(workspaceRootPath, scenario, doc).catch(() => {
@@ -9301,7 +9538,7 @@ function getWorkspaceName() {
 }
 async function serveIcon(req, res) {
   try {
-    const png = await readFile3(ICON_PATH);
+    const png = await readFile4(ICON_PATH);
     res.writeHead(200, {
       "Content-Type": "image/png",
       "Cache-Control": "public, max-age=86400"
@@ -9354,8 +9591,8 @@ async function serveHtmlFile(req, res, filePath, ctx = {}) {
     res.end('Missing "path" query parameter');
     return;
   }
-  const resolved = resolve2(filePath);
-  if (resolved !== workspaceRootPath && !resolved.startsWith(workspaceRootPath + sep3)) {
+  const resolved = resolve3(filePath);
+  if (resolved !== workspaceRootPath && !resolved.startsWith(workspaceRootPath + sep4)) {
     res.writeHead(403, { "Content-Type": "text/plain" });
     res.end("Access denied: path is outside workspace root");
     return;
@@ -9367,8 +9604,8 @@ async function serveHtmlFile(req, res, filePath, ctx = {}) {
     return;
   }
   try {
-    const raw = await readFile3(resolved, "utf-8");
-    const scenarioDir = resolved.substring(0, resolved.lastIndexOf(sep3));
+    const raw = await readFile4(resolved, "utf-8");
+    const scenarioDir = resolved.substring(0, resolved.lastIndexOf(sep4));
     let siblingSet = /* @__PURE__ */ new Set();
     try {
       const siblingEntries = await readdir2(scenarioDir);
@@ -9508,7 +9745,7 @@ async function serveApiScenarioStatus(req, res, scenarioName) {
   }, null, 2));
 }
 async function scanScenarios() {
-  const plansDir = join3(workspaceRootPath, "plans");
+  const plansDir = join4(workspaceRootPath, "plans");
   try {
     await stat2(plansDir);
   } catch {
@@ -9519,7 +9756,7 @@ async function scanScenarios() {
   const flatFiles = [];
   for (const entry of entries) {
     if (entry.isDirectory()) {
-      const scenario = await scanScenarioDir(entry.name, join3(plansDir, entry.name));
+      const scenario = await scanScenarioDir(entry.name, join4(plansDir, entry.name));
       if (scenario) subdirScenarios.push(scenario);
     } else if (entry.isFile() && extname2(entry.name).toLowerCase() === ".html") {
       flatFiles.push(entry.name);
@@ -9552,7 +9789,7 @@ async function scanScenarioDir(name, dirPath) {
     for (const suffix of pt.suffixes) {
       const matching = entries.find((e) => e.toLowerCase().endsWith(suffix));
       if (matching) {
-        const filePath = join3(dirPath, matching);
+        const filePath = join4(dirPath, matching);
         const { todos, done } = await estimateFileCompletion(filePath);
         files.push({ type: pt.type, path: filePath, exists: true, todos, done });
         found = true;
@@ -9560,7 +9797,7 @@ async function scanScenarioDir(name, dirPath) {
       }
     }
     if (!found) {
-      files.push({ type: pt.type, path: join3(dirPath, `${name}-${pt.type}.html`), exists: false, todos: 0, done: 0 });
+      files.push({ type: pt.type, path: join4(dirPath, `${name}-${pt.type}.html`), exists: false, todos: 0, done: 0 });
     }
   }
   const totalTodos = files.reduce((s, f) => s + (f.todos || 0), 0);
@@ -9646,7 +9883,7 @@ function groupFlatFilesIntoScenarios(fileNames, plansDir) {
       prefixMap.get(prefix).push({
         type: planTypeMap[matchedSuffix],
         fileName,
-        path: join3(plansDir, fileName),
+        path: join4(plansDir, fileName),
         exists: true
       });
     }
@@ -9659,7 +9896,7 @@ function groupFlatFilesIntoScenarios(fileNames, plansDir) {
       if (found) {
         return { type, path: found.path, exists: true, todos: 0, done: 0 };
       }
-      return { type, path: join3(plansDir, `${prefix}-${type}.html`), exists: false, todos: 0, done: 0 };
+      return { type, path: join4(plansDir, `${prefix}-${type}.html`), exists: false, todos: 0, done: 0 };
     });
     scenarios.push({
       name: prefix,
@@ -9675,7 +9912,7 @@ function groupFlatFilesIntoScenarios(fileNames, plansDir) {
 }
 async function estimateFileCompletion(filePath) {
   try {
-    const content = await readFile3(filePath, "utf-8");
+    const content = await readFile4(filePath, "utf-8");
     let todos = 0;
     let done = 0;
     const inlineTodos = content.match(/\b(TODO|FIXME)\s*[:：]\s*.{2,}/g);
@@ -9696,13 +9933,13 @@ async function estimateFileCompletion(filePath) {
 }
 async function readScenarioDescription(dirPath) {
   try {
-    let metaPath = join3(dirPath, "manifest.json");
+    let metaPath = join4(dirPath, "manifest.json");
     try {
       await stat2(metaPath);
     } catch {
-      metaPath = join3(dirPath, "metadata.json");
+      metaPath = join4(dirPath, "metadata.json");
     }
-    const content = await readFile3(metaPath, "utf-8");
+    const content = await readFile4(metaPath, "utf-8");
     const meta3 = JSON.parse(content);
     return meta3.description || null;
   } catch {
@@ -9856,7 +10093,8 @@ var init_web_server = __esm({
     init_auth();
     init_comment_manager();
     init_comment_manager();
-    ICON_PATH = resolve2(dirname(fileURLToPath(import.meta.url)), "..", "..", "assets", "icon.png");
+    init_revise_dispatcher();
+    ICON_PATH = resolve3(dirname(fileURLToPath(import.meta.url)), "..", "..", "assets", "icon.png");
     server = null;
     serverPort = null;
     workspaceRootPath = null;
@@ -22657,7 +22895,7 @@ var Protocol = class {
           return;
         }
         const pollInterval = task2.pollInterval ?? this._options?.defaultTaskPollInterval ?? 1e3;
-        await new Promise((resolve3) => setTimeout(resolve3, pollInterval));
+        await new Promise((resolve4) => setTimeout(resolve4, pollInterval));
         options?.signal?.throwIfAborted();
       }
     } catch (error2) {
@@ -22674,7 +22912,7 @@ var Protocol = class {
    */
   request(request, resultSchema, options) {
     const { relatedRequestId, resumptionToken, onresumptiontoken, task, relatedTask } = options ?? {};
-    return new Promise((resolve3, reject) => {
+    return new Promise((resolve4, reject) => {
       const earlyReject = (error2) => {
         reject(error2);
       };
@@ -22752,7 +22990,7 @@ var Protocol = class {
           if (!parseResult.success) {
             reject(parseResult.error);
           } else {
-            resolve3(parseResult.data);
+            resolve4(parseResult.data);
           }
         } catch (error2) {
           reject(error2);
@@ -23013,12 +23251,12 @@ var Protocol = class {
       }
     } catch {
     }
-    return new Promise((resolve3, reject) => {
+    return new Promise((resolve4, reject) => {
       if (signal.aborted) {
         reject(new McpError(ErrorCode.InvalidRequest, "Request cancelled"));
         return;
       }
-      const timeoutId = setTimeout(resolve3, interval);
+      const timeoutId = setTimeout(resolve4, interval);
       signal.addEventListener("abort", () => {
         clearTimeout(timeoutId);
         reject(new McpError(ErrorCode.InvalidRequest, "Request cancelled"));
@@ -23888,12 +24126,12 @@ var StdioServerTransport = class {
     this.onclose?.();
   }
   send(message) {
-    return new Promise((resolve3) => {
+    return new Promise((resolve4) => {
       const json2 = serializeMessage(message);
       if (this._stdout.write(json2)) {
-        resolve3();
+        resolve4();
       } else {
-        this._stdout.once("drain", resolve3);
+        this._stdout.once("drain", resolve4);
       }
     });
   }
@@ -24613,14 +24851,14 @@ ${ctx.structure.csprojFiles.map((f) => `  ${f}`).join("\n")}` : ""
           tunnelProcess = proc;
           tunnelMode = args.mode;
           let output = "";
-          const urlPromise = new Promise((resolve3, reject) => {
+          const urlPromise = new Promise((resolve4, reject) => {
             const timeout = setTimeout(() => reject(new Error("Timed out waiting for devtunnel URL")), 3e4);
             const onData = (chunk) => {
               output += chunk.toString();
               const urlMatch = output.match(/https:\/\/[^\s]+devtunnels\.ms[^\s]*/);
               if (urlMatch) {
                 clearTimeout(timeout);
-                resolve3(urlMatch[0]);
+                resolve4(urlMatch[0]);
               }
             };
             proc.stdout.on("data", onData);
