@@ -6801,6 +6801,7 @@ var require_dist = __commonJS({
 });
 
 // src/templates/base.js
+import { createHash } from "node:crypto";
 function getBaseCSS() {
   return `
   /* Palette inspired by Linear (see plan-harness/DESIGN.md).
@@ -7467,6 +7468,53 @@ function escapeAttr(str) {
   if (!str) return "";
   return String(str).replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/'/g, "&#39;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
+function normalizeSectionTitle(title) {
+  return String(title).toLowerCase().replace(/\s+/g, "-").replace(/[^a-z0-9-]/g, "").replace(/-+/g, "-").replace(/^-|-$/g, "");
+}
+function computeSectionId(parentChain, depth, normalizedTitle) {
+  const input = `${depth}:${parentChain.join("/")}:${normalizedTitle}`;
+  const hex3 = createHash("sha256").update(input, "utf8").digest("hex").slice(0, 16);
+  return `sec-${hex3}`;
+}
+function injectSectionIds(html) {
+  if (!html || typeof html !== "string") return html;
+  const seen = /* @__PURE__ */ new Map();
+  const parentChain = [];
+  return html.replace(
+    /<(h[234])\b([^>]*)>([\s\S]*?)<\/\1>/gi,
+    (match, tag, attrs, inner) => {
+      const depth = parseInt(tag[1], 10);
+      const text = inner.replace(/<[^>]+>/g, "").replace(/&[a-zA-Z#0-9]+;/g, " ").replace(/\s+/g, " ").trim();
+      const normalized = normalizeSectionTitle(text);
+      if (!normalized) return match;
+      parentChain.length = depth - 2;
+      parentChain.push(normalized);
+      if (/\bdata-section-id\s*=/.test(attrs)) return match;
+      const parents = parentChain.slice(0, -1);
+      let id = computeSectionId(parents, depth, normalized);
+      if (seen.has(id)) {
+        const n = seen.get(id) + 1;
+        seen.set(id, n);
+        id = `${id}-${n}`;
+      } else {
+        seen.set(id, 1);
+      }
+      return `<${tag}${attrs} data-section-id="${id}">${inner}</${tag}>`;
+    }
+  );
+}
+function injectPlanMeta(html, meta3) {
+  if (!html || typeof html !== "string" || !meta3) return html;
+  const json2 = JSON.stringify(meta3).replace(/</g, "\\u003c");
+  const tag = `<script>window.__PLAN_HARNESS_META__=${json2};</script>`;
+  if (/<\/head>/i.test(html)) {
+    return html.replace(/<\/head>/i, tag + "</head>");
+  }
+  if (/<body\b[^>]*>/i.test(html)) {
+    return html.replace(/<body\b([^>]*)>/i, (_m, a) => `<body${a}>${tag}`);
+  }
+  return tag + html;
+}
 var init_base = __esm({
   "src/templates/base.js"() {
   }
@@ -7711,7 +7759,7 @@ async function handleRequest(req, res) {
   }
   if (pathname === "/view" && req.method === "GET") {
     const filePath = parsedUrl.searchParams.get("path");
-    return serveHtmlFile(req, res, filePath);
+    return serveHtmlFile(req, res, filePath, { fromLoopback });
   }
   if (pathname === "/api/scenarios" && req.method === "GET") {
     return serveApiScenarios(req, res);
@@ -7723,8 +7771,13 @@ async function handleRequest(req, res) {
   }
   if (pathname === "/api/me" && req.method === "GET") {
     const name = req.user?.name || (fromLoopback ? "Host (local)" : "Anonymous");
+    const role = fromLoopback ? "host" : "reviewer";
     res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
-    res.end(JSON.stringify({ name, authenticated: !!req.user || fromLoopback }));
+    res.end(JSON.stringify({
+      name,
+      role,
+      authenticated: !!req.user || fromLoopback
+    }));
     return;
   }
   res.writeHead(404, { "Content-Type": "text/plain" });
@@ -7769,7 +7822,7 @@ async function serveScenarioDetail(req, res, scenarioName) {
   });
   res.end(html);
 }
-async function serveHtmlFile(req, res, filePath) {
+async function serveHtmlFile(req, res, filePath, ctx = {}) {
   if (!filePath) {
     res.writeHead(400, { "Content-Type": "text/plain" });
     res.end('Missing "path" query parameter');
@@ -7788,8 +7841,19 @@ async function serveHtmlFile(req, res, filePath) {
     return;
   }
   try {
-    const content = await readFile2(resolved, "utf-8");
-    const injected = injectBreadcrumbIntoHtml(content, resolved);
+    const raw = await readFile2(resolved, "utf-8");
+    const withSectionIds = injectSectionIds(raw);
+    const { scenarioName, docLabel } = parseScenarioFromPath(resolved);
+    const fromLoopback = !!ctx.fromLoopback;
+    const meta3 = {
+      workspace: getWorkspaceName(),
+      scenario: scenarioName,
+      doc: docLabel,
+      role: fromLoopback ? "host" : "reviewer",
+      user: req.user?.name || (fromLoopback ? "Host (local)" : "Anonymous")
+    };
+    const withMeta = injectPlanMeta(withSectionIds, meta3);
+    const injected = injectBreadcrumbIntoHtml(withMeta, resolved);
     res.writeHead(200, {
       "Content-Type": "text/html; charset=utf-8",
       "Cache-Control": "no-cache"

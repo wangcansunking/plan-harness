@@ -2,6 +2,8 @@
 // HTML template system for plan documents.
 // All output is self-contained HTML strings (inline CSS + JS, no external deps).
 
+import { createHash } from 'node:crypto';
+
 /**
  * Shared CSS variables, fonts, base styles (dark/light theme).
  * Matches the visual patterns from existing plan files.
@@ -1409,4 +1411,96 @@ function escapeAttr(str) {
 
 function slugify(str) {
   return String(str).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+}
+
+// ---- Stable section IDs (Phase 1 of built-in-comment-ui) ----
+// See plans/built-in-comment-ui/design.html §3 for the algorithm spec.
+
+function normalizeSectionTitle(title) {
+  return String(title)
+    .toLowerCase()
+    .replace(/\s+/g, '-')
+    .replace(/[^a-z0-9-]/g, '')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '');
+}
+
+/**
+ * Deterministic section id for a heading, shared by the HTML emitter and the
+ * /view-time post-processor so the comment anchor survives doc regeneration.
+ * @param {string[]} parentChain  normalized ancestor titles (empty for h2)
+ * @param {number} depth          2 | 3 | 4
+ * @param {string} normalizedTitle  output of normalizeSectionTitle(titleText)
+ * @returns {string} e.g. "sec-4f3a9c2e8b1d6f0a"
+ */
+export function computeSectionId(parentChain, depth, normalizedTitle) {
+  const input = `${depth}:${parentChain.join('/')}:${normalizedTitle}`;
+  const hex = createHash('sha256').update(input, 'utf8').digest('hex').slice(0, 16);
+  return `sec-${hex}`;
+}
+
+/**
+ * Inject data-section-id="sec-<16hex>" on every <h2>/<h3>/<h4> in document
+ * order. Idempotent: headings that already carry data-section-id are left
+ * untouched. Within-doc collisions get -2, -3 suffixes.
+ *
+ * The output is a stable content-anchor that survives regen, which the
+ * comment widget uses to reattach a W3C-style anchor (prefix + exact +
+ * suffix) after the doc is rewritten.
+ */
+export function injectSectionIds(html) {
+  if (!html || typeof html !== 'string') return html;
+
+  const seen = new Map();
+  const parentChain = [];
+
+  return html.replace(
+    /<(h[234])\b([^>]*)>([\s\S]*?)<\/\1>/gi,
+    (match, tag, attrs, inner) => {
+      const depth = parseInt(tag[1], 10);
+
+      const text = inner
+        .replace(/<[^>]+>/g, '')
+        .replace(/&[a-zA-Z#0-9]+;/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+      const normalized = normalizeSectionTitle(text);
+      if (!normalized) return match;
+
+      parentChain.length = depth - 2;
+      parentChain.push(normalized);
+
+      if (/\bdata-section-id\s*=/.test(attrs)) return match;
+
+      const parents = parentChain.slice(0, -1);
+      let id = computeSectionId(parents, depth, normalized);
+      if (seen.has(id)) {
+        const n = seen.get(id) + 1;
+        seen.set(id, n);
+        id = `${id}-${n}`;
+      } else {
+        seen.set(id, 1);
+      }
+
+      return `<${tag}${attrs} data-section-id="${id}">${inner}</${tag}>`;
+    }
+  );
+}
+
+/**
+ * Inject a synchronous <script> into <head> exposing window.__PLAN_HARNESS_META__
+ * so the future comment widget reads scenario/doc/role without a round-trip.
+ * Falls back to <body>-prepend if <head> is missing.
+ */
+export function injectPlanMeta(html, meta) {
+  if (!html || typeof html !== 'string' || !meta) return html;
+  const json = JSON.stringify(meta).replace(/</g, '\\u003c');
+  const tag = `<script>window.__PLAN_HARNESS_META__=${json};</script>`;
+  if (/<\/head>/i.test(html)) {
+    return html.replace(/<\/head>/i, tag + '</head>');
+  }
+  if (/<body\b[^>]*>/i.test(html)) {
+    return html.replace(/<body\b([^>]*)>/i, (_m, a) => `<body${a}>${tag}`);
+  }
+  return tag + html;
 }

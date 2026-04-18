@@ -8,7 +8,9 @@ import { join, basename, extname, resolve, sep } from 'node:path';
 import { URL } from 'node:url';
 import {
   generateDashboard,
-  generateScenarioDetail
+  generateScenarioDetail,
+  injectSectionIds,
+  injectPlanMeta
 } from './templates/base.js';
 import * as auth from './auth.js';
 
@@ -171,7 +173,7 @@ async function handleRequest(req, res) {
   // Route: GET /view?path=<absolute-path> -> Serve an HTML plan file directly
   if (pathname === '/view' && req.method === 'GET') {
     const filePath = parsedUrl.searchParams.get('path');
-    return serveHtmlFile(req, res, filePath);
+    return serveHtmlFile(req, res, filePath, { fromLoopback });
   }
 
   // Route: GET /api/scenarios -> JSON list of all scenarios
@@ -190,8 +192,13 @@ async function handleRequest(req, res) {
   // Used by future comment UI to display/attribute the current viewer.
   if (pathname === '/api/me' && req.method === 'GET') {
     const name = req.user?.name || (fromLoopback ? 'Host (local)' : 'Anonymous');
+    const role = fromLoopback ? 'host' : 'reviewer';
     res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-    res.end(JSON.stringify({ name, authenticated: !!req.user || fromLoopback }));
+    res.end(JSON.stringify({
+      name,
+      role,
+      authenticated: !!req.user || fromLoopback,
+    }));
     return;
   }
 
@@ -248,7 +255,7 @@ async function serveScenarioDetail(req, res, scenarioName) {
   res.end(html);
 }
 
-async function serveHtmlFile(req, res, filePath) {
+async function serveHtmlFile(req, res, filePath, ctx = {}) {
   if (!filePath) {
     res.writeHead(400, { 'Content-Type': 'text/plain' });
     res.end('Missing "path" query parameter');
@@ -272,8 +279,28 @@ async function serveHtmlFile(req, res, filePath) {
   }
 
   try {
-    const content = await readFile(resolved, 'utf-8');
-    const injected = injectBreadcrumbIntoHtml(content, resolved);
+    const raw = await readFile(resolved, 'utf-8');
+
+    // 1. Stable content-anchors for the future comment widget (idempotent).
+    const withSectionIds = injectSectionIds(raw);
+
+    // 2. Server-supplied context for the widget so it doesn't round-trip /api/me
+    //    on every open. `role` today is loopback-or-not; once the auth layer
+    //    grows a host-role session it plugs in here without touching /view.
+    const { scenarioName, docLabel } = parseScenarioFromPath(resolved);
+    const fromLoopback = !!ctx.fromLoopback;
+    const meta = {
+      workspace: getWorkspaceName(),
+      scenario: scenarioName,
+      doc: docLabel,
+      role: fromLoopback ? 'host' : 'reviewer',
+      user: req.user?.name || (fromLoopback ? 'Host (local)' : 'Anonymous'),
+    };
+    const withMeta = injectPlanMeta(withSectionIds, meta);
+
+    // 3. Breadcrumb pill (last so it sits above the doc's head metadata).
+    const injected = injectBreadcrumbIntoHtml(withMeta, resolved);
+
     res.writeHead(200, {
       'Content-Type': 'text/html; charset=utf-8',
       'Cache-Control': 'no-cache'
