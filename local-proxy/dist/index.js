@@ -7641,6 +7641,25 @@ function injectSidebarPanels(html) {
 .ph-comment-mark.ph-mark-revise { background: rgba(113,112,255,0.12); border-bottom-color: var(--purple, #7170ff); }
 @media print { .ph-select-cta, .ph-select-composer { display: none !important; } }
 
+/* Resolved-thread toggle at top of Comments panel body */
+.ph-comments-toggle-row {
+  display: flex; justify-content: flex-end;
+  padding: 0.1rem 0.5rem 0.35rem;
+}
+.ph-comments-toggle {
+  font: 600 0.62rem/1 inherit; padding: 0.2rem 0.45rem;
+  border: 1px solid var(--border); border-radius: 999px;
+  background: var(--bg); color: var(--muted); cursor: pointer;
+  text-transform: uppercase; letter-spacing: 0.05em;
+}
+.ph-comments-toggle:hover { color: var(--text); border-color: var(--text); }
+.ph-comments-toggle.is-on { color: var(--accent); border-color: var(--accent); }
+.ph-panel-list.ph-panel-list-resolved {
+  margin-top: 0.15rem; padding-top: 0.3rem;
+  border-top: 1px dashed var(--border);
+}
+.ph-panel-list.ph-panel-list-resolved .ph-panel-item { opacity: 0.7; }
+
 /* Phase 7 \u2014 Orphan pinned group at top of Comments panel */
 .ph-orphan-group {
   margin: 0 0.4rem 0.3rem; padding: 0.35rem 0.55rem;
@@ -7940,12 +7959,44 @@ function injectSidebarPanels(html) {
     }
 
     // ---- Comments panel (simple list) ----
+    // Resolved threads are collapsed by default (Word / Google Docs model) \u2014 a
+    // toggle at the top of the panel body lets the reader expose them when
+    // they need to revisit a settled discussion. The preference is persisted
+    // per (scenario, doc) so each doc remembers its own state.
+    var SHOW_RESOLVED_KEY = prefKey + ':comments:showResolved';
+    function getShowResolved(){ return localStorage.getItem(SHOW_RESOLVED_KEY) === '1'; }
+    function setShowResolved(v){ localStorage.setItem(SHOW_RESOLVED_KEY, v ? '1' : '0'); }
+
     function renderCommentList(panel, items, orphans){
       var body = panel.querySelector('.ph-panel-body');
       body.innerHTML = '';
       var hasContent = items.length > 0 || (orphans && orphans.length > 0);
       if (!hasContent) { setVisibility(panel, false); return; }
       setVisibility(panel, true);
+
+      // Split items into open vs resolved buckets. 'it.done' covers both
+      // thread-level resolved and the TODO->comment bridge's auto-resolve
+      // (todoResolves) \u2014 either way the conversation is settled and should
+      // collapse out of sight by default.
+      var openItems = items.filter(function(it){ return !it.done; });
+      var resolvedItems = items.filter(function(it){ return it.done; });
+
+      if (resolvedItems.length > 0) {
+        var toggleRow = document.createElement('div');
+        toggleRow.className = 'ph-comments-toggle-row';
+        var showing = getShowResolved();
+        var toggleBtn = document.createElement('button');
+        toggleBtn.type = 'button';
+        toggleBtn.className = 'ph-comments-toggle' + (showing ? ' is-on' : '');
+        toggleBtn.setAttribute('aria-pressed', showing ? 'true' : 'false');
+        toggleBtn.textContent = (showing ? 'Hide' : 'Show') + ' resolved (' + resolvedItems.length + ')';
+        toggleBtn.addEventListener('click', function(){
+          setShowResolved(!getShowResolved());
+          renderCommentList(panel, items, orphans);
+        });
+        toggleRow.appendChild(toggleBtn);
+        body.appendChild(toggleRow);
+      }
 
       // Phase 7 \u2014 pinned orphan group at the top of the Comments panel.
       if (orphans && orphans.length > 0) {
@@ -8004,9 +8055,8 @@ function injectSidebarPanels(html) {
       }
 
       if (items.length === 0) return;
-      var ul = document.createElement('ul');
-      ul.className = 'ph-panel-list';
-      items.forEach(function(it){
+
+      function renderRow(it){
         var li = document.createElement('li');
         var a = document.createElement('a');
         a.href = '#';
@@ -8020,7 +8070,6 @@ function injectSidebarPanels(html) {
         metaSpan.textContent = it.meta || '';
         a.appendChild(lbl);
         if (it.meta) a.appendChild(metaSpan);
-        // Inline "Proposal ready" chip + click \u2192 open modal
         if (it.reviseStatus === 'proposed') {
           var chip = document.createElement('span');
           chip.className = 'ph-todo-chip ph-todo-chip-revise';
@@ -8034,17 +8083,26 @@ function injectSidebarPanels(html) {
             openProposalModal(it.id, it.label, it.anchor && it.anchor.exact);
             return;
           }
-          // First, scroll the document to the anchor so the reader sees
-          // context, then open the thread panel for the conversation. This
-          // is the Word model: click \u2192 land at the highlight + see the
-          // thread alongside it.
           if (it.target) scrollTo(it.target);
           if (it.id) openThread(it.id);
         });
         li.appendChild(a);
-        ul.appendChild(li);
-      });
-      body.appendChild(ul);
+        return li;
+      }
+
+      if (openItems.length > 0) {
+        var ul = document.createElement('ul');
+        ul.className = 'ph-panel-list';
+        openItems.forEach(function(it){ ul.appendChild(renderRow(it)); });
+        body.appendChild(ul);
+      }
+
+      if (resolvedItems.length > 0 && getShowResolved()) {
+        var ulR = document.createElement('ul');
+        ulR.className = 'ph-panel-list ph-panel-list-resolved';
+        resolvedItems.forEach(function(it){ ulR.appendChild(renderRow(it)); });
+        body.appendChild(ulR);
+      }
     }
 
     // ---- Phase 9 \u2014 Proposal review modal ----
@@ -9081,7 +9139,14 @@ function injectSidebarPanels(html) {
           var liveRoots = comments.filter(function(c){
             return !c.deleted && !(c.anchor && c.anchor.orphaned);
           });
-          setCount(commentPanel, liveRoots.length + orphans.length);
+          // Header count tracks *unresolved* threads + orphans \u2014 matches the
+          // scenario-card badge and the author's "what still needs attention"
+          // mental model. Resolved threads are available via the "Show
+          // resolved" toggle but don't inflate the count.
+          var unresolvedRoots = liveRoots.filter(function(c){
+            return !c.resolved && !c.todoResolves;
+          });
+          setCount(commentPanel, unresolvedRoots.length + orphans.length);
           var items = liveRoots.map(function(c){
             var anchor = c.anchor || {};
             var target = anchor.sectionId ? document.querySelector('[data-section-id="' + CSS.escape(anchor.sectionId) + '"]') : null;
@@ -9503,12 +9568,16 @@ var init_auth = __esm({
 var comment_manager_exports = {};
 __export(comment_manager_exports, {
   CommentError: () => CommentError,
+  PERSONA_NAMES: () => PERSONA_NAMES,
   appendComment: () => appendComment,
   broadcastCommentEvent: () => broadcastCommentEvent,
   checkRate: () => checkRate2,
   deleteComment: () => deleteComment,
+  extractMentions: () => extractMentions,
   listComments: () => listComments,
+  listPendingMentions: () => listPendingMentions,
   patchComment: () => patchComment,
+  postPersonaReply: () => postPersonaReply,
   reanchorDocument: () => reanchorDocument,
   reanchorScenario: () => reanchorScenario,
   registerSseClient: () => registerSseClient,
@@ -9517,6 +9586,17 @@ __export(comment_manager_exports, {
 import { appendFile, mkdir as mkdir2, readFile as readFile2 } from "node:fs/promises";
 import { join as join2, resolve, sep as sep2 } from "node:path";
 import { randomBytes as randomBytes2 } from "node:crypto";
+function extractMentions(body) {
+  if (typeof body !== "string" || body.length === 0) return [];
+  const found = /* @__PURE__ */ new Set();
+  let m;
+  MENTION_RE.lastIndex = 0;
+  while ((m = MENTION_RE.exec(body)) !== null) {
+    const persona = m[1].toLowerCase();
+    if (PERSONA_SET.has(persona)) found.add(persona);
+  }
+  return Array.from(found);
+}
 function assertName(value, label) {
   if (typeof value !== "string" || !NAME_RE.test(value) || value.length > NAME_MAX) {
     throw new CommentError("BAD_REQUEST", `invalid ${label}`, 400);
@@ -9632,7 +9712,14 @@ function collapse(events) {
         deletedBy: null,
         editedAt: null,
         reviseStatus: ev.intent === "revise" ? "pending" : null,
-        reviseProposalRef: null
+        reviseProposalRef: null,
+        // @-mention payload: personas referenced in the body and the
+        // optional personaRole a persona-reply was posted under. The
+        // presence of mentionedPersonas[] means a reviewer summoned one
+        // or more agent personas; personaRole != null means this very
+        // comment is a persona's reply.
+        mentionedPersonas: Array.isArray(ev.mentionedPersonas) ? ev.mentionedPersonas.slice() : [],
+        personaRole: typeof ev.personaRole === "string" ? ev.personaRole : null
       };
       byId.set(ev.id, c);
       continue;
@@ -9725,6 +9812,7 @@ async function appendComment(workspaceRoot, scenario, doc, payload, actor) {
   }
   const id = genId();
   const createdAt = (/* @__PURE__ */ new Date()).toISOString();
+  const mentionedPersonas = extractMentions(body);
   const event = {
     op: "create",
     id,
@@ -9737,6 +9825,7 @@ async function appendComment(workspaceRoot, scenario, doc, payload, actor) {
     intent
   };
   if (todoResolves) event.todoResolves = true;
+  if (mentionedPersonas.length > 0) event.mentionedPersonas = mentionedPersonas;
   const file2 = commentFilePath(workspaceRoot, scenario, doc);
   await appendEvent(file2, event);
   return {
@@ -9757,6 +9846,8 @@ async function appendComment(workspaceRoot, scenario, doc, payload, actor) {
     editedAt: null,
     reviseStatus: intent === "revise" ? "pending" : null,
     reviseProposalRef: null,
+    mentionedPersonas,
+    personaRole: null,
     replies: []
   };
 }
@@ -9789,6 +9880,120 @@ async function patchComment(workspaceRoot, scenario, doc, id, patch, actor) {
   const refreshed = collapse(await readEvents(file2)).find((c) => c.id === id);
   refreshed.replies = [];
   return refreshed;
+}
+async function listPendingMentions(workspaceRoot, scenario) {
+  assertName(scenario, "scenario");
+  const commentsDir = resolve(workspaceRoot, "plans", scenario, ".comments");
+  let files;
+  try {
+    const { readdir: readdir3 } = await import("node:fs/promises");
+    files = await readdir3(commentsDir);
+  } catch {
+    return [];
+  }
+  const out = [];
+  for (const name of files) {
+    if (!name.endsWith(".jsonl")) continue;
+    const docSlug = name.slice(0, -".jsonl".length);
+    let data;
+    try {
+      data = await listComments(workspaceRoot, scenario, docSlug);
+    } catch {
+      continue;
+    }
+    const flat = [];
+    (function walk(list) {
+      for (const c of list) {
+        flat.push(c);
+        if (c.replies) walk(c.replies);
+      }
+    })(data.comments || []);
+    const byId = new Map(flat.map((c) => [c.id, c]));
+    for (const c of flat) {
+      if (c.deleted) continue;
+      if (!c.mentionedPersonas || c.mentionedPersonas.length === 0) continue;
+      const threadReplies = flat.filter(
+        (r) => r.threadId === c.threadId && !r.deleted && r.personaRole != null
+      );
+      for (const persona of c.mentionedPersonas) {
+        const fulfilled = threadReplies.some(
+          (r) => r.personaRole === persona && String(r.createdAt) >= String(c.createdAt)
+        );
+        if (!fulfilled) {
+          out.push({
+            scenario,
+            doc: docSlug,
+            id: c.id,
+            threadId: c.threadId,
+            replyTo: c.replyTo,
+            persona,
+            author: c.author,
+            body: c.body,
+            anchor: c.anchor,
+            createdAt: c.createdAt
+          });
+        }
+      }
+    }
+  }
+  out.sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)));
+  return out;
+}
+async function postPersonaReply(workspaceRoot, scenario, doc, parentId, persona, body, actor) {
+  if (!actor || !actor.name) throw new CommentError("FORBIDDEN", "actor required", 403);
+  if (!PERSONA_SET.has(String(persona || "").toLowerCase())) {
+    throw new CommentError("BAD_REQUEST", `unknown persona "${persona}"`, 400);
+  }
+  const personaLc = String(persona).toLowerCase();
+  const validatedBody = validateBody(body);
+  if (!ID_RE.test(parentId)) throw new CommentError("BAD_REQUEST", "invalid parent id", 400);
+  const file2 = commentFilePath(workspaceRoot, scenario, doc);
+  const existing = collapse(await readEvents(file2));
+  const parent = existing.find((c) => c.id === parentId);
+  if (!parent) throw new CommentError("NOT_FOUND", "parent comment not found", 404);
+  if (parent.deleted) throw new CommentError("BAD_REQUEST", "cannot reply to deleted comment", 400);
+  if (!parent.mentionedPersonas || !parent.mentionedPersonas.includes(personaLc)) {
+    throw new CommentError("BAD_REQUEST", `parent comment does not mention @${personaLc}`, 400);
+  }
+  const id = genId();
+  const createdAt = (/* @__PURE__ */ new Date()).toISOString();
+  const event = {
+    op: "create",
+    id,
+    createdAt,
+    author: personaLc,
+    anchor: parent.anchor || null,
+    body: validatedBody,
+    threadId: parent.threadId || parent.id,
+    replyTo: parent.id,
+    intent: "comment",
+    personaRole: personaLc,
+    postedBy: actor.name
+    // audit trail: which MCP caller relayed this
+  };
+  await appendEvent(file2, event);
+  return {
+    id,
+    createdAt,
+    author: personaLc,
+    anchor: parent.anchor || null,
+    body: validatedBody,
+    threadId: event.threadId,
+    replyTo: parent.id,
+    intent: "comment",
+    todoResolves: false,
+    resolved: false,
+    resolvedBy: null,
+    resolvedAt: null,
+    deleted: false,
+    deletedBy: null,
+    editedAt: null,
+    reviseStatus: null,
+    reviseProposalRef: null,
+    mentionedPersonas: [],
+    personaRole: personaLc,
+    replies: []
+  };
 }
 function tokens(s) {
   const t = String(s || "").replace(/<[^>]+>/g, " ").replace(/&[a-zA-Z#0-9]+;/g, " ").toLowerCase().replace(/[^a-z0-9\u00a0-\uffff]+/g, " ").trim();
@@ -9995,7 +10200,7 @@ function sseHeartbeat() {
     }
   }
 }
-var NAME_RE, NAME_MAX, ID_RE, BODY_MIN, BODY_MAX, EXACT_MAX, AFFIX_MAX, EDIT_WINDOW_MS, CommentError, JACCARD_THRESHOLD, BUCKET_CAPACITY, BUCKET_WINDOW_MS, buckets, sseClients;
+var NAME_RE, NAME_MAX, ID_RE, BODY_MIN, BODY_MAX, EXACT_MAX, AFFIX_MAX, EDIT_WINDOW_MS, PERSONA_NAMES, PERSONA_SET, MENTION_RE, CommentError, JACCARD_THRESHOLD, BUCKET_CAPACITY, BUCKET_WINDOW_MS, buckets, sseClients;
 var init_comment_manager = __esm({
   "src/comment-manager.js"() {
     NAME_RE = /^[a-zA-Z0-9_-]+$/;
@@ -10006,6 +10211,9 @@ var init_comment_manager = __esm({
     EXACT_MAX = 2e3;
     AFFIX_MAX = 64;
     EDIT_WINDOW_MS = 10 * 60 * 1e3;
+    PERSONA_NAMES = ["architect", "pm", "tester", "frontend", "backend", "writer"];
+    PERSONA_SET = new Set(PERSONA_NAMES);
+    MENTION_RE = new RegExp("(?:^|[^a-zA-Z0-9_])@(" + PERSONA_NAMES.join("|") + ")(?![a-zA-Z0-9_])", "gi");
     CommentError = class extends Error {
       constructor(code, message, status) {
         super(message);
@@ -25924,6 +26132,58 @@ server2.setRequestHandler(ListToolsRequestSchema, async () => ({
         },
         required: ["workspaceRoot", "scenario"]
       }
+    },
+    {
+      name: "plan_list_pending_mentions",
+      description: "List every @-mention (e.g. @architect, @pm, @tester, @frontend, @backend, @writer) in the scenario's comment threads that has not yet received a persona reply. Used by the /plan-review batch step and by any skill handling @-mentions posted by reviewers.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          workspaceRoot: {
+            type: "string",
+            description: "Absolute path to the workspace root."
+          },
+          scenario: {
+            type: "string",
+            description: "Scenario name (directory under plans/)."
+          }
+        },
+        required: ["workspaceRoot", "scenario"]
+      }
+    },
+    {
+      name: "plan_post_persona_reply",
+      description: "Post a persona (architect / pm / tester / frontend / backend / writer) reply to a mention-bearing comment. The parent comment must actually mention the persona or the call is rejected. Used after the calling agent has drafted the persona's reply content.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          workspaceRoot: {
+            type: "string",
+            description: "Absolute path to the workspace root."
+          },
+          scenario: {
+            type: "string",
+            description: "Scenario name (directory under plans/)."
+          },
+          doc: {
+            type: "string",
+            description: "Document slug the comment lives under (e.g. 'design', 'test-plan')."
+          },
+          parentId: {
+            type: "string",
+            description: "The comment id (cmt_<6hex>) of the parent that mentions this persona."
+          },
+          persona: {
+            type: "string",
+            description: "One of: architect, pm, tester, frontend, backend, writer."
+          },
+          body: {
+            type: "string",
+            description: "The persona's reply body (1..4000 chars). Plain text; the widget renders it verbatim."
+          }
+        },
+        required: ["workspaceRoot", "scenario", "doc", "parentId", "persona", "body"]
+      }
     }
   ]
 }));
@@ -26256,6 +26516,50 @@ ${ctx.structure.csprojFiles.map((f) => `  ${f}`).join("\n")}` : ""
 
 ${lines.join("\n")}` },
             { type: "text", text: JSON.stringify(pending, null, 2) }
+          ]
+        };
+      }
+      case "plan_list_pending_mentions": {
+        if (!args.workspaceRoot || !args.scenario) {
+          throw new Error("workspaceRoot and scenario are required");
+        }
+        const commentMgr = await Promise.resolve().then(() => (init_comment_manager(), comment_manager_exports));
+        const pending = await commentMgr.listPendingMentions(args.workspaceRoot, args.scenario);
+        if (pending.length === 0) {
+          return textResult(`No pending persona mentions in ${args.scenario}.`);
+        }
+        const lines = pending.map(
+          (p) => `  ${p.doc.padEnd(22)} @${p.persona.padEnd(9)} ${p.id}  ${JSON.stringify(p.body).slice(0, 80)}  (${p.author})`
+        );
+        return {
+          content: [
+            { type: "text", text: `${pending.length} pending @-mention(s) in ${args.scenario}:
+
+${lines.join("\n")}` },
+            { type: "text", text: JSON.stringify(pending, null, 2) }
+          ]
+        };
+      }
+      case "plan_post_persona_reply": {
+        const required2 = ["workspaceRoot", "scenario", "doc", "parentId", "persona", "body"];
+        for (const f of required2) {
+          if (!args[f]) throw new Error(`${f} is required`);
+        }
+        const commentMgr = await Promise.resolve().then(() => (init_comment_manager(), comment_manager_exports));
+        const actor = { name: `mcp:${args.persona}`, role: "host" };
+        const reply = await commentMgr.postPersonaReply(
+          args.workspaceRoot,
+          args.scenario,
+          args.doc,
+          args.parentId,
+          args.persona,
+          args.body,
+          actor
+        );
+        return {
+          content: [
+            { type: "text", text: `Posted @${args.persona} reply ${reply.id} on ${args.scenario}/${args.doc} (parent ${args.parentId}).` },
+            { type: "text", text: JSON.stringify(reply, null, 2) }
           ]
         };
       }

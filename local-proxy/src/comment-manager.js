@@ -28,6 +28,27 @@ const EXACT_MAX = 2000;
 const AFFIX_MAX = 64;
 const EDIT_WINDOW_MS = 10 * 60 * 1000;
 
+// Personas that can be summoned via @-mention. Kept in sync with the
+// reviewer roles in /plan-review and the prompts under prompts/.
+export const PERSONA_NAMES = ['architect', 'pm', 'tester', 'frontend', 'backend', 'writer'];
+const PERSONA_SET = new Set(PERSONA_NAMES);
+// Only detect @-mentions when they look like standalone tokens — avoid
+// catching "email@pm.com" or code fragments. Lookbehind requires start or
+// non-word boundary, lookahead requires end or non-word.
+const MENTION_RE = new RegExp('(?:^|[^a-zA-Z0-9_])@(' + PERSONA_NAMES.join('|') + ')(?![a-zA-Z0-9_])', 'gi');
+
+export function extractMentions(body) {
+  if (typeof body !== 'string' || body.length === 0) return [];
+  const found = new Set();
+  let m;
+  MENTION_RE.lastIndex = 0;
+  while ((m = MENTION_RE.exec(body)) !== null) {
+    const persona = m[1].toLowerCase();
+    if (PERSONA_SET.has(persona)) found.add(persona);
+  }
+  return Array.from(found);
+}
+
 export class CommentError extends Error {
   constructor(code, message, status) {
     super(message);
@@ -176,6 +197,13 @@ function collapse(events) {
         editedAt: null,
         reviseStatus: ev.intent === 'revise' ? 'pending' : null,
         reviseProposalRef: null,
+        // @-mention payload: personas referenced in the body and the
+        // optional personaRole a persona-reply was posted under. The
+        // presence of mentionedPersonas[] means a reviewer summoned one
+        // or more agent personas; personaRole != null means this very
+        // comment is a persona's reply.
+        mentionedPersonas: Array.isArray(ev.mentionedPersonas) ? ev.mentionedPersonas.slice() : [],
+        personaRole: typeof ev.personaRole === 'string' ? ev.personaRole : null,
       };
       byId.set(ev.id, c);
       continue;
@@ -289,6 +317,7 @@ export async function appendComment(workspaceRoot, scenario, doc, payload, actor
 
   const id = genId();
   const createdAt = new Date().toISOString();
+  const mentionedPersonas = extractMentions(body);
   const event = {
     op: 'create',
     id,
@@ -301,6 +330,9 @@ export async function appendComment(workspaceRoot, scenario, doc, payload, actor
     intent,
   };
   if (todoResolves) event.todoResolves = true;
+  if (mentionedPersonas.length > 0) event.mentionedPersonas = mentionedPersonas;
+  // personaRole is reserved for persona-reply posts made by postPersonaReply;
+  // reviewer-created comments can never claim a persona role.
   const file = commentFilePath(workspaceRoot, scenario, doc);
   await appendEvent(file, event);
 
@@ -322,6 +354,8 @@ export async function appendComment(workspaceRoot, scenario, doc, payload, actor
     editedAt: null,
     reviseStatus: intent === 'revise' ? 'pending' : null,
     reviseProposalRef: null,
+    mentionedPersonas,
+    personaRole: null,
     replies: [],
   };
 }
@@ -364,6 +398,146 @@ export async function patchComment(workspaceRoot, scenario, doc, id, patch, acto
   const refreshed = collapse(await readEvents(file)).find((c) => c.id === id);
   refreshed.replies = [];
   return refreshed;
+}
+
+// ---- @-mention queue (used by /plan-review + /plan-revise-like flows) ----
+
+/**
+ * Walk every doc in the scenario and return every mention-bearing comment
+ * that hasn't been fulfilled by a persona reply yet. "Fulfilled" means a
+ * reply comment exists in the same thread with `personaRole === persona`
+ * created after the mention.
+ *
+ * Deleted comments are skipped on both sides — if the reviewer deletes
+ * their @-mention, the mention vanishes; if the persona's reply is
+ * deleted, the mention reopens.
+ */
+export async function listPendingMentions(workspaceRoot, scenario) {
+  assertName(scenario, 'scenario');
+  const commentsDir = resolve(workspaceRoot, 'plans', scenario, '.comments');
+  let files;
+  try {
+    const { readdir } = await import('node:fs/promises');
+    files = await readdir(commentsDir);
+  } catch {
+    return [];
+  }
+  const out = [];
+  for (const name of files) {
+    if (!name.endsWith('.jsonl')) continue;
+    const docSlug = name.slice(0, -'.jsonl'.length);
+    let data;
+    try {
+      data = await listComments(workspaceRoot, scenario, docSlug);
+    } catch {
+      continue;
+    }
+    // Flatten the thread tree so we can inspect replies uniformly.
+    const flat = [];
+    (function walk(list) {
+      for (const c of list) { flat.push(c); if (c.replies) walk(c.replies); }
+    })(data.comments || []);
+    const byId = new Map(flat.map((c) => [c.id, c]));
+    for (const c of flat) {
+      if (c.deleted) continue;
+      if (!c.mentionedPersonas || c.mentionedPersonas.length === 0) continue;
+      // Siblings in the thread that are live persona replies created after c.
+      const threadReplies = flat.filter((r) =>
+        r.threadId === c.threadId && !r.deleted && r.personaRole != null
+      );
+      for (const persona of c.mentionedPersonas) {
+        const fulfilled = threadReplies.some((r) =>
+          r.personaRole === persona && String(r.createdAt) >= String(c.createdAt)
+        );
+        if (!fulfilled) {
+          out.push({
+            scenario,
+            doc: docSlug,
+            id: c.id,
+            threadId: c.threadId,
+            replyTo: c.replyTo,
+            persona,
+            author: c.author,
+            body: c.body,
+            anchor: c.anchor,
+            createdAt: c.createdAt,
+          });
+        }
+      }
+    }
+  }
+  // Stable order: oldest mentions first, so a batch agent drains FIFO.
+  out.sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)));
+  return out;
+}
+
+/**
+ * Post a persona's reply to a mention. Appends a create event with
+ * author=`<persona>` (for display) and personaRole=`<persona>` (the
+ * authoritative marker). Requires a workspace-writable actor — the MCP
+ * tool layer passes the caller's identity.
+ *
+ * Throws if the parent is deleted, the persona is unknown, or the parent
+ * did not actually mention that persona (a weak guard against agents
+ * spamming unrelated threads).
+ */
+export async function postPersonaReply(workspaceRoot, scenario, doc, parentId, persona, body, actor) {
+  if (!actor || !actor.name) throw new CommentError('FORBIDDEN', 'actor required', 403);
+  if (!PERSONA_SET.has(String(persona || '').toLowerCase())) {
+    throw new CommentError('BAD_REQUEST', `unknown persona "${persona}"`, 400);
+  }
+  const personaLc = String(persona).toLowerCase();
+  const validatedBody = validateBody(body);
+  if (!ID_RE.test(parentId)) throw new CommentError('BAD_REQUEST', 'invalid parent id', 400);
+
+  const file = commentFilePath(workspaceRoot, scenario, doc);
+  const existing = collapse(await readEvents(file));
+  const parent = existing.find((c) => c.id === parentId);
+  if (!parent) throw new CommentError('NOT_FOUND', 'parent comment not found', 404);
+  if (parent.deleted) throw new CommentError('BAD_REQUEST', 'cannot reply to deleted comment', 400);
+  if (!parent.mentionedPersonas || !parent.mentionedPersonas.includes(personaLc)) {
+    throw new CommentError('BAD_REQUEST', `parent comment does not mention @${personaLc}`, 400);
+  }
+
+  const id = genId();
+  const createdAt = new Date().toISOString();
+  const event = {
+    op: 'create',
+    id,
+    createdAt,
+    author: personaLc,
+    anchor: parent.anchor || null,
+    body: validatedBody,
+    threadId: parent.threadId || parent.id,
+    replyTo: parent.id,
+    intent: 'comment',
+    personaRole: personaLc,
+    postedBy: actor.name, // audit trail: which MCP caller relayed this
+  };
+  await appendEvent(file, event);
+
+  return {
+    id,
+    createdAt,
+    author: personaLc,
+    anchor: parent.anchor || null,
+    body: validatedBody,
+    threadId: event.threadId,
+    replyTo: parent.id,
+    intent: 'comment',
+    todoResolves: false,
+    resolved: false,
+    resolvedBy: null,
+    resolvedAt: null,
+    deleted: false,
+    deletedBy: null,
+    editedAt: null,
+    reviseStatus: null,
+    reviseProposalRef: null,
+    mentionedPersonas: [],
+    personaRole: personaLc,
+    replies: [],
+  };
 }
 
 // ---- Phase 10: re-anchor cascade ----------------------------------------

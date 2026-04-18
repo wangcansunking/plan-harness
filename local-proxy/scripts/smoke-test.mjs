@@ -329,6 +329,57 @@ async function main() {
       }
     }
 
+    // ---- @-mention queue end-to-end ----
+    process.stdout.write(`\n[mention] extractMentions + listPendingMentions + postPersonaReply\n`);
+    {
+      const mgr = await import('../src/comment-manager.js');
+      const { mkdir, writeFile, rm } = await import('node:fs/promises');
+      const { tmpdir } = await import('node:os');
+      const tmp = join(tmpdir(), 'ph-mention-' + Date.now());
+      const scen = 'unit-mention';
+      const docSlug = 'design';
+      try {
+        await mkdir(join(tmp, 'plans', scen, '.comments'), { recursive: true });
+        await writeFile(join(tmp, 'plans', scen, '.comments', docSlug + '.jsonl'), '', 'utf8');
+
+        // Baseline: detector accepts valid personas and ignores noise.
+        expect(mgr.extractMentions('please @architect weigh in').join() === 'architect', 'extractMentions finds @architect');
+        expect(mgr.extractMentions('email@pm.com is not a mention').length === 0, 'extractMentions ignores email-like pm');
+        expect(mgr.extractMentions('@pm and @tester both').sort().join() === 'pm,tester', 'extractMentions finds multiple');
+        expect(mgr.extractMentions('@writerly is not a mention').length === 0, 'extractMentions rejects trailing-word match');
+
+        // Root comment + reply that mentions @architect.
+        const actor = { name: 'alice', role: 'host' };
+        const root = await mgr.appendComment(tmp, scen, docSlug,
+          { body: 'thoughts on data model?', anchor: { sectionId: 'sec-aaaaaaaaaaaaaaaa', exact: 'data model' } }, actor);
+        const reply = await mgr.appendComment(tmp, scen, docSlug,
+          { body: '@architect can you weigh in on this?', replyTo: root.id }, actor);
+        expect(Array.isArray(reply.mentionedPersonas) && reply.mentionedPersonas.includes('architect'),
+          'appendComment stamps mentionedPersonas on the reply');
+
+        let pending = await mgr.listPendingMentions(tmp, scen);
+        expect(pending.length === 1 && pending[0].persona === 'architect' && pending[0].id === reply.id,
+          'listPendingMentions surfaces the architect mention');
+
+        // Reject persona-reply when parent did not mention that persona.
+        let rejected = false;
+        try {
+          await mgr.postPersonaReply(tmp, scen, docSlug, reply.id, 'tester', 'drive-by', actor);
+        } catch (e) { rejected = e.code === 'BAD_REQUEST'; }
+        expect(rejected, 'postPersonaReply rejects persona not mentioned by parent');
+
+        // Happy path: persona replies → mention becomes fulfilled.
+        const personaReply = await mgr.postPersonaReply(tmp, scen, docSlug, reply.id, 'architect',
+          'Split anchor and sectionId; they conflate two concerns.', actor);
+        expect(personaReply.personaRole === 'architect' && personaReply.replyTo === reply.id,
+          'postPersonaReply returns a personaRole-tagged reply');
+        pending = await mgr.listPendingMentions(tmp, scen);
+        expect(pending.length === 0, 'mention no longer pending after persona reply');
+      } finally {
+        await rm(tmp, { recursive: true, force: true });
+      }
+    }
+
     // ---- 404 on missing routes ----
     const miss = await getText('/does-not-exist');
     expect(miss.status === 404, 'unknown path returns 404');

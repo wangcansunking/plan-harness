@@ -246,6 +246,60 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
         required: ["workspaceRoot", "scenario"],
       },
     },
+    {
+      name: "plan_list_pending_mentions",
+      description:
+        "List every @-mention (e.g. @architect, @pm, @tester, @frontend, @backend, @writer) in the scenario's comment threads that has not yet received a persona reply. Used by the /plan-review batch step and by any skill handling @-mentions posted by reviewers.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          workspaceRoot: {
+            type: "string",
+            description: "Absolute path to the workspace root.",
+          },
+          scenario: {
+            type: "string",
+            description: "Scenario name (directory under plans/).",
+          },
+        },
+        required: ["workspaceRoot", "scenario"],
+      },
+    },
+    {
+      name: "plan_post_persona_reply",
+      description:
+        "Post a persona (architect / pm / tester / frontend / backend / writer) reply to a mention-bearing comment. The parent comment must actually mention the persona or the call is rejected. Used after the calling agent has drafted the persona's reply content.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          workspaceRoot: {
+            type: "string",
+            description: "Absolute path to the workspace root.",
+          },
+          scenario: {
+            type: "string",
+            description: "Scenario name (directory under plans/).",
+          },
+          doc: {
+            type: "string",
+            description: "Document slug the comment lives under (e.g. 'design', 'test-plan').",
+          },
+          parentId: {
+            type: "string",
+            description: "The comment id (cmt_<6hex>) of the parent that mentions this persona.",
+          },
+          persona: {
+            type: "string",
+            description: "One of: architect, pm, tester, frontend, backend, writer.",
+          },
+          body: {
+            type: "string",
+            description: "The persona's reply body (1..4000 chars). Plain text; the widget renders it verbatim.",
+          },
+        },
+        required: ["workspaceRoot", "scenario", "doc", "parentId", "persona", "body"],
+      },
+    },
   ],
 }));
 
@@ -655,6 +709,53 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           content: [
             { type: "text", text: `${pending.length} pending revise request(s) in ${args.scenario}:\n\n${lines.join("\n")}` },
             { type: "text", text: JSON.stringify(pending, null, 2) },
+          ],
+        };
+      }
+
+      case "plan_list_pending_mentions": {
+        if (!args.workspaceRoot || !args.scenario) {
+          throw new Error("workspaceRoot and scenario are required");
+        }
+        const commentMgr = await import("./comment-manager.js");
+        const pending = await commentMgr.listPendingMentions(args.workspaceRoot, args.scenario);
+        if (pending.length === 0) {
+          return textResult(`No pending persona mentions in ${args.scenario}.`);
+        }
+        const lines = pending.map(
+          (p) => `  ${p.doc.padEnd(22)} @${p.persona.padEnd(9)} ${p.id}  ${JSON.stringify(p.body).slice(0, 80)}  (${p.author})`
+        );
+        return {
+          content: [
+            { type: "text", text: `${pending.length} pending @-mention(s) in ${args.scenario}:\n\n${lines.join("\n")}` },
+            { type: "text", text: JSON.stringify(pending, null, 2) },
+          ],
+        };
+      }
+
+      case "plan_post_persona_reply": {
+        const required = ["workspaceRoot", "scenario", "doc", "parentId", "persona", "body"];
+        for (const f of required) {
+          if (!args[f]) throw new Error(`${f} is required`);
+        }
+        const commentMgr = await import("./comment-manager.js");
+        // MCP is always running on behalf of the workspace host. We pass
+        // a synthesized actor so the persona-reply carries an audit
+        // `postedBy` of "mcp:<persona>" for tracing who relayed it.
+        const actor = { name: `mcp:${args.persona}`, role: "host" };
+        const reply = await commentMgr.postPersonaReply(
+          args.workspaceRoot,
+          args.scenario,
+          args.doc,
+          args.parentId,
+          args.persona,
+          args.body,
+          actor,
+        );
+        return {
+          content: [
+            { type: "text", text: `Posted @${args.persona} reply ${reply.id} on ${args.scenario}/${args.doc} (parent ${args.parentId}).` },
+            { type: "text", text: JSON.stringify(reply, null, 2) },
           ],
         };
       }
