@@ -574,7 +574,7 @@ async function serveHtmlFile(req, res, filePath, ctx = {}) {
       const siblingEntries = await readdir(scenarioDir);
       siblingSet = new Set(siblingEntries.filter(e => /\.html?$/i.test(e)));
     } catch { /* best-effort; if readdir fails, skip normalization */ }
-    const withTabsFixed = normalizePlanTabs(raw, siblingSet);
+    const withTabsFixed = normalizePlanTabs(raw, siblingSet, scenarioDir);
 
     // 0b. Collapse doubled-up checklist markers (<input type="checkbox"> paired
     //     with a redundant `[x]` / `[ ]` text marker). Syncs `checked` from the

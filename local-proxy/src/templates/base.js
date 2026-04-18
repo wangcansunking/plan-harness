@@ -1839,7 +1839,10 @@ export function injectSidebarPanels(html) {
   text-transform: none; letter-spacing: 0; min-width: 1.5rem; text-align: center;
 }
 .ph-count.ph-count-empty { opacity: 0.4; }
-.ph-panel-body { padding: 0.15rem 0.4rem 0.6rem; }
+/* Containment — without these, a long TODO list pushes the section-nav
+   out of view. Each panel owns its own scroll + a max-height tied to the
+   viewport so the layout above it stays put. */
+.ph-panel-body { padding: 0.15rem 0.4rem 0.6rem; max-height: 38vh; overflow-y: auto; }
 .ph-panel-empty { padding: 0.5rem 0.6rem; font-size: 0.72rem; color: var(--muted, #62666d); font-style: italic; }
 .ph-panel-list { list-style: none; margin: 0; padding: 0; }
 .ph-panel-item {
@@ -2039,7 +2042,12 @@ export function injectSidebarPanels(html) {
             openProposalModal(it.id, it.label, it.anchor && it.anchor.exact);
             return;
           }
-          scrollTo(it.target);
+          // First, scroll the document to the anchor so the reader sees
+          // context, then open the thread panel for the conversation. This
+          // is the Word model: click → land at the highlight + see the
+          // thread alongside it.
+          if (it.target) scrollTo(it.target);
+          if (it.id) openThread(it.id);
         });
         li.appendChild(a);
         ul.appendChild(li);
@@ -3224,7 +3232,7 @@ export function normalizeChecklistItems(html) {
  * @param {Set<string>} existingSiblings - set of sibling file basenames
  *   (e.g. 'test-cases.html') that exist on disk in the scenario dir.
  */
-export function normalizePlanTabs(html, existingSiblings) {
+export function normalizePlanTabs(html, existingSiblings, scenarioDir) {
   if (!html || typeof html !== 'string' || !existingSiblings || existingSiblings.size === 0) return html;
   return html.replace(
     /<nav\b[^>]*class=["'][^"']*\bplan-tabs\b[^"']*["'][^>]*>([\s\S]*?)<\/nav>/gi,
@@ -3235,9 +3243,25 @@ export function normalizePlanTabs(html, existingSiblings) {
           const hrefMatch = attrs.match(/\bhref\s*=\s*["']([^"']+)["']/i);
           if (!hrefMatch) return aMatch;
           const href = hrefMatch[1];
+          // Absolute or /view-prefixed hrefs already point where they should.
+          if (/^(https?:|\/)/.test(href)) return aMatch;
           const basename = href.split(/[\\/]/).pop().split(/[#?]/)[0];
           if (!existingSiblings.has(basename)) return aMatch;
-          let newAttrs = attrs.replace(/\s+aria-disabled\s*=\s*["'][^"']*["']/gi, '');
+
+          // Writer-baked relative hrefs (e.g. "design.html") 404 when the doc
+          // is served via /view?path=<abs>, because the browser resolves them
+          // against the current /view URL. Rewrite to the /view form so the
+          // link lands in-place. scenarioDir is optional; when omitted we
+          // leave the href alone so file:// previews keep working.
+          let newHref = href;
+          if (scenarioDir) {
+            const absPath = scenarioDir.replace(/\\/g, '/') + '/' + basename;
+            newHref = '/view?path=' + encodeURIComponent(absPath);
+          }
+
+          let newAttrs = attrs
+            .replace(/\s+aria-disabled\s*=\s*["'][^"']*["']/gi, '')
+            .replace(/\bhref\s*=\s*["'][^"']+["']/i, 'href="' + newHref.replace(/"/g, '&quot;') + '"');
           const newBody = body.replace(/<span\b[^>]*class=["'][^"']*\bsoon\b[^"']*["'][^>]*>[\s\S]*?<\/span>/gi, '').trim();
           return '<a' + newAttrs + '>' + newBody + '</a>';
         }
