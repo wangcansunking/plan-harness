@@ -106,6 +106,20 @@ Anchor model is inspired by W3C TextQuoteSelector: `exact` + `prefix` + `suffix`
 - For shared tunnel: URL param `?reviewer=alice` prefills (convenience, not auth — password guards access)
 - No OAuth, no central accounts
 
+### Author vs reviewer actions
+
+Reviewers get a single action (**Reply**). The host/author gets a second action (**Request update**) that posts with `intent: "revise"` — a directive the plugin hands back to a Claude Code writer subagent to mutate the doc. Flow:
+
+1. Author selects a span + writes what to change (e.g. *"data model conflates anchor and section id; please split"*)
+2. Click **Request update** → stored as a `revise`-intent comment
+3. Depending on `.comment-config.json` → `reviseMode`:
+   - `"passive"` (default) — queued; picked up on the next `/plan-revise` run
+   - `"active"` — dispatched immediately to a writer subagent (max 3 concurrent per scenario)
+4. Agent writes a unified diff to `.comments/<doc>.proposals/<cmtId>.diff` and appends `reviseStatus: "proposed"`
+5. Author reviews in a modal overlay → **Accept** (applies + resolves) or **Reject** (keeps the doc, appends rejection)
+
+Safety: the server refuses to apply if the anchor has drifted since proposal; the proposal is kept for manual re-application. See `plans/built-in-comment-ui/design.html` §§ 6–8.
+
 ### Re-anchoring after regeneration
 
 When a document is regenerated, the server walks each comment's `anchor`:
