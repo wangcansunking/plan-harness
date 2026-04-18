@@ -587,5 +587,13 @@ Before submitting your output, verify:
 - [ ] Theme toggle switches between dark and light mode with SVG color remapping
 - [ ] Print styles hide navigation elements and use white background
 - [ ] Cross-reference links point to valid `id` attributes within the same document or sibling files
-- [ ] No placeholder text remains (no "TBD", "TODO", or "{placeholder}")
+- [ ] No lazy placeholder text ("TBD", "{placeholder}", empty "lorem-ipsum" stubs). Every sentence must carry content.
 - [ ] Content from all agents is included without truncation or summarization
+
+**Intentional TODOs (explicit open items):** you *may* emit open items when the content genuinely depends on a later decision (e.g. "awaiting security review of the SSE stream"). They must use one of the three recognized markers so the `/view` TODOs sidebar panel picks them up:
+
+1. Inline text: `TODO: <thing>` or `FIXME: <thing>` (2–200 chars after the colon) inside a paragraph, table cell, or callout.
+2. Checklist: `<li>[ ] <thing></li>` (open) or `<li>[x] <thing></li>` (done). Done items render struck-through in the panel.
+3. Styled callout: `<p class="todo">...</p>` (or any element with `class="todo"`) — preferred for high-signal items that deserve visual weight in the flow.
+
+Do **not** use "TODO" casually inside arbitrary prose — only these three forms. The sidebar dedups by target element, so a single callout with a `TODO:` prefix counts once.

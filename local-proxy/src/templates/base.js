@@ -1580,6 +1580,9 @@ export function injectSidebarPanels(html) {
       var det = document.createElement('details');
       det.className = 'ph-side-panel';
       det.setAttribute('data-panel', id);
+      // Hidden until proven to have content. Avoids a flash of empty chrome
+      // before the scanner / fetch populate the panel.
+      det.style.display = 'none';
       if (saved === '1') det.open = true;
       det.innerHTML = '<summary><span class="ph-panel-title">' + title + '</span><span class="ph-count ph-count-empty">0</span></summary><div class="ph-panel-body" aria-live="polite"></div>';
       det.addEventListener('toggle', function(){
@@ -1622,13 +1625,21 @@ export function injectSidebarPanels(html) {
       c.classList.toggle('ph-count-empty', n === 0);
     }
 
+    // Show panel (summary + body) only when there's at least one item.
+    // Empty panels hide entirely — no button, no row — so docs without
+    // TODOs or comments don't carry dead chrome at the bottom of the nav.
+    function setVisibility(panel, hasItems){
+      panel.style.display = hasItems ? '' : 'none';
+    }
+
     function renderList(panel, items){
       var body = panel.querySelector('.ph-panel-body');
       body.innerHTML = '';
       if (!items.length) {
-        body.innerHTML = '<div class="ph-panel-empty">' + (panel.dataset.empty || 'Nothing here.') + '</div>';
+        setVisibility(panel, false);
         return;
       }
+      setVisibility(panel, true);
       var ul = document.createElement('ul');
       ul.className = 'ph-panel-list';
       items.forEach(function(it){
@@ -1657,13 +1668,13 @@ export function injectSidebarPanels(html) {
     // ---- TODOs ----
     function scanTodos(){
       var found = [];
-      var seen = new Set();
+      var seenTargets = new WeakSet();
       var add = function(item){
         if (!item.target) return;
-        // Dedup by target + label so the same TODO picked up twice doesn't repeat.
-        var key = item.label + '::' + (item.target.outerHTML || '').slice(0, 80);
-        if (seen.has(key)) return;
-        seen.add(key);
+        // Dedup by target element so the same TODO picked up by both the
+        // text walker and the .todo class selector doesn't show twice.
+        if (seenTargets.has(item.target)) return;
+        seenTargets.add(item.target);
         found.push(item);
       };
 
@@ -1752,9 +1763,9 @@ export function injectSidebarPanels(html) {
         renderList(commentPanel, items);
       })
       .catch(function(){
-        setCount(commentPanel, 0);
-        var body = commentPanel.querySelector('.ph-panel-body');
-        body.innerHTML = '<div class="ph-panel-empty">Comments API coming in Phase 2.</div>';
+        // API not yet implemented / reachable. Keep the panel hidden —
+        // dead chrome adds friction without signal.
+        setVisibility(commentPanel, false);
       });
   }
 
