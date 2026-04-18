@@ -7246,6 +7246,7 @@ function wrapPage(content, options = {}) {
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>${escapeHTML(title)}</title>
+<link rel="icon" type="image/png" href="/icon.png">
 ${getThemeInitScript()}
 <style>
 ${getBaseCSS()}
@@ -7278,18 +7279,20 @@ function generateDashboard(scenarios, options = {}) {
   const totalScenarios = scenarios.length;
   const totalFiles = scenarios.reduce((s, sc) => s + (sc.files ? sc.files.length : 0), 0);
   const existingFiles = scenarios.reduce((s, sc) => s + (sc.files ? sc.files.filter((f) => f.exists).length : 0), 0);
-  const avgCompletion = totalScenarios > 0 ? Math.round(scenarios.reduce((s, sc) => s + (sc.completion || 0), 0) / totalScenarios) : 0;
+  const totalTodos = scenarios.reduce((s, sc) => s + (sc.todos || 0), 0);
+  const totalUnresolved = scenarios.reduce((s, sc) => s + (sc.unresolvedComments || 0), 0);
   const planTypes = ["design", "test-plan", "state-machines", "test-cases", "impl-plan"];
   let summaryCards = `
 <div class="summary-grid">
   <div class="summary-card"><div class="summary-value">${totalScenarios}</div><div class="summary-label">Scenarios</div></div>
   <div class="summary-card"><div class="summary-value" style="color:var(--green)">${existingFiles}</div><div class="summary-label">Plan Files</div></div>
-  <div class="summary-card"><div class="summary-value" style="color:var(--yellow)">${totalFiles - existingFiles}</div><div class="summary-label">Missing</div></div>
-  <div class="summary-card"><div class="summary-value" style="color:var(--accent)">${avgCompletion}%</div><div class="summary-label">Avg. Completion</div></div>
+  ${totalTodos > 0 ? `<div class="summary-card"><div class="summary-value" style="color:var(--yellow)">${totalTodos}</div><div class="summary-label">Open TODOs</div></div>` : ""}
+  ${totalUnresolved > 0 ? `<div class="summary-card"><div class="summary-value" style="color:var(--accent)">${totalUnresolved}</div><div class="summary-label">Unresolved comments</div></div>` : ""}
 </div>
 `;
   let scenarioCards = scenarios.map((sc, idx) => {
-    const pct = sc.completion || 0;
+    const todos = sc.todos || 0;
+    const unresolved = sc.unresolvedComments || 0;
     const fileCount = sc.files ? sc.files.length : 0;
     const existCount = sc.files ? sc.files.filter((f) => f.exists).length : 0;
     const workItemLink = sc.workItem ? `<a href="${escapeAttr(sc.workItem)}" style="color:var(--accent);font-size:0.8rem;">${escapeHTML(sc.workItem)}</a>` : "";
@@ -7300,7 +7303,8 @@ function generateDashboard(scenarios, options = {}) {
       const pillStyle = !exists ? "background:var(--code-bg);color:var(--muted);border:1px solid var(--border);" : "";
       return `<span class="badge ${pillClass}" style="${pillStyle}font-size:0.7rem;">${type}</span>`;
     }).join(" ");
-    const statusDot = pct >= 100 ? '<span style="color:var(--green);font-size:1.2rem;" title="Complete">&#10003;</span>' : pct > 0 ? '<span style="color:var(--yellow);font-size:1.2rem;" title="In Progress">&#9679;</span>' : '<span style="color:var(--muted);font-size:1.2rem;" title="Not Started">&#9675;</span>';
+    const open = todos + unresolved;
+    const statusDot = open === 0 && existCount > 0 ? '<span style="color:var(--green);font-size:1.2rem;" title="No open items">&#10003;</span>' : open > 0 ? '<span style="color:var(--yellow);font-size:1.2rem;" title="Open items">&#9679;</span>' : '<span style="color:var(--muted);font-size:1.2rem;" title="No tracked items">&#9675;</span>';
     return `
 <div class="scenario-card" style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:1.2rem;cursor:pointer;transition:box-shadow 0.15s,border-color 0.15s;" onclick="window.location.href='/scenario/${encodeURIComponent(sc.name)}'" onmouseover="this.style.boxShadow='var(--shadow-lg)';this.style.borderColor='var(--accent)'" onmouseout="this.style.boxShadow='';this.style.borderColor='var(--border)'">
   <div style="display:flex;align-items:center;gap:0.6rem;margin-bottom:0.6rem;">
@@ -7310,12 +7314,10 @@ function generateDashboard(scenarios, options = {}) {
   ${sc.description ? `<p style="font-size:0.85rem;color:var(--muted);margin-bottom:0.6rem;">${escapeHTML(sc.description)}</p>` : ""}
   ${workItemLink ? `<div style="margin-bottom:0.6rem;">${workItemLink}</div>` : ""}
   <div style="margin-bottom:0.6rem;">${filePills}</div>
-  <div style="display:flex;align-items:center;gap:0.6rem;font-size:0.85rem;">
+  <div style="display:flex;align-items:center;gap:0.9rem;font-size:0.85rem;flex-wrap:wrap;">
     <span style="color:var(--muted);">${existCount}/${fileCount} files</span>
-    <div style="flex:1;height:6px;background:var(--border);border-radius:3px;overflow:hidden;">
-      <div style="height:100%;width:${pct}%;background:var(--green);border-radius:3px;transition:width 0.3s;"></div>
-    </div>
-    <span style="font-weight:600;color:var(--accent);">${pct}%</span>
+    ${todos > 0 ? `<span style="color:var(--yellow);font-weight:600;" title="Open TODO items">${todos} todo</span>` : ""}
+    ${unresolved > 0 ? `<span style="color:var(--accent);font-weight:600;" title="Unresolved comments">${unresolved} unresolved</span>` : ""}
   </div>
 </div>
 `;
@@ -7367,8 +7369,8 @@ function generateScenarioDetail(scenario, options = {}) {
   const files = scenario.files || [];
   const byType = Object.fromEntries(files.map((f) => [f.type, f]));
   const existingFiles = files.filter((f) => f.exists);
-  const doneFiles = existingFiles.filter((f) => (f.completion || 0) >= 100).length;
-  const avgCompletion = scenario.completion ?? (existingFiles.length ? Math.round(existingFiles.reduce((s, f) => s + (f.completion || 0), 0) / existingFiles.length) : 0);
+  const totalTodos = files.reduce((s, f) => s + (f.todos || 0), 0);
+  const totalDone = files.reduce((s, f) => s + (f.done || 0), 0);
   const tags = Array.isArray(scenario.tags) ? scenario.tags : [];
   const tagHTML = tags.map((t) => `<span class="badge badge-blue" style="font-size:0.72rem;">${escapeHTML(t)}</span>`).join(" ");
   const statusPill = (() => {
@@ -7376,12 +7378,12 @@ function generateScenarioDetail(scenario, options = {}) {
     const color = s === "complete" ? "green" : s === "in-progress" ? "yellow" : "blue";
     return `<span class="badge badge-${color}" style="font-size:0.72rem;text-transform:capitalize;">${escapeHTML(s)}</span>`;
   })();
+  const totalUnresolved = scenario.unresolvedComments || 0;
   const summaryHTML = `
 <div class="scn-summary">
   <div class="scn-stat"><div class="scn-stat-val">${existingFiles.length}<span class="scn-stat-total">/${PLAN_DEFS.length}</span></div><div class="scn-stat-label">Documents</div></div>
-  <div class="scn-stat"><div class="scn-stat-val" style="color:var(--green);">${doneFiles}</div><div class="scn-stat-label">Complete</div></div>
-  <div class="scn-stat"><div class="scn-stat-val" style="color:var(--yellow);">${existingFiles.length - doneFiles}</div><div class="scn-stat-label">In Progress</div></div>
-  <div class="scn-stat"><div class="scn-stat-val" style="color:var(--accent);">${avgCompletion}%</div><div class="scn-stat-label">Avg. Complete</div></div>
+  ${totalTodos > 0 ? `<div class="scn-stat"><div class="scn-stat-val" style="color:var(--yellow);">${totalTodos}</div><div class="scn-stat-label">Open TODOs</div></div>` : ""}
+  ${totalUnresolved > 0 ? `<div class="scn-stat"><div class="scn-stat-val" style="color:var(--accent);">${totalUnresolved}</div><div class="scn-stat-label">Unresolved comments</div></div>` : ""}
 </div>`;
   const descHTML = scenario.description ? `<p class="scn-description">${escapeHTML(scenario.description)}</p>` : "";
   const metaRowHTML = `
@@ -7393,11 +7395,16 @@ function generateScenarioDetail(scenario, options = {}) {
   const docsHTML = PLAN_DEFS.map((def) => {
     const f = byType[def.type];
     const exists = !!(f && f.exists);
-    const pct = f && f.completion || 0;
-    const state = !exists ? "missing" : pct >= 100 ? "complete" : "partial";
-    const stateBadge = state === "complete" ? `<span class="doc-state doc-state-complete">Complete</span>` : state === "partial" ? `<span class="doc-state doc-state-partial">${pct}%</span>` : `<span class="doc-state doc-state-missing">Not generated</span>`;
+    const docTodos = f && f.todos || 0;
+    const docUnresolved = f && f.unresolvedComments || 0;
+    const hasOpen = docTodos + docUnresolved > 0;
+    const state = !exists ? "missing" : hasOpen ? "partial" : "complete";
+    const stateBadge = !exists ? `<span class="doc-state doc-state-missing">Not generated</span>` : hasOpen ? `<span class="doc-state doc-state-partial">${docTodos + docUnresolved} open</span>` : `<span class="doc-state doc-state-complete">Clear</span>`;
     const primaryAction = exists ? `<a href="/view?path=${encodeURIComponent(f.path)}" class="doc-primary-action">Open \u2192</a>` : `<code class="doc-skill">${escapeHTML(def.skill)} ${escapeHTML(scenario.name || "")}</code>`;
-    const progressBar = exists ? `<div class="doc-progress"><div class="doc-progress-fill" style="width:${pct}%;"></div></div>` : `<div class="doc-progress"><div class="doc-progress-fill doc-progress-empty"></div></div>`;
+    const countParts = [];
+    if (docTodos > 0) countParts.push(`<span class="doc-count doc-count-todo" title="Open TODOs in this doc">${docTodos} todo</span>`);
+    if (docUnresolved > 0) countParts.push(`<span class="doc-count doc-count-unresolved" title="Unresolved comments on this doc">${docUnresolved} unresolved</span>`);
+    const countsRow = exists && countParts.length > 0 ? `<div class="doc-counts">${countParts.join("")}</div>` : "";
     return `
 <article class="doc-card doc-card-${state}">
   <header class="doc-card-header">
@@ -7405,7 +7412,7 @@ function generateScenarioDetail(scenario, options = {}) {
     ${stateBadge}
   </header>
   <p class="doc-card-blurb">${escapeHTML(def.blurb)}</p>
-  ${progressBar}
+  ${countsRow}
   <footer class="doc-card-footer">${primaryAction}</footer>
 </article>`;
   }).join("");
@@ -8311,8 +8318,8 @@ __export(web_server_exports, {
 });
 import { createServer } from "node:http";
 import { readdir as readdir2, readFile as readFile3, stat as stat2 } from "node:fs/promises";
-import { join as join3, basename as basename2, extname as extname2, resolve as resolve2, sep as sep3 } from "node:path";
-import { URL as URL2 } from "node:url";
+import { join as join3, basename as basename2, extname as extname2, resolve as resolve2, sep as sep3, dirname } from "node:path";
+import { URL as URL2, fileURLToPath } from "node:url";
 async function startDashboard(workspaceRoot, port = 3847) {
   if (server) {
     return getDashboardUrl();
@@ -8381,6 +8388,9 @@ async function handleRequest(req, res) {
   const fromLoopback = isLoopback(req.socket?.remoteAddress);
   if (isEnabled() && pathname === "/_auth/login" && req.method === "POST") {
     return handleLogin(req, res);
+  }
+  if ((pathname === "/favicon.ico" || pathname === "/icon.png") && req.method === "GET") {
+    return serveIcon(req, res);
   }
   if (isEnabled() && !fromLoopback) {
     const cookieValue = parseCookie(req.headers.cookie || "", COOKIE_NAME);
@@ -8588,6 +8598,19 @@ function handleCommentStream(req, res, { scenario, doc }) {
 function getWorkspaceName() {
   return workspaceRootPath ? basename2(workspaceRootPath) : "workspace";
 }
+async function serveIcon(req, res) {
+  try {
+    const png = await readFile3(ICON_PATH);
+    res.writeHead(200, {
+      "Content-Type": "image/png",
+      "Cache-Control": "public, max-age=86400"
+    });
+    res.end(png);
+  } catch {
+    res.writeHead(404, { "Content-Type": "text/plain" });
+    res.end("Icon not found");
+  }
+}
 async function serveDashboard(req, res) {
   const scenarios = await scanScenarios();
   const workspaceName = getWorkspaceName();
@@ -8754,7 +8777,6 @@ async function serveApiScenarioStatus(req, res, scenarioName) {
   const files = scenario.files || [];
   const totalFiles = files.length;
   const existingFiles = files.filter((f) => f.exists).length;
-  const completion = scenario.completion || 0;
   res.writeHead(200, {
     "Content-Type": "application/json; charset=utf-8",
     "Cache-Control": "no-cache"
@@ -8764,12 +8786,14 @@ async function serveApiScenarioStatus(req, res, scenarioName) {
     totalFiles,
     existingFiles,
     missingFiles: totalFiles - existingFiles,
-    completion,
+    todos: scenario.todos || 0,
+    done: scenario.done || 0,
     files: files.map((f) => ({
       type: f.type,
       path: f.path,
       exists: f.exists,
-      completion: f.completion || 0
+      todos: f.todos || 0,
+      done: f.done || 0
     }))
   }, null, 2));
 }
@@ -8819,18 +8843,34 @@ async function scanScenarioDir(name, dirPath) {
       const matching = entries.find((e) => e.toLowerCase().endsWith(suffix));
       if (matching) {
         const filePath = join3(dirPath, matching);
-        const completion2 = await estimateFileCompletion(filePath);
-        files.push({ type: pt.type, path: filePath, exists: true, completion: completion2 });
+        const { todos, done } = await estimateFileCompletion(filePath);
+        files.push({ type: pt.type, path: filePath, exists: true, todos, done });
         found = true;
         break;
       }
     }
     if (!found) {
-      files.push({ type: pt.type, path: join3(dirPath, `${name}-${pt.type}.html`), exists: false, completion: 0 });
+      files.push({ type: pt.type, path: join3(dirPath, `${name}-${pt.type}.html`), exists: false, todos: 0, done: 0 });
     }
   }
-  const existingFiles = files.filter((f) => f.exists);
-  const completion = existingFiles.length > 0 ? Math.round(existingFiles.reduce((s, f) => s + f.completion, 0) / files.length) : 0;
+  const totalTodos = files.reduce((s, f) => s + (f.todos || 0), 0);
+  const totalDone = files.reduce((s, f) => s + (f.done || 0), 0);
+  let totalUnresolved = 0;
+  for (const f of files) {
+    if (!f.exists) {
+      f.unresolvedComments = 0;
+      continue;
+    }
+    const docSlug = basename2(f.path, extname2(f.path));
+    try {
+      const data = await listComments(workspaceRootPath, name, docSlug);
+      const count = countUnresolved(data.comments || []);
+      f.unresolvedComments = count;
+      totalUnresolved += count;
+    } catch {
+      f.unresolvedComments = 0;
+    }
+  }
   const description = await readScenarioDescription(dirPath);
   return {
     name,
@@ -8838,8 +8878,18 @@ async function scanScenarioDir(name, dirPath) {
     description: description || "",
     workItem: "",
     files,
-    completion
+    todos: totalTodos,
+    done: totalDone,
+    unresolvedComments: totalUnresolved
   };
+}
+function countUnresolved(comments) {
+  let n = 0;
+  for (const c of comments) {
+    if (!c.deleted && !c.resolved) n += 1;
+    if (c.replies && c.replies.length) n += countUnresolved(c.replies);
+  }
+  return n;
 }
 function groupFlatFilesIntoScenarios(fileNames, plansDir) {
   const suffixes = [
@@ -8897,19 +8947,18 @@ function groupFlatFilesIntoScenarios(fileNames, plansDir) {
     const files = allPlanTypes.map((type) => {
       const found = foundFiles.find((f) => f.type === type);
       if (found) {
-        return { type, path: found.path, exists: true, completion: 50 };
+        return { type, path: found.path, exists: true, todos: 0, done: 0 };
       }
-      return { type, path: join3(plansDir, `${prefix}-${type}.html`), exists: false, completion: 0 };
+      return { type, path: join3(plansDir, `${prefix}-${type}.html`), exists: false, todos: 0, done: 0 };
     });
-    const existingCount = files.filter((f) => f.exists).length;
-    const completion = Math.round(existingCount / files.length * 100);
     scenarios.push({
       name: prefix,
       path: plansDir,
       description: "",
       workItem: "",
       files,
-      completion
+      todos: 0,
+      done: 0
     });
   }
   return scenarios;
@@ -8917,14 +8966,22 @@ function groupFlatFilesIntoScenarios(fileNames, plansDir) {
 async function estimateFileCompletion(filePath) {
   try {
     const content = await readFile3(filePath, "utf-8");
-    const checkboxes = (content.match(/type=["']checkbox["']/g) || []).length;
-    if (checkboxes === 0) {
-      return content.length > 1e3 ? 50 : 10;
+    let todos = 0;
+    let done = 0;
+    const inlineTodos = content.match(/\b(TODO|FIXME)\s*[:：]\s*.{2,}/g);
+    if (inlineTodos) todos += inlineTodos.length;
+    const openLi = content.match(/<li[^>]*>\s*\[\s\]/g);
+    const doneLi = content.match(/<li[^>]*>\s*\[[xX]\]/g);
+    if (openLi) todos += openLi.length;
+    if (doneLi) done += doneLi.length;
+    const allChecks = content.match(/<input[^>]*type=["']checkbox["'][^>]*>/g) || [];
+    for (const input of allChecks) {
+      if (/\bchecked\b/.test(input)) done += 1;
+      else todos += 1;
     }
-    const checked = (content.match(/type=["']checkbox["'][^>]*checked/g) || []).length;
-    return Math.round(checked / checkboxes * 100);
+    return { todos, done };
   } catch {
-    return 0;
+    return { todos: 0, done: 0 };
   }
 }
 async function readScenarioDescription(dirPath) {
@@ -8973,6 +9030,7 @@ function serveLoginPage(req, res) {
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Plan Dashboard \u2014 Sign in</title>
+<link rel="icon" type="image/png" href="/icon.png">
 <script>
 (function(){
   try {
@@ -9081,13 +9139,14 @@ async function handleLogin(req, res) {
   res.writeHead(302, { "Set-Cookie": cookie, Location: "/" });
   res.end();
 }
-var server, serverPort, workspaceRootPath, COOKIE_NAME;
+var ICON_PATH, server, serverPort, workspaceRootPath, COOKIE_NAME;
 var init_web_server = __esm({
   "src/web-server.js"() {
     init_base();
     init_auth();
     init_comment_manager();
     init_comment_manager();
+    ICON_PATH = resolve2(dirname(fileURLToPath(import.meta.url)), "..", "..", "assets", "icon.png");
     server = null;
     serverPort = null;
     workspaceRootPath = null;

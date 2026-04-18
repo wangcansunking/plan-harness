@@ -635,7 +635,6 @@ async function serveApiScenarioStatus(req, res, scenarioName) {
   const files = scenario.files || [];
   const totalFiles = files.length;
   const existingFiles = files.filter(f => f.exists).length;
-  const completion = scenario.completion || 0;
 
   res.writeHead(200, {
     'Content-Type': 'application/json; charset=utf-8',
@@ -646,12 +645,14 @@ async function serveApiScenarioStatus(req, res, scenarioName) {
     totalFiles,
     existingFiles,
     missingFiles: totalFiles - existingFiles,
-    completion,
+    todos: scenario.todos || 0,
+    done: scenario.done || 0,
     files: files.map(f => ({
       type: f.type,
       path: f.path,
       exists: f.exists,
-      completion: f.completion || 0
+      todos: f.todos || 0,
+      done: f.done || 0
     }))
   }, null, 2));
 }
@@ -731,21 +732,37 @@ async function scanScenarioDir(name, dirPath) {
       const matching = entries.find(e => e.toLowerCase().endsWith(suffix));
       if (matching) {
         const filePath = join(dirPath, matching);
-        const completion = await estimateFileCompletion(filePath);
-        files.push({ type: pt.type, path: filePath, exists: true, completion });
+        const { todos, done } = await estimateFileCompletion(filePath);
+        files.push({ type: pt.type, path: filePath, exists: true, todos, done });
         found = true;
         break;
       }
     }
     if (!found) {
-      files.push({ type: pt.type, path: join(dirPath, `${name}-${pt.type}.html`), exists: false, completion: 0 });
+      files.push({ type: pt.type, path: join(dirPath, `${name}-${pt.type}.html`), exists: false, todos: 0, done: 0 });
     }
   }
 
-  const existingFiles = files.filter(f => f.exists);
-  const completion = existingFiles.length > 0
-    ? Math.round(existingFiles.reduce((s, f) => s + f.completion, 0) / files.length)
-    : 0;
+  const totalTodos = files.reduce((s, f) => s + (f.todos || 0), 0);
+  const totalDone = files.reduce((s, f) => s + (f.done || 0), 0);
+
+  // Per-doc unresolved comment counts. Read the JSONL for every existing
+  // doc in the scenario and collapse to comments; sum non-deleted + unresolved.
+  // Folds the counts onto each file object so the scenario detail view can
+  // show them inline, and also rolls up to a scenario-level total.
+  let totalUnresolved = 0;
+  for (const f of files) {
+    if (!f.exists) { f.unresolvedComments = 0; continue; }
+    const docSlug = basename(f.path, extname(f.path));
+    try {
+      const data = await commentMgr.listComments(workspaceRootPath, name, docSlug);
+      const count = countUnresolved(data.comments || []);
+      f.unresolvedComments = count;
+      totalUnresolved += count;
+    } catch {
+      f.unresolvedComments = 0;
+    }
+  }
 
   // Try to find description from a metadata.json or the first file
   const description = await readScenarioDescription(dirPath);
@@ -756,8 +773,20 @@ async function scanScenarioDir(name, dirPath) {
     description: description || '',
     workItem: '',
     files,
-    completion
+    todos: totalTodos,
+    done: totalDone,
+    unresolvedComments: totalUnresolved
   };
+}
+
+// Recursively count unresolved, non-deleted comments across a thread tree.
+function countUnresolved(comments) {
+  let n = 0;
+  for (const c of comments) {
+    if (!c.deleted && !c.resolved) n += 1;
+    if (c.replies && c.replies.length) n += countUnresolved(c.replies);
+  }
+  return n;
 }
 
 function groupFlatFilesIntoScenarios(fileNames, plansDir) {
@@ -818,13 +847,10 @@ function groupFlatFilesIntoScenarios(fileNames, plansDir) {
     const files = allPlanTypes.map(type => {
       const found = foundFiles.find(f => f.type === type);
       if (found) {
-        return { type, path: found.path, exists: true, completion: 50 }; // Estimate
+        return { type, path: found.path, exists: true, todos: 0, done: 0 };
       }
-      return { type, path: join(plansDir, `${prefix}-${type}.html`), exists: false, completion: 0 };
+      return { type, path: join(plansDir, `${prefix}-${type}.html`), exists: false, todos: 0, done: 0 };
     });
-
-    const existingCount = files.filter(f => f.exists).length;
-    const completion = Math.round((existingCount / files.length) * 100);
 
     scenarios.push({
       name: prefix,
@@ -832,7 +858,8 @@ function groupFlatFilesIntoScenarios(fileNames, plansDir) {
       description: '',
       workItem: '',
       files,
-      completion
+      todos: 0,
+      done: 0
     });
   }
 
@@ -840,27 +867,49 @@ function groupFlatFilesIntoScenarios(fileNames, plansDir) {
 }
 
 /**
- * Estimate file completion based on content analysis.
- * Looks for checkboxes and their checked state.
+ * Count TODO + done markers in an HTML plan doc.
+ *
+ * Uses the same three-marker contract as the /view sidebar TODO panel
+ * (see plans/built-in-comment-ui/design.html §6.3):
+ *   1. `TODO:` / `FIXME:` inline text       -> counts as 1 todo
+ *   2. <li>[ ]...</li> (open) / [x] (done)  -> todo / done
+ *   3. <input type="checkbox">              -> unchecked = todo, checked = done
+ *
+ * Returning raw counts (not a percentage) lets the dashboard show "3 todo /
+ * 5 done" honestly. Docs with no markers show as "— / —" rather than a
+ * meaningless 50% estimate.
+ *
  * @param {string} filePath
- * @returns {Promise<number>} Completion percentage 0-100.
+ * @returns {Promise<{todos: number, done: number}>}
  */
 async function estimateFileCompletion(filePath) {
   try {
     const content = await readFile(filePath, 'utf-8');
+    let todos = 0;
+    let done = 0;
 
-    // Count checkboxes (input type=checkbox)
-    const checkboxes = (content.match(/type=["']checkbox["']/g) || []).length;
-    if (checkboxes === 0) {
-      // No checkboxes: if the file exists and has substantial content, assume partially complete
-      return content.length > 1000 ? 50 : 10;
+    // Pattern 1: TODO: / FIXME: text (ASCII : or full-width ：). Each match
+    // is one open item — there's no "done" form of this pattern.
+    const inlineTodos = content.match(/\b(TODO|FIXME)\s*[:：]\s*.{2,}/g);
+    if (inlineTodos) todos += inlineTodos.length;
+
+    // Pattern 2: <li>[ ] ...</li> and <li>[x] ...</li>. Allow any attrs on
+    // the li and trim leading whitespace inside.
+    const openLi = content.match(/<li[^>]*>\s*\[\s\]/g);
+    const doneLi = content.match(/<li[^>]*>\s*\[[xX]\]/g);
+    if (openLi) todos += openLi.length;
+    if (doneLi) done += doneLi.length;
+
+    // Pattern 3: <input type="checkbox">. `checked` presence flips it.
+    const allChecks = content.match(/<input[^>]*type=["']checkbox["'][^>]*>/g) || [];
+    for (const input of allChecks) {
+      if (/\bchecked\b/.test(input)) done += 1;
+      else todos += 1;
     }
 
-    // Count checked checkboxes
-    const checked = (content.match(/type=["']checkbox["'][^>]*checked/g) || []).length;
-    return Math.round((checked / checkboxes) * 100);
+    return { todos, done };
   } catch {
-    return 0;
+    return { todos: 0, done: 0 };
   }
 }
 

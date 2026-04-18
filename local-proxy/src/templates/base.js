@@ -567,23 +567,26 @@ export function generateDashboard(scenarios, options = {}) {
   const totalScenarios = scenarios.length;
   const totalFiles = scenarios.reduce((s, sc) => s + (sc.files ? sc.files.length : 0), 0);
   const existingFiles = scenarios.reduce((s, sc) => s + (sc.files ? sc.files.filter(f => f.exists).length : 0), 0);
-  const avgCompletion = totalScenarios > 0
-    ? Math.round(scenarios.reduce((s, sc) => s + (sc.completion || 0), 0) / totalScenarios)
-    : 0;
+  const totalTodos = scenarios.reduce((s, sc) => s + (sc.todos || 0), 0);
+  const totalUnresolved = scenarios.reduce((s, sc) => s + (sc.unresolvedComments || 0), 0);
 
   const planTypes = ['design', 'test-plan', 'state-machines', 'test-cases', 'impl-plan'];
 
+  // Cards are omitted when their count is zero — honest signal, no dead chrome.
+  // Scenarios + Plan Files are always shown because they can be zero only
+  // on a fresh workspace, where "0 scenarios" is itself a useful signal.
   let summaryCards = `
 <div class="summary-grid">
   <div class="summary-card"><div class="summary-value">${totalScenarios}</div><div class="summary-label">Scenarios</div></div>
   <div class="summary-card"><div class="summary-value" style="color:var(--green)">${existingFiles}</div><div class="summary-label">Plan Files</div></div>
-  <div class="summary-card"><div class="summary-value" style="color:var(--yellow)">${totalFiles - existingFiles}</div><div class="summary-label">Missing</div></div>
-  <div class="summary-card"><div class="summary-value" style="color:var(--accent)">${avgCompletion}%</div><div class="summary-label">Avg. Completion</div></div>
+  ${totalTodos > 0 ? `<div class="summary-card"><div class="summary-value" style="color:var(--yellow)">${totalTodos}</div><div class="summary-label">Open TODOs</div></div>` : ''}
+  ${totalUnresolved > 0 ? `<div class="summary-card"><div class="summary-value" style="color:var(--accent)">${totalUnresolved}</div><div class="summary-label">Unresolved comments</div></div>` : ''}
 </div>
 `;
 
   let scenarioCards = scenarios.map((sc, idx) => {
-    const pct = sc.completion || 0;
+    const todos = sc.todos || 0;
+    const unresolved = sc.unresolvedComments || 0;
     const fileCount = sc.files ? sc.files.length : 0;
     const existCount = sc.files ? sc.files.filter(f => f.exists).length : 0;
     const workItemLink = sc.workItem
@@ -598,11 +601,15 @@ export function generateDashboard(scenarios, options = {}) {
       return `<span class="badge ${pillClass}" style="${pillStyle}font-size:0.7rem;">${type}</span>`;
     }).join(' ');
 
-    const statusDot = pct >= 100
-      ? '<span style="color:var(--green);font-size:1.2rem;" title="Complete">&#10003;</span>'
-      : pct > 0
-        ? '<span style="color:var(--yellow);font-size:1.2rem;" title="In Progress">&#9679;</span>'
-        : '<span style="color:var(--muted);font-size:1.2rem;" title="Not Started">&#9675;</span>';
+    // Status dot: yellow if anything open (todos OR unresolved comments),
+    // muted grey if there's nothing tracked yet, green once the tracked
+    // set is empty. Honest signal beats a fake percentage.
+    const open = todos + unresolved;
+    const statusDot = open === 0 && (existCount > 0)
+      ? '<span style="color:var(--green);font-size:1.2rem;" title="No open items">&#10003;</span>'
+      : open > 0
+        ? '<span style="color:var(--yellow);font-size:1.2rem;" title="Open items">&#9679;</span>'
+        : '<span style="color:var(--muted);font-size:1.2rem;" title="No tracked items">&#9675;</span>';
 
     return `
 <div class="scenario-card" style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:1.2rem;cursor:pointer;transition:box-shadow 0.15s,border-color 0.15s;" onclick="window.location.href='/scenario/${encodeURIComponent(sc.name)}'" onmouseover="this.style.boxShadow='var(--shadow-lg)';this.style.borderColor='var(--accent)'" onmouseout="this.style.boxShadow='';this.style.borderColor='var(--border)'">
@@ -613,12 +620,10 @@ export function generateDashboard(scenarios, options = {}) {
   ${sc.description ? `<p style="font-size:0.85rem;color:var(--muted);margin-bottom:0.6rem;">${escapeHTML(sc.description)}</p>` : ''}
   ${workItemLink ? `<div style="margin-bottom:0.6rem;">${workItemLink}</div>` : ''}
   <div style="margin-bottom:0.6rem;">${filePills}</div>
-  <div style="display:flex;align-items:center;gap:0.6rem;font-size:0.85rem;">
+  <div style="display:flex;align-items:center;gap:0.9rem;font-size:0.85rem;flex-wrap:wrap;">
     <span style="color:var(--muted);">${existCount}/${fileCount} files</span>
-    <div style="flex:1;height:6px;background:var(--border);border-radius:3px;overflow:hidden;">
-      <div style="height:100%;width:${pct}%;background:var(--green);border-radius:3px;transition:width 0.3s;"></div>
-    </div>
-    <span style="font-weight:600;color:var(--accent);">${pct}%</span>
+    ${todos > 0 ? `<span style="color:var(--yellow);font-weight:600;" title="Open TODO items">${todos} todo</span>` : ''}
+    ${unresolved > 0 ? `<span style="color:var(--accent);font-weight:600;" title="Unresolved comments">${unresolved} unresolved</span>` : ''}
   </div>
 </div>
 `;
@@ -682,10 +687,8 @@ export function generateScenarioDetail(scenario, options = {}) {
   const byType = Object.fromEntries(files.map(f => [f.type, f]));
 
   const existingFiles = files.filter(f => f.exists);
-  const doneFiles = existingFiles.filter(f => (f.completion || 0) >= 100).length;
-  const avgCompletion = scenario.completion ?? (existingFiles.length
-    ? Math.round(existingFiles.reduce((s, f) => s + (f.completion || 0), 0) / existingFiles.length)
-    : 0);
+  const totalTodos = files.reduce((s, f) => s + (f.todos || 0), 0);
+  const totalDone = files.reduce((s, f) => s + (f.done || 0), 0);
 
   const tags = Array.isArray(scenario.tags) ? scenario.tags : [];
   const tagHTML = tags.map(t => `<span class="badge badge-blue" style="font-size:0.72rem;">${escapeHTML(t)}</span>`).join(' ');
@@ -695,12 +698,12 @@ export function generateScenarioDetail(scenario, options = {}) {
     return `<span class="badge badge-${color}" style="font-size:0.72rem;text-transform:capitalize;">${escapeHTML(s)}</span>`;
   })();
 
+  const totalUnresolved = scenario.unresolvedComments || 0;
   const summaryHTML = `
 <div class="scn-summary">
   <div class="scn-stat"><div class="scn-stat-val">${existingFiles.length}<span class="scn-stat-total">/${PLAN_DEFS.length}</span></div><div class="scn-stat-label">Documents</div></div>
-  <div class="scn-stat"><div class="scn-stat-val" style="color:var(--green);">${doneFiles}</div><div class="scn-stat-label">Complete</div></div>
-  <div class="scn-stat"><div class="scn-stat-val" style="color:var(--yellow);">${existingFiles.length - doneFiles}</div><div class="scn-stat-label">In Progress</div></div>
-  <div class="scn-stat"><div class="scn-stat-val" style="color:var(--accent);">${avgCompletion}%</div><div class="scn-stat-label">Avg. Complete</div></div>
+  ${totalTodos > 0 ? `<div class="scn-stat"><div class="scn-stat-val" style="color:var(--yellow);">${totalTodos}</div><div class="scn-stat-label">Open TODOs</div></div>` : ''}
+  ${totalUnresolved > 0 ? `<div class="scn-stat"><div class="scn-stat-val" style="color:var(--accent);">${totalUnresolved}</div><div class="scn-stat-label">Unresolved comments</div></div>` : ''}
 </div>`;
 
   const descHTML = scenario.description
@@ -717,21 +720,30 @@ export function generateScenarioDetail(scenario, options = {}) {
   const docsHTML = PLAN_DEFS.map(def => {
     const f = byType[def.type];
     const exists = !!(f && f.exists);
-    const pct = (f && f.completion) || 0;
-    const state = !exists ? 'missing' : pct >= 100 ? 'complete' : 'partial';
-    const stateBadge = state === 'complete'
-      ? `<span class="doc-state doc-state-complete">Complete</span>`
-      : state === 'partial'
-        ? `<span class="doc-state doc-state-partial">${pct}%</span>`
-        : `<span class="doc-state doc-state-missing">Not generated</span>`;
+    const docTodos = (f && f.todos) || 0;
+    const docUnresolved = (f && f.unresolvedComments) || 0;
+    const hasOpen = docTodos + docUnresolved > 0;
+    const state = !exists ? 'missing' : hasOpen ? 'partial' : 'complete';
+    const stateBadge = !exists
+      ? `<span class="doc-state doc-state-missing">Not generated</span>`
+      : hasOpen
+        ? `<span class="doc-state doc-state-partial">${docTodos + docUnresolved} open</span>`
+        : `<span class="doc-state doc-state-complete">Clear</span>`;
 
     const primaryAction = exists
       ? `<a href="/view?path=${encodeURIComponent(f.path)}" class="doc-primary-action">Open →</a>`
       : `<code class="doc-skill">${escapeHTML(def.skill)} ${escapeHTML(scenario.name || '')}</code>`;
 
-    const progressBar = exists
-      ? `<div class="doc-progress"><div class="doc-progress-fill" style="width:${pct}%;"></div></div>`
-      : `<div class="doc-progress"><div class="doc-progress-fill doc-progress-empty"></div></div>`;
+    // Counts row only shows non-zero items. When the doc has zero of
+    // everything, the whole row is suppressed — the "Clear" state badge
+    // already communicates the signal, so repeating "0 todo · 0 unresolved"
+    // is just noise.
+    const countParts = [];
+    if (docTodos > 0) countParts.push(`<span class="doc-count doc-count-todo" title="Open TODOs in this doc">${docTodos} todo</span>`);
+    if (docUnresolved > 0) countParts.push(`<span class="doc-count doc-count-unresolved" title="Unresolved comments on this doc">${docUnresolved} unresolved</span>`);
+    const countsRow = (exists && countParts.length > 0)
+      ? `<div class="doc-counts">${countParts.join('')}</div>`
+      : '';
 
     return `
 <article class="doc-card doc-card-${state}">
@@ -740,7 +752,7 @@ export function generateScenarioDetail(scenario, options = {}) {
     ${stateBadge}
   </header>
   <p class="doc-card-blurb">${escapeHTML(def.blurb)}</p>
-  ${progressBar}
+  ${countsRow}
   <footer class="doc-card-footer">${primaryAction}</footer>
 </article>`;
   }).join('');

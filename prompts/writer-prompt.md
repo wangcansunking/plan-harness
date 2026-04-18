@@ -76,6 +76,44 @@ Font stack: `'Inter Variable', Inter, -apple-system, BlinkMacSystemFont, 'Segoe 
 
 ---
 
+## MANDATORY RULE — Mockups / playgrounds for UX scenarios
+
+If the scenario is **UX-adjacent** (has a user-facing surface: widgets, panels, modals, buttons, forms, layouts, cursors, overlays, kbd flows — anything a reviewer can see or click), every generated plan doc that references UI MUST carry at least one **mockup or interactive playground** per top-level UX concept. Text-only descriptions of what a reviewer "will see" are rejected by the review gate.
+
+### Which doc carries which shape
+
+| Doc | Expected artifact |
+|-----|-------------------|
+| `design.html` §6 UX Design | Static **wireframe mockups** as inline SVG for each major surface (composer, sidebar, pill, toolbar). One per state (empty / populated / error / loading). |
+| `test-plan.html` | Per UX scenario: a **flow or branch diagram** (covered by the tester-prompt.md rule). |
+| `test-cases.html` | **Interactive playground**: a self-contained inline HTML/JS harness that renders the target component and lets the reviewer tick acceptance criteria while exercising it. Re-use the pattern already in `base.js` `generateTestCases` where applicable. |
+| `implementation-plan.html` | **Before / after mockup pair** for each phase that visibly changes the UI — so the reviewer can see which surface that phase lands. |
+| `state-machine.html` | Optional: small **per-state mockups** (thumbnail SVG) beside each state node if the state is visible to the user. |
+
+### Styling contract for mockups
+
+- Inline SVG only. No `<img src=...>`, no external CDN icons.
+- Re-use the doc palette via CSS custom props so mockups re-theme with dark mode: `var(--surface)` for panel backgrounds, `var(--text)` for labels, `var(--muted)` for placeholder text, `var(--border)` for outlines, `var(--accent)` for primary buttons / focus rings.
+- Label realistic copy (not `Lorem ipsum`). The mockup's text should read as if the feature were already shipped.
+- Include a `<title>` + `<desc>` on every SVG for a11y.
+- Caption each mockup with `<div class="caption">Figure N. {state name} — {what a reviewer should notice}</div>`.
+- Responsive: keep viewBox ≤ 900 × 600. Use `preserveAspectRatio="xMidYMid meet"`.
+
+### When a playground is required
+
+For `test-cases.html`, if the component has state-dependent behavior (expanded/collapsed, loading/loaded, valid/invalid), add an **interactive playground section** at the top with:
+
+- A `<fieldset>` of `<input type="checkbox">` / `<select>` toggles for each prop / state dimension.
+- A live preview that re-renders when toggles change (vanilla JS, no framework).
+- "Expected behavior" prose underneath that updates based on the toggle state.
+- A "Copy-to-clipboard" button for the resulting JSON payload (useful for passing to curl/automation).
+
+### Negative guard
+
+If the scenario is purely backend (e.g. a cron job, a data migration, a server-only refactor) and the acceptance criteria have no UI observable, skip mockups and state so explicitly in §6 of design.html: *"No user-facing surface — all acceptance criteria are server-observable."* This is the only exemption.
+
+---
+
 ## Context
 
 You receive:

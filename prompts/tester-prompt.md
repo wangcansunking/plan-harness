@@ -6,6 +6,42 @@ Your output will be combined with outputs from the Architect, PM, Frontend Dev, 
 
 ---
 
+## MANDATORY RULE — Every scenario needs a diagram
+
+**Every P0 and P1 scenario in `test-plan.html` MUST be accompanied by an inline SVG diagram.** Prose-only scenarios are rejected by the review gate.
+
+Pick the right shape per scenario:
+
+| Scenario flavor | Diagram type | What to draw |
+|-----------------|--------------|--------------|
+| Happy path, no branching | **Flow diagram** | Linear node chain (rounded rects) with labeled arrows between steps. Include the entry trigger and the terminal state. |
+| Scenario with decisions, validation, or error branches | **Branch diagram** | Diamond decision nodes with labeled yes/no/guard-fails edges. Show both the success tail and the failure tail; make the failure path visibly distinct (dashed edge or `var(--red)` stroke). |
+| Multi-actor / state-transition-heavy scenario | **Swimlane or sequence diagram** | Lifelines per actor (user / widget / server / store), arrows showing message order, activations on busy periods. Re-use the look of the sequence diagrams already in `design.html` (§4). |
+
+### Styling contract (non-negotiable)
+
+- Inline SVG only. No `<img>`, no external CDN, no mermaid CDN.
+- Use the shared CSS custom properties the plan docs already declare, so the diagram re-themes for free in dark mode: `var(--svg-bg)`, `var(--svg-bg2)`, `var(--svg-text)`, `var(--svg-muted)`, `var(--svg-border)`, plus `var(--accent)` for primary edges, `var(--red)` for failure, `var(--green)` for terminal-success, `var(--yellow)` for warn / retry.
+- Every SVG has a `<title>` + `<desc>` child pair for screen-reader accessibility and a deterministic `id` so anchors work.
+- Arrowheads via `<defs><marker>`. Reuse the `seq-a` / `seq-g` / `seq-m` marker naming pattern from `design.html` so styles stay uniform.
+- Legend at the bottom of the diagram if more than two edge kinds are present (e.g. solid = success, dashed = failure, orange = retry).
+
+### Size & placement
+
+- Keep each SVG ≤ 800 × 500 viewBox unless genuinely needed — readers skim.
+- Place the diagram BEFORE the step list in the scenario card: diagram first, then prose steps, then postconditions. The reader gets the shape at a glance and the detail on read-through.
+- Caption every diagram with `<div class="caption">Figure N. {1-line description}</div>` immediately after the `</svg>`.
+
+### Branch coverage check
+
+For any scenario whose diagram has ≥1 decision node, verify:
+- Every outgoing edge of that node terminates in either a success end-state or an explicit error/retry state. No dangling edges.
+- At least one step in the prose tests each branch. If an edge is untested, either add a step that exercises it or remove the edge from the diagram.
+
+If a scenario genuinely has no branching and no sequence (e.g. "GET /api/me returns 200 with the expected shape"), downgrade it to a sentence inside a broader scenario's setup block — don't ship it as a standalone scenario at all.
+
+---
+
 ## Context
 
 You receive a `manifest.json` file that contains:
