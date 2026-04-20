@@ -60,8 +60,8 @@ The per-type files are short reference stubs. The full agent prompts live in `sk
    - `generating...` if `<type>Generating == true` in the manifest (set while a run is in flight)
    - `not generated` otherwise
 2. Call the `AskUserQuestion` tool with TWO multi-select questions to cover all seven types (max 4 options per question). Include the status string in each option's description:
-   - Q1 (header: `Core docs`, multiSelect: true): `design`, `state-machine`, `test-plan`, `test-cases`
-   - Q2 (header: `Downstream`, multiSelect: true): `implementation`, `test-report`, `analysis`
+   - Q1 (header: `Upstream + core`, multiSelect: true): `analysis`, `design`, `state-machine`, `test-plan`
+   - Q2 (header: `Downstream`, multiSelect: true): `test-cases`, `implementation`, `test-report`
 3. Union the selections; if empty, print `"Nothing selected. Stopping."` and stop.
 
 ### Step 3 — Order the selected types topologically
@@ -69,13 +69,30 @@ The per-type files are short reference stubs. The full agent prompts live in `sk
 Dependency graph (see also `/plan-sync`):
 
 ```
-design → state-machine
-design → test-plan → test-cases → implementation
-                   → test-report
-              analysis (parallel, no downstream deps)
+analysis  →  design  ┬─►  state-machine  ──────────────────────────┐
+                     │                                               │
+                     ├─►  test-plan  ─┬─►  test-cases  ─────────────┤
+                     │                │                              │
+                     │                └──────────────────┐           │
+                     │                                   │           │
+                     └────────────────────────────────── ┼──► implementation ──► test-report
+                                                         │                       ▲
+                                                         └───────────────────────┘
 ```
 
-Sort the selection so that any upstream type runs before its downstream. When a later type's input is being regenerated in the same run, it reads the freshly-written file.
+Required vs. optional edges:
+
+| Doc | Hard (required) upstream | Soft (optional) upstream |
+|-----|--------------------------|---------------------------|
+| `analysis` | — | — |
+| `design` | — | `analysis` |
+| `state-machine` | `design` | — |
+| `test-plan` | `design` | — |
+| `test-cases` | `design`, `test-plan` | — |
+| `implementation` | `design` | `state-machine`, `test-plan`, `test-cases` |
+| `test-report` | `test-plan` | `implementation` |
+
+Sort the selection so that any upstream type (hard OR soft) runs before its downstream. When a later type's input is being regenerated in the same run, it reads the freshly-written file. When a soft upstream is absent AND not part of the current selection, skip it — the downstream still runs on its hard inputs.
 
 ### Step 4 — For each selected type, execute its workflow
 
@@ -108,6 +125,7 @@ Scenario:     {scenarioName}
 Generated:    {n} docs in topological order
 Duration:     {mm:ss}
 
+  [Y] analysis.html          (agents: architect, writer)
   [Y] design.html            (agents: architect, pm, writer)
   [Y] state-machine.html     (agents: architect, writer)
   [Y] test-plan.html         (agents: pm, tester, writer)
