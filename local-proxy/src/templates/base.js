@@ -681,12 +681,12 @@ export function generateScenarioDetail(scenario, options = {}) {
   // Types must match the keys emitted by scanScenarioDir in web-server.js.
   // Keep this list in sync with the planTypes array in generateDashboard above.
   const PLAN_DEFS = [
-    { type: 'design', label: 'Design', blurb: 'Architecture, data model, API, UX, risks', skill: '/plan-design' },
-    { type: 'test-plan', label: 'Test Plan', blurb: 'E2E scenarios, entry criteria, ownership', skill: '/plan-test-plan' },
-    { type: 'state-machine', label: 'State Machine', blurb: 'Entity states, transitions, invariants', skill: '/plan-state-machine' },
-    { type: 'test-cases', label: 'Test Cases', blurb: 'Priority-ranked cases with expected outcomes', skill: '/plan-test-cases' },
-    { type: 'implementation-plan', label: 'Implementation', blurb: 'File-level steps, phases, dependencies', skill: '/plan-implementation' },
-    { type: 'test-report', label: 'Test Report', blurb: 'Last E2E run: pass/fail per scenario with evidence', skill: '/plan-test-report' },
+    { type: 'design', label: 'Design', blurb: 'Architecture, data model, API, UX, risks', skill: '/plan-gen design' },
+    { type: 'test-plan', label: 'Test Plan', blurb: 'E2E scenarios, entry criteria, ownership', skill: '/plan-gen test-plan' },
+    { type: 'state-machine', label: 'State Machine', blurb: 'Entity states, transitions, invariants', skill: '/plan-gen state-machine' },
+    { type: 'test-cases', label: 'Test Cases', blurb: 'Priority-ranked cases with expected outcomes', skill: '/plan-gen test-cases' },
+    { type: 'implementation-plan', label: 'Implementation', blurb: 'File-level steps, phases, dependencies', skill: '/plan-gen implementation' },
+    { type: 'test-report', label: 'Test Report', blurb: 'Last E2E run: pass/fail per scenario with evidence', skill: '/plan-gen test-report' },
   ];
 
   const files = scenario.files || [];
@@ -742,7 +742,7 @@ export function generateScenarioDetail(scenario, options = {}) {
 
     const primaryAction = exists
       ? `<a href="/view?path=${encodeURIComponent(f.path)}" class="doc-primary-action">Open →</a>`
-      : `<code class="doc-skill">${escapeHTML(def.skill)} ${escapeHTML(scenario.name || '')}</code>`;
+      : `<code class="doc-skill">${escapeHTML(def.skill)}${scenario.name ? ' --scenario ' + escapeHTML(scenario.name) : ''}</code>`;
 
     // Counts row only shows non-zero items. When the doc has zero of
     // everything, the whole row is suppressed — the "Clear" state badge

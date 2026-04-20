@@ -127,7 +127,7 @@ body.nav-open .side-nav { transform: translateX(0); }
 
 <h1>plan-harness</h1>
 <p class="meta">Claude Code Plugin &mdash; Structured Project Planning with Agent Teams<br>
-11 skills &bull; 6 MCP tools &bull; 6 agent roles &bull; 7 document types<br>
+10 skills &bull; 12 MCP tools &bull; 6 agent roles &bull; 7 document types<br>
 <span class="badge badge-blue">v1.0.0</span> <span class="badge badge-purple">Interactive HTML</span> <span class="badge badge-green">Dark/Light Theme</span></p>
 
 <!-- ===== SECTION 1: Overview ===== -->
@@ -206,7 +206,7 @@ body.nav-open .side-nav { transform: translateX(0); }
 
   <!-- Skills box -->
   <rect x="300" y="55" width="270" height="260" rx="12" fill="var(--glow)" stroke="var(--purple)" stroke-width="2"/>
-  <text x="435" y="78" text-anchor="middle" fill="var(--purple)" font-weight="700" font-size="13">11 Skills</text>
+  <text x="435" y="78" text-anchor="middle" fill="var(--purple)" font-weight="700" font-size="13">10 Skills</text>
   <!-- Skill groups -->
   <text x="320" y="100" fill="var(--muted)" font-size="10" font-weight="600">CONTEXT</text>
   <rect x="320" y="106" width="110" height="24" rx="5" fill="var(--badge-purple-bg)" stroke="var(--purple)" stroke-width="1"/>
@@ -216,17 +216,17 @@ body.nav-open .side-nav { transform: translateX(0); }
 
   <text x="320" y="148" fill="var(--muted)" font-size="10" font-weight="600">GENERATE</text>
   <rect x="320" y="154" width="110" height="24" rx="5" fill="var(--badge-blue-bg)" stroke="var(--accent)" stroke-width="1"/>
-  <text x="375" y="170" text-anchor="middle" fill="var(--accent)" font-size="10" font-weight="600">/plan-analyze</text>
+  <text x="375" y="170" text-anchor="middle" fill="var(--accent)" font-size="10" font-weight="600">/plan-gen analysis</text>
   <rect x="438" y="154" width="110" height="24" rx="5" fill="var(--badge-blue-bg)" stroke="var(--accent)" stroke-width="1"/>
-  <text x="493" y="170" text-anchor="middle" fill="var(--accent)" font-size="10" font-weight="600">/plan-design</text>
+  <text x="493" y="170" text-anchor="middle" fill="var(--accent)" font-size="10" font-weight="600">/plan-gen design</text>
   <rect x="320" y="182" width="110" height="24" rx="5" fill="var(--badge-blue-bg)" stroke="var(--accent)" stroke-width="1"/>
-  <text x="375" y="198" text-anchor="middle" fill="var(--accent)" font-size="9" font-weight="600">/plan-state-machine</text>
+  <text x="375" y="198" text-anchor="middle" fill="var(--accent)" font-size="9" font-weight="600">/plan-gen state-machine</text>
   <rect x="438" y="182" width="110" height="24" rx="5" fill="var(--badge-blue-bg)" stroke="var(--accent)" stroke-width="1"/>
-  <text x="493" y="198" text-anchor="middle" fill="var(--accent)" font-size="10" font-weight="600">/plan-test-plan</text>
+  <text x="493" y="198" text-anchor="middle" fill="var(--accent)" font-size="10" font-weight="600">/plan-gen test-plan</text>
   <rect x="320" y="210" width="110" height="24" rx="5" fill="var(--badge-blue-bg)" stroke="var(--accent)" stroke-width="1"/>
-  <text x="375" y="226" text-anchor="middle" fill="var(--accent)" font-size="10" font-weight="600">/plan-test-cases</text>
+  <text x="375" y="226" text-anchor="middle" fill="var(--accent)" font-size="10" font-weight="600">/plan-gen test-cases</text>
   <rect x="438" y="210" width="110" height="24" rx="5" fill="var(--badge-blue-bg)" stroke="var(--accent)" stroke-width="1"/>
-  <text x="493" y="226" text-anchor="middle" fill="var(--accent)" font-size="9" font-weight="600">/plan-implementation</text>
+  <text x="493" y="226" text-anchor="middle" fill="var(--accent)" font-size="9" font-weight="600">/plan-gen implementation</text>
 
   <text x="320" y="252" fill="var(--muted)" font-size="10" font-weight="600">REVIEW</text>
   <rect x="320" y="258" width="110" height="24" rx="5" fill="var(--badge-green-bg)" stroke="var(--green)" stroke-width="1"/>
@@ -400,13 +400,13 @@ body.nav-open .side-nav { transform: translateX(0); }
 
   <!-- Analyze -->
   <rect x="310" y="68" width="240" height="46" rx="10" fill="var(--svg-node)" stroke="var(--accent)" stroke-width="2"/>
-  <text x="430" y="88" text-anchor="middle" fill="var(--accent)" font-weight="700" font-size="12">/plan-analyze</text>
+  <text x="430" y="88" text-anchor="middle" fill="var(--accent)" font-weight="700" font-size="12">/plan-gen analysis</text>
   <text x="430" y="105" text-anchor="middle" fill="var(--muted)" font-size="10">Architect + Frontend + Backend + Tester + Writer</text>
   <line x1="430" y1="114" x2="430" y2="134" stroke="var(--accent)" stroke-width="2" marker-end="url(#arrow)"/>
 
   <!-- Design -->
   <rect x="310" y="137" width="240" height="46" rx="10" fill="var(--svg-node)" stroke="var(--accent)" stroke-width="2"/>
-  <text x="430" y="157" text-anchor="middle" fill="var(--accent)" font-weight="700" font-size="12">/plan-design</text>
+  <text x="430" y="157" text-anchor="middle" fill="var(--accent)" font-weight="700" font-size="12">/plan-gen design</text>
   <text x="430" y="174" text-anchor="middle" fill="var(--muted)" font-size="10">Architect + PM + Writer</text>
 
   <!-- Branch to state-machine and test-plan -->
@@ -415,18 +415,18 @@ body.nav-open .side-nav { transform: translateX(0); }
 
   <!-- State machine -->
   <rect x="70" y="216" width="240" height="46" rx="10" fill="var(--svg-node)" stroke="var(--accent)" stroke-width="2"/>
-  <text x="190" y="236" text-anchor="middle" fill="var(--accent)" font-weight="700" font-size="12">/plan-state-machine</text>
+  <text x="190" y="236" text-anchor="middle" fill="var(--accent)" font-weight="700" font-size="12">/plan-gen state-machine</text>
   <text x="190" y="253" text-anchor="middle" fill="var(--muted)" font-size="10">Architect + Writer</text>
 
   <!-- Test plan -->
   <rect x="550" y="216" width="240" height="46" rx="10" fill="var(--svg-node)" stroke="var(--accent)" stroke-width="2"/>
-  <text x="670" y="236" text-anchor="middle" fill="var(--accent)" font-weight="700" font-size="12">/plan-test-plan</text>
+  <text x="670" y="236" text-anchor="middle" fill="var(--accent)" font-weight="700" font-size="12">/plan-gen test-plan</text>
   <text x="670" y="253" text-anchor="middle" fill="var(--muted)" font-size="10">PM + Tester + Writer</text>
   <line x1="670" y1="262" x2="670" y2="282" stroke="var(--accent)" stroke-width="2" marker-end="url(#arrow)"/>
 
   <!-- Test cases -->
   <rect x="550" y="285" width="240" height="46" rx="10" fill="var(--svg-node)" stroke="var(--accent)" stroke-width="2"/>
-  <text x="670" y="305" text-anchor="middle" fill="var(--accent)" font-weight="700" font-size="12">/plan-test-cases</text>
+  <text x="670" y="305" text-anchor="middle" fill="var(--accent)" font-weight="700" font-size="12">/plan-gen test-cases</text>
   <text x="670" y="322" text-anchor="middle" fill="var(--muted)" font-size="10">Tester + Frontend Dev + Writer</text>
 
   <!-- Merge to implementation -->
@@ -435,7 +435,7 @@ body.nav-open .side-nav { transform: translateX(0); }
 
   <!-- Implementation -->
   <rect x="310" y="358" width="240" height="55" rx="10" fill="var(--svg-node)" stroke="var(--yellow)" stroke-width="2.5"/>
-  <text x="430" y="378" text-anchor="middle" fill="var(--yellow)" font-weight="700" font-size="12">/plan-implementation</text>
+  <text x="430" y="378" text-anchor="middle" fill="var(--yellow)" font-weight="700" font-size="12">/plan-gen implementation</text>
   <text x="430" y="395" text-anchor="middle" fill="var(--muted)" font-size="10">ALL 6 AGENTS</text>
   <text x="430" y="408" text-anchor="middle" fill="var(--muted)" font-size="9">Architect + PM + Frontend + Backend + Tester + Writer</text>
 
@@ -539,32 +539,32 @@ body.nav-open .side-nav { transform: translateX(0); }
     <div class="agents"><span class="agent-badge" style="background:var(--badge-purple-bg);color:var(--purple)">Interactive</span></div>
   </div>
   <div class="skill-card">
-    <h4>/plan-analyze</h4>
+    <h4>/plan-gen analysis</h4>
     <p>Deep codebase analysis with health scores and recommendations</p>
     <div class="agents"><span class="agent-badge" style="background:var(--badge-blue-bg);color:var(--accent)">Architect</span><span class="agent-badge" style="background:var(--badge-green-bg);color:var(--green)">Frontend</span><span class="agent-badge" style="background:var(--badge-yellow-bg);color:var(--yellow)">Backend</span><span class="agent-badge" style="background:var(--badge-red-bg);color:var(--red)">Tester</span><span class="agent-badge" style="background:var(--badge-cyan-bg);color:var(--cyan)">Writer</span></div>
   </div>
   <div class="skill-card">
-    <h4>/plan-design</h4>
+    <h4>/plan-gen design</h4>
     <p>Architecture, data models, API contracts, SVG diagrams, UX design</p>
     <div class="agents"><span class="agent-badge" style="background:var(--badge-blue-bg);color:var(--accent)">Architect</span><span class="agent-badge" style="background:var(--badge-purple-bg);color:var(--purple)">PM</span><span class="agent-badge" style="background:var(--badge-cyan-bg);color:var(--cyan)">Writer</span></div>
   </div>
   <div class="skill-card">
-    <h4>/plan-state-machine</h4>
+    <h4>/plan-gen state-machine</h4>
     <p>Entity states, transitions, SVG state diagrams, relationship reference</p>
     <div class="agents"><span class="agent-badge" style="background:var(--badge-blue-bg);color:var(--accent)">Architect</span><span class="agent-badge" style="background:var(--badge-cyan-bg);color:var(--cyan)">Writer</span></div>
   </div>
   <div class="skill-card">
-    <h4>/plan-test-plan</h4>
+    <h4>/plan-gen test-plan</h4>
     <p>E2E test scenarios with interactive checkboxes and progress tracking</p>
     <div class="agents"><span class="agent-badge" style="background:var(--badge-purple-bg);color:var(--purple)">PM</span><span class="agent-badge" style="background:var(--badge-red-bg);color:var(--red)">Tester</span><span class="agent-badge" style="background:var(--badge-cyan-bg);color:var(--cyan)">Writer</span></div>
   </div>
   <div class="skill-card">
-    <h4>/plan-test-cases</h4>
+    <h4>/plan-gen test-cases</h4>
     <p>Detailed test cases with P0/P1/P2 priorities, filtering, bulk operations</p>
     <div class="agents"><span class="agent-badge" style="background:var(--badge-red-bg);color:var(--red)">Tester</span><span class="agent-badge" style="background:var(--badge-green-bg);color:var(--green)">Frontend</span><span class="agent-badge" style="background:var(--badge-cyan-bg);color:var(--cyan)">Writer</span></div>
   </div>
   <div class="skill-card">
-    <h4>/plan-implementation</h4>
+    <h4>/plan-gen implementation</h4>
     <p>File-level implementation steps with dependency graph and test mapping</p>
     <div class="agents"><span class="agent-badge" style="background:var(--badge-blue-bg);color:var(--accent)">Architect</span><span class="agent-badge" style="background:var(--badge-purple-bg);color:var(--purple)">PM</span><span class="agent-badge" style="background:var(--badge-green-bg);color:var(--green)">Frontend</span><span class="agent-badge" style="background:var(--badge-yellow-bg);color:var(--yellow)">Backend</span><span class="agent-badge" style="background:var(--badge-red-bg);color:var(--red)">Tester</span><span class="agent-badge" style="background:var(--badge-cyan-bg);color:var(--cyan)">Writer</span></div>
   </div>
@@ -738,23 +738,22 @@ body.nav-open .side-nav { transform: translateX(0); }
 │&nbsp;&nbsp; ├── <span class="file">package.json</span> <span class="comment">&mdash; deps: @modelcontextprotocol/sdk</span><br>
 │&nbsp;&nbsp; ├── <span class="file">start.js</span> <span class="comment">&mdash; bootstrap (auto-installs on first run)</span><br>
 │&nbsp;&nbsp; └── <span class="dir">src/</span><br>
-│&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; ├── <span class="file">index.js</span> <span class="comment">&mdash; MCP server: 6 tools via stdio (406 lines)</span><br>
+│&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; ├── <span class="file">index.js</span> <span class="comment">&mdash; MCP server: 12 tools via stdio</span><br>
 │&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; ├── <span class="file">plan-manager.js</span> <span class="comment">&mdash; plan file CRUD operations (569 lines)</span><br>
 │&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; ├── <span class="file">web-server.js</span> <span class="comment">&mdash; local HTTP dashboard, node:http only (486 lines)</span><br>
 │&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; └── <span class="dir">templates/</span><br>
 │&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; └── <span class="file">base.js</span> <span class="comment">&mdash; HTML template system: CSS + generators (1,220 lines)</span><br>
-├── <span class="dir">skills/</span> <span class="comment">&mdash; 11 skill definitions (4,015 lines MD)</span><br>
-│&nbsp;&nbsp; ├── <span class="dir">plan-context/</span><span class="file">SKILL.md</span> <span class="comment">&mdash; persistent project context (622 lines)</span><br>
-│&nbsp;&nbsp; ├── <span class="dir">plan-init/</span><span class="file">SKILL.md</span> <span class="comment">&mdash; select context + scenario (274 lines)</span><br>
-│&nbsp;&nbsp; ├── <span class="dir">plan-analyze/</span><span class="file">SKILL.md</span> <span class="comment">&mdash; deep codebase analysis (420 lines)</span><br>
-│&nbsp;&nbsp; ├── <span class="dir">plan-design/</span><span class="file">SKILL.md</span> <span class="comment">&mdash; architecture &amp; design (302 lines)</span><br>
-│&nbsp;&nbsp; ├── <span class="dir">plan-state-machine/</span><span class="file">SKILL.md</span> <span class="comment">&mdash; state diagrams (285 lines)</span><br>
-│&nbsp;&nbsp; ├── <span class="dir">plan-test-plan/</span><span class="file">SKILL.md</span> <span class="comment">&mdash; E2E test plan (282 lines)</span><br>
-│&nbsp;&nbsp; ├── <span class="dir">plan-test-cases/</span><span class="file">SKILL.md</span> <span class="comment">&mdash; test cases harness (297 lines)</span><br>
-│&nbsp;&nbsp; ├── <span class="dir">plan-implementation/</span><span class="file">SKILL.md</span> <span class="comment">&mdash; implementation steps (469 lines)</span><br>
-│&nbsp;&nbsp; ├── <span class="dir">plan-review/</span><span class="file">SKILL.md</span> <span class="comment">&mdash; section-by-section review (393 lines)</span><br>
-│&nbsp;&nbsp; ├── <span class="dir">plan-review-cycle/</span><span class="file">SKILL.md</span> <span class="comment">&mdash; full review cycle (342 lines)</span><br>
-│&nbsp;&nbsp; └── <span class="dir">plan-full/</span><span class="file">SKILL.md</span> <span class="comment">&mdash; workflow orchestrator (329 lines)</span><br>
+├── <span class="dir">skills/</span> <span class="comment">&mdash; 10 skill definitions</span><br>
+│&nbsp;&nbsp; ├── <span class="dir">plan-context/</span><span class="file">SKILL.md</span> <span class="comment">&mdash; persistent project context</span><br>
+│&nbsp;&nbsp; ├── <span class="dir">plan-init/</span><span class="file">SKILL.md</span> <span class="comment">&mdash; select context + scenario</span><br>
+│&nbsp;&nbsp; ├── <span class="dir">plan-gen/</span><span class="file">SKILL.md</span> <span class="comment">&mdash; unified doc generator (design / state-machine / test-plan / test-cases / implementation / test-report / analysis)</span><br>
+│&nbsp;&nbsp; ├── <span class="dir">plan-full/</span><span class="file">SKILL.md</span> <span class="comment">&mdash; workflow orchestrator</span><br>
+│&nbsp;&nbsp; ├── <span class="dir">plan-sync/</span><span class="file">SKILL.md</span> <span class="comment">&mdash; cascade downstream regeneration after upstream edits</span><br>
+│&nbsp;&nbsp; ├── <span class="dir">plan-test/</span><span class="file">SKILL.md</span> <span class="comment">&mdash; run test-plan scenarios via Playwright MCP</span><br>
+│&nbsp;&nbsp; ├── <span class="dir">plan-share/</span><span class="file">SKILL.md</span> <span class="comment">&mdash; share docs via devtunnel (public / private / password)</span><br>
+│&nbsp;&nbsp; ├── <span class="dir">plan-review/</span><span class="file">SKILL.md</span> <span class="comment">&mdash; section-by-section review</span><br>
+│&nbsp;&nbsp; ├── <span class="dir">plan-review-cycle/</span><span class="file">SKILL.md</span> <span class="comment">&mdash; full review cycle</span><br>
+│&nbsp;&nbsp; └── <span class="dir">plan-revise/</span><span class="file">SKILL.md</span> <span class="comment">&mdash; batch-dispatch revise-intent comments</span><br>
 └── <span class="dir">prompts/</span> <span class="comment">&mdash; 6 agent role templates (2,328 lines MD)</span><br>
 &nbsp;&nbsp;&nbsp; ├── <span class="file">architect-prompt.md</span> <span class="comment">&mdash; 318 lines</span><br>
 &nbsp;&nbsp;&nbsp; ├── <span class="file">pm-prompt.md</span> <span class="comment">&mdash; 287 lines</span><br>

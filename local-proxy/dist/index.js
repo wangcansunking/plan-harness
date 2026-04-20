@@ -7360,12 +7360,12 @@ function filterScenarios() {
 }
 function generateScenarioDetail(scenario, options = {}) {
   const PLAN_DEFS = [
-    { type: "design", label: "Design", blurb: "Architecture, data model, API, UX, risks", skill: "/plan-design" },
-    { type: "test-plan", label: "Test Plan", blurb: "E2E scenarios, entry criteria, ownership", skill: "/plan-test-plan" },
-    { type: "state-machine", label: "State Machine", blurb: "Entity states, transitions, invariants", skill: "/plan-state-machine" },
-    { type: "test-cases", label: "Test Cases", blurb: "Priority-ranked cases with expected outcomes", skill: "/plan-test-cases" },
-    { type: "implementation-plan", label: "Implementation", blurb: "File-level steps, phases, dependencies", skill: "/plan-implementation" },
-    { type: "test-report", label: "Test Report", blurb: "Last E2E run: pass/fail per scenario with evidence", skill: "/plan-test-report" }
+    { type: "design", label: "Design", blurb: "Architecture, data model, API, UX, risks", skill: "/plan-gen design" },
+    { type: "test-plan", label: "Test Plan", blurb: "E2E scenarios, entry criteria, ownership", skill: "/plan-gen test-plan" },
+    { type: "state-machine", label: "State Machine", blurb: "Entity states, transitions, invariants", skill: "/plan-gen state-machine" },
+    { type: "test-cases", label: "Test Cases", blurb: "Priority-ranked cases with expected outcomes", skill: "/plan-gen test-cases" },
+    { type: "implementation-plan", label: "Implementation", blurb: "File-level steps, phases, dependencies", skill: "/plan-gen implementation" },
+    { type: "test-report", label: "Test Report", blurb: "Last E2E run: pass/fail per scenario with evidence", skill: "/plan-gen test-report" }
   ];
   const files = scenario.files || [];
   const byType = Object.fromEntries(files.map((f) => [f.type, f]));
@@ -7401,7 +7401,7 @@ function generateScenarioDetail(scenario, options = {}) {
     const hasOpen = docTodos + docUnresolved > 0;
     const state = !exists ? "missing" : hasOpen ? "partial" : "complete";
     const stateBadge = !exists ? `<span class="doc-state doc-state-missing">Not generated</span>` : hasOpen ? "" : `<span class="doc-state doc-state-complete">Clear</span>`;
-    const primaryAction = exists ? `<a href="/view?path=${encodeURIComponent(f.path)}" class="doc-primary-action">Open \u2192</a>` : `<code class="doc-skill">${escapeHTML(def.skill)} ${escapeHTML(scenario.name || "")}</code>`;
+    const primaryAction = exists ? `<a href="/view?path=${encodeURIComponent(f.path)}" class="doc-primary-action">Open \u2192</a>` : `<code class="doc-skill">${escapeHTML(def.skill)}${scenario.name ? " --scenario " + escapeHTML(scenario.name) : ""}</code>`;
     const countParts = [];
     if (docTodos > 0) countParts.push(`<span class="doc-count doc-count-todo" title="Open TODOs in this doc">${docTodos} TODOs</span>`);
     if (docUnresolved > 0) countParts.push(`<span class="doc-count doc-count-unresolved" title="Unresolved comments on this doc">${docUnresolved} unresolved</span>`);
