@@ -76,22 +76,42 @@ Update `manifest.json` with the enriched description.
 
 ### Phase 2: Generate Analysis Document
 
-Run the `/plan-gen analysis` workflow:
+Run the `/plan-gen analysis` workflow. **Analysis is the problem statement** for the whole run — current state, what we're solving, pain points, root causes, impact. No solutions (those belong in design).
 
-1. Read `manifest.json` for repo path + scenario context
-2. Dispatch the Architect agent (codebase walk — architecture layers, patterns, conventions, tech stack, code health)
-3. Dispatch the Writer agent (format into analysis.html with SVG component + dependency graphs)
-4. Write `{scenarioPath}/analysis.html`
-5. Update manifest.json (`analysisHtml`, `analysisGeneratedAt`)
+1. Read `manifest.json` for repo path + scenario context + the user's Phase 1 feature description
+2. Dispatch the PM agent (frame: problem to solve / pain points / impact / urgency / constraints, using the Phase 1 description as the brief)
+3. Dispatch the Architect agent (ground: current-state walk of the code/product area, root causes tied to each pain point)
+4. Dispatch the Writer agent (assemble sections 1–6 per `skills/plan-gen/types/analysis.md`)
+5. Write `{scenarioPath}/analysis.html`
+6. Update manifest.json (`analysisHtml`, `analysisGeneratedAt`)
 
-Brief confirmation (no full review checkpoint — this is a reference doc, not a decision doc):
+**USER REVIEW CHECKPOINT:**
 
 ```
-Analysis document generated — {n} layers, {n} patterns, code-health score {X}/100.
-The Architect in Phase 3 will read this as optional input.
+=== Analysis Document Review ===
+
+Problem to solve:
+  {one-line summary from §2}
+
+Observed pain points:
+  P1 {…}   P2 {…}   P3 {…}   …
+
+Root causes:
+  {grouped bullets}
+
+Impact:
+  {who / how often / severity}
+
+Questions for you:
+- Is the problem framed right? Anything missing from the pain points?
+- Do the root causes actually explain the pain points, or are we treating symptoms?
+
+Type your feedback, or press Enter to continue to Phase 3 (Design).
 ```
 
-If the user passed `--skip-analysis` or the scenario is trivial/analysis already exists, skip this phase.
+If the user provides feedback, re-dispatch PM + Architect with the correction, regenerate analysis.html, and re-show the summary. Treat analysis as a decision doc — design hangs off it.
+
+If the user passed `--skip-analysis` or re-running with an existing analysis.html that's still accurate, skip this phase.
 
 ### Phase 3: Generate Design Document
 

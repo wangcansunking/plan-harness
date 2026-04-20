@@ -7281,7 +7281,7 @@ function generateDashboard(scenarios, options = {}) {
   const existingFiles = scenarios.reduce((s, sc) => s + (sc.files ? sc.files.filter((f) => f.exists).length : 0), 0);
   const totalTodos = scenarios.reduce((s, sc) => s + (sc.todos || 0), 0);
   const totalUnresolved = scenarios.reduce((s, sc) => s + (sc.unresolvedComments || 0), 0);
-  const planTypes = ["design", "test-plan", "state-machine", "test-cases", "implementation-plan"];
+  const planTypes = ["analysis", "design", "state-machine", "test-plan", "test-cases", "implementation-plan", "test-report"];
   let summaryCards = `
 <div class="summary-grid">
   <div class="summary-card"><div class="summary-value">${totalScenarios}</div><div class="summary-label">Scenarios</div></div>
@@ -7360,9 +7360,10 @@ function filterScenarios() {
 }
 function generateScenarioDetail(scenario, options = {}) {
   const PLAN_DEFS = [
+    { type: "analysis", label: "Analysis", blurb: "Current state, problem to solve, observed pain points, root causes", skill: "/plan-gen analysis" },
     { type: "design", label: "Design", blurb: "Architecture, data model, API, UX, risks", skill: "/plan-gen design" },
-    { type: "test-plan", label: "Test Plan", blurb: "E2E scenarios, entry criteria, ownership", skill: "/plan-gen test-plan" },
     { type: "state-machine", label: "State Machine", blurb: "Entity states, transitions, invariants", skill: "/plan-gen state-machine" },
+    { type: "test-plan", label: "Test Plan", blurb: "E2E scenarios, entry criteria, ownership", skill: "/plan-gen test-plan" },
     { type: "test-cases", label: "Test Cases", blurb: "Priority-ranked cases with expected outcomes", skill: "/plan-gen test-cases" },
     { type: "implementation-plan", label: "Implementation", blurb: "File-level steps, phases, dependencies", skill: "/plan-gen implementation" },
     { type: "test-report", label: "Test Report", blurb: "Last E2E run: pass/fail per scenario with evidence", skill: "/plan-gen test-report" }
@@ -11319,7 +11320,7 @@ function groupFlatFilesIntoScenarios(fileNames, plansDir) {
     }
   }
   const scenarios = [];
-  const allPlanTypes = ["design", "test-plan", "state-machines", "test-cases", "impl-plan"];
+  const allPlanTypes = ["analysis", "design", "state-machine", "test-plan", "test-cases", "implementation-plan", "test-report"];
   for (const [prefix, foundFiles] of prefixMap) {
     const files = allPlanTypes.map((type) => {
       const found = foundFiles.find((f) => f.type === type);

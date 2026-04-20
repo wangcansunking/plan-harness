@@ -1,7 +1,15 @@
 
 # plan-analyze
 
-Generate a comprehensive codebase analysis document as an interactive HTML file. This goes far deeper than `/plan-init` (which creates a lightweight `manifest.json`). The analysis document is a full reference that the team uses throughout planning and implementation.
+> **SCOPE CHANGED (2026-04).** The authoritative contract now lives in
+> `skills/plan-gen/types/analysis.md`. `analysis.html` is a **problem
+> statement** (current state → problem → pain points → root causes →
+> impact), not a codebase structural tour. The agent prompts below are
+> preserved because many of their codebase-walk instructions are still
+> useful — treat them as raw material for §1 (current state) and §4
+> (root causes) only. Do NOT produce a generic codebase overview.
+
+Generate the analysis document as an interactive HTML file. The analysis frames *why* the team is about to design anything — it is the brief that `design.html` consumes.
 
 ## Input
 
