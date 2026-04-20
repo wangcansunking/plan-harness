@@ -224,9 +224,9 @@ The plugin ships three generation rule contexts:
 
 | Template | Documents | Best for |
 |----------|-----------|----------|
-| `feature-planning.md` | 7 docs (analysis, design, state-machine, test-plan, test-cases, impl-plan, review) | New features, major refactors |
-| `performance-audit.md` | 4 docs (index, analysis, design, impl-plan) | Performance optimization, resource analysis |
-| `lean.md` | 2 docs (design, impl-plan) | Spikes, prototypes, small changes |
+| `feature-planning.md` | 7 docs (analysis, design, state-machine, test-plan, test-cases, implementation-plan, test-report) | New features, major refactors |
+| `performance-audit.md` | 4 docs (index, analysis, design, implementation-plan) | Performance optimization, resource analysis |
+| `lean.md` | 2 docs (design, implementation-plan) | Spikes, prototypes, small changes |
 
 Plus `_example-project.md` as a template for project-specific contexts.
 
