@@ -14,6 +14,22 @@ Version fields in `.claude-plugin/plugin.json`, `.claude-plugin/marketplace.json
 ---
 
 
+
+## [1.3.1] — 2026-04-20
+
+### Changed
+- `analysis.html` §1 Current state now has two layers: product/flow (PM) and code logic (Architect — control flow, data flow, cited by file+line).
+- §3 Observed pain points explicitly mixes business-level pain (latency, complaints, abandonment) with code-level findings (race conditions, silent failures, N+1, dead paths, duplicated logic). Code findings must cite file+line — vague prose ("the sync layer has issues") is no longer a valid finding.
+- §4 Root causes must declare which layer the cause lives at: `logic / abstraction / architecture / external / historical`.
+- `/plan-full` Phase 2 Architect prompt rewritten: read the actual code paths, surface specific bugs, map each finding to a root-cause layer.
+- Dashboard + scenario-detail card blurb for analysis updated to reflect the hybrid scope.
+
+### Fixed
+- `_deprecated/plan-analyze/SKILL.md` banner adjusted — the codebase-walk instructions inside are once again directly useful (as raw material for §1/§3/§4).
+- `contexts/feature-planning.md` chart types include `code-flow-svg` and `pain-point-table` with file/line.
+
+([#6](https://github.com/wangcansunking/plan-harness/pull/6))
+
 ## [1.3.0] — 2026-04-20
 
 ### Changed
