@@ -47,7 +47,33 @@ claude plugin install plan-harness@can-claude-plugins
 /plan-gen all               # 转交给 /plan-full
 ```
 
-文档类型之间的依赖（design → state-machine / test-plan → test-cases / test-report）自动解析，下游文档读的是本次刚生成的上游输出。
+文档类型之间的依赖（analysis → design → state-machine / test-plan → test-cases → implementation → test-report）自动解析，下游文档读的是本次刚生成的上游输出。完整顺序见下方 [§标准工作流](#标准工作流)。
+
+### 标准工作流
+
+```
+analysis  →  design  ┬─►  state-machine  ─────────────────┐
+                     │                                      │
+                     ├─►  test-plan   ─►  test-cases  ─────┤
+                     │                                      │
+                     └─►  implementation   ◄────────────────┘
+                              │
+                              └─►  test-report
+```
+
+硬依赖（必需）与软依赖（可选）：
+
+| 文档 | 必需上游 | 可选上游 |
+|---|---|---|
+| `analysis` | — | — |
+| `design` | — | `analysis` |
+| `state-machine` | `design` | — |
+| `test-plan` | `design` | — |
+| `test-cases` | `design`, `test-plan` | — |
+| `implementation` | `design` | `state-machine`, `test-plan`, `test-cases` |
+| `test-report` | `test-plan` | `implementation` |
+
+`/plan-gen` 会对你挑的子集做拓扑排序;`/plan-full` 带 checkpoint 跑完整条流水线;`/plan-sync` 把某个上游的改动级联到所有下游。
 
 ### 插件架构一览
 

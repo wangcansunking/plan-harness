@@ -47,7 +47,33 @@ One command generates any plan document. Pick one or several types via a multi-s
 /plan-gen all               # delegate to /plan-full
 ```
 
-Dependencies between doc types (design → state-machine / test-plan → test-cases / test-report) are resolved automatically so downstream docs read the freshly generated upstream output.
+Dependencies between doc types (analysis → design → state-machine / test-plan → test-cases → implementation → test-report) are resolved automatically so downstream docs read the freshly generated upstream output. See [§Canonical workflow](#canonical-workflow) below.
+
+### Canonical workflow
+
+```
+analysis  →  design  ┬─►  state-machine  ─────────────────┐
+                     │                                      │
+                     ├─►  test-plan   ─►  test-cases  ─────┤
+                     │                                      │
+                     └─►  implementation   ◄────────────────┘
+                              │
+                              └─►  test-report
+```
+
+Hard (required) vs. soft (optional) edges:
+
+| Doc | Required upstream | Optional upstream |
+|---|---|---|
+| `analysis` | — | — |
+| `design` | — | `analysis` |
+| `state-machine` | `design` | — |
+| `test-plan` | `design` | — |
+| `test-cases` | `design`, `test-plan` | — |
+| `implementation` | `design` | `state-machine`, `test-plan`, `test-cases` |
+| `test-report` | `test-plan` | `implementation` |
+
+`/plan-gen` topologically sorts whatever subset you pick. `/plan-full` walks the whole thing with review checkpoints. `/plan-sync` cascades a single upstream edit down to every affected doc.
 
 ### Plugin architecture at a glance
 

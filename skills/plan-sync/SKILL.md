@@ -5,7 +5,7 @@ description: When an upstream plan doc (design / test-plan / test-cases) changes
 
 # plan-sync
 
-Plan docs form a dependency graph. `design.html` is the root; `state-machine.html` + `test-plan.html` depend on it; `test-cases.html` depends on test-plan; `implementation-plan.html` depends on the whole upstream set; `test-report.html` depends on test-plan. When the user edits an upstream doc, every downstream doc is silently out-of-date until they re-run each skill in order.
+Plan docs form a dependency graph. `analysis.html` is the deepest root (an optional input to design). `design.html` is the hard root — `state-machine.html` and `test-plan.html` depend on it, `test-cases.html` depends on test-plan, `implementation-plan.html` depends on the whole upstream set, and `test-report.html` depends on test-plan (with implementation as an optional upstream). When the user edits an upstream doc, every downstream doc is silently out-of-date until they re-run each skill in order.
 
 This skill is the "do the cascade for me" button: detect what changed, list what needs to regenerate, ask for confirmation, run them in topological order, and finish by running `/plan-gen test-report` so the user sees whether the new shape actually works.
 
@@ -26,24 +26,25 @@ This skill is the "do the cascade for me" button: detect what changed, list what
 ## Dependency Graph
 
 ```
-design.html
-├── state-machine.html
-├── test-plan.html
-│   ├── test-cases.html
-│   │   └── implementation-plan.html ← also depends on state-machine + design
-│   ├── implementation-plan.html
-│   └── test-report.html
-└── implementation-plan.html
+analysis.html  (optional upstream of design)
+└── design.html
+    ├── state-machine.html ─────────────────────┐
+    ├── test-plan.html                          │
+    │   ├── test-cases.html ────────────────────┤
+    │   ├── test-report.html  ← also optional: implementation
+    │   └── implementation-plan.html            │
+    └── implementation-plan.html ← optional: sm/test-plan/test-cases ┘
 ```
 
 Topological order (lowest → highest downstream):
 
-1. `design.html` (root, regenerated via `/plan-gen design` if marked dirty)
-2. `state-machine.html` (via `/plan-gen state-machine`)
-3. `test-plan.html` (via `/plan-gen test-plan`)
-4. `test-cases.html` (via `/plan-gen test-cases`)
-5. `implementation-plan.html` (via `/plan-gen implementation`)
-6. `test-report.html` (via `/plan-gen test-report`, includes fix loop)
+1. `analysis.html` (optional root; if user edited it, cascade starts here)
+2. `design.html` (hard root; regenerated via `/plan-gen design` if marked dirty)
+3. `state-machine.html` (via `/plan-gen state-machine`)
+4. `test-plan.html` (via `/plan-gen test-plan`)
+5. `test-cases.html` (via `/plan-gen test-cases`)
+6. `implementation-plan.html` (via `/plan-gen implementation`)
+7. `test-report.html` (via `/plan-gen test-report`, includes fix loop)
 
 ## Workflow
 
@@ -73,11 +74,12 @@ Detected change:
   (Δ 1d 3h)
 
 Will regenerate (topological order):
-  1. state-machine.html        (via /plan-gen state-machine)
-  2. test-plan.html            (via /plan-gen test-plan)
-  3. test-cases.html           (via /plan-gen test-cases)
-  4. implementation-plan.html  (via /plan-gen implementation)
-  5. test-report.html          (via /plan-gen test-report, with fix loop)
+  1. design.html               (via /plan-gen design, only if analysis was the origin)
+  2. state-machine.html        (via /plan-gen state-machine)
+  3. test-plan.html            (via /plan-gen test-plan)
+  4. test-cases.html           (via /plan-gen test-cases)
+  5. implementation-plan.html  (via /plan-gen implementation)
+  6. test-report.html          (via /plan-gen test-report, with fix loop)
 
 Proceed? [y]es / [s]kip one or more steps / [n]o
 ```
@@ -123,7 +125,8 @@ Test run:    {P}/{T} P0 passed, {N} fixes applied during loop
 Duration:    {mm:ss}
 
 Updated manifest.json:
-  designGeneratedAt       → {ts}  (unchanged)
+  analysisGeneratedAt     → {ts}  (unchanged unless analysis was the origin)
+  designGeneratedAt       → {ts}  (unchanged unless design/analysis was the origin)
   stateMachineGeneratedAt → {ts}
   testPlanGeneratedAt     → {ts}
   testCasesGeneratedAt    → {ts}

@@ -5,6 +5,7 @@
 | Output filename             | `test-report.html`                                                       |
 | Manifest fields             | `testReportHtml`, `testReportGeneratedAt`, `testReportSummary`           |
 | Required inputs             | `manifest.json`, `test-plan.html`                                        |
+| Optional inputs             | `implementation-plan.html` (ties failures back to claimed implementation steps) |
 | Evidence directory          | `plans/<scenario>/.test-evidence/`                                       |
 | Agent team                  | Tester (live browser via Playwright MCP), Writer                         |
 | Full workflow (read verbatim) | `skills/_deprecated/plan-test-report/SKILL.md`                         |
