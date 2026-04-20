@@ -13,6 +13,25 @@ Version fields in `.claude-plugin/plugin.json`, `.claude-plugin/marketplace.json
 
 ---
 
+
+## [1.3.0] — 2026-04-20
+
+### Changed
+- Dashboard scenario cards now render pills for all 7 canonical doc types (analysis + test-report added, names unified to `state-machine` / `implementation-plan`).
+- Scenario detail page (`PLAN_DEFS`) now lists `Analysis` at the top in canonical workflow order.
+- `/plan-gen analysis` scope redefined: produces a problem-statement doc with §1 current state, §2 problem to solve, §3 observed pain points, §4 root causes, §5 impact + urgency, §6 optional constraints. Agent team is PM + Architect + Writer.
+- `/plan-full` Phase 2 (Analysis) is now a decision checkpoint — user reviews the problem framing before design starts.
+
+### Fixed
+- `local-proxy/src/web-server.js` `groupFlatFilesIntoScenarios` used `['design', 'test-plan', 'state-machines', 'test-cases', 'impl-plan']` — missing analysis + test-report and using old names — so flat-layout plans/ dirs showed every doc as missing. Now fixed.
+- `local-proxy/src/templates/base.js` dashboard `planTypes` and detail `PLAN_DEFS` aligned with the canonical workflow order.
+- `local-proxy/dist/index.js` rebuilt from sources.
+
+### Deprecated
+- `skills/_deprecated/plan-analyze/SKILL.md` still shipped as reference but carries a SCOPE CHANGED banner; its codebase-walk instructions now serve only §1 and §4 of the new analysis template.
+
+([#5](https://github.com/wangcansunking/plan-harness/pull/5))
+
 ## [1.2.0] — 2026-04-19
 
 ### Added
