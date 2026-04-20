@@ -9,7 +9,7 @@
     {
       "name": "plan-harness",
       "description": "Structured project planning with agent teams — unified /plan-gen dispatcher (design / state-machine / test-plan / test-cases / implementation / test-report / analysis), cascade sync, interactive test-report fix-loop, lightbox-backed evidence screenshots",
-      "version": "1.3.2",
+      "version": "1.4.0",
       "source": "./",
       "icon": "./assets/icon.png",
       "category": "planning",

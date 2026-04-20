@@ -16,6 +16,23 @@ Version fields in `.claude-plugin/plugin.json`, `.claude-plugin/marketplace.json
 
 
 
+
+## [1.4.0] — 2026-04-20
+
+### Added
+- **MCP tool \`plan_restart\`** (optional \`reason\` string) — exits the server cleanly for Claude Code to respawn with the latest plugin bundle.
+- **Skill \`/plan-restart\`** — user-facing entry point; guidance on post-update bounce, dev loop, stale-bundle symptoms.
+- **Staleness watcher** in \`src/index.js\` — auto-exits on bundle mtime drift or newer-semver sibling; env-tunable polling.
+- Startup log line \`[plan-harness] bundle=<path> version=<v> watcher=<ms>\` so operators can confirm which version is actually running.
+
+### Changed
+- Counts across READMEs + overview.html: 10 → 11 skills, 12 → 13 MCP tools.
+- Skills SVG: new "ORCHESTRATE & MAINTAIN" row holds \`/plan-full\` + \`/plan-restart\`.
+- MCP Server SVG: 13th tool row ("restart (exit for respawn)").
+- \`docs/screenshots/01-overview-hero.png\` + \`02-plugin-architecture.png\` regenerated via Playwright MCP.
+
+([#10](https://github.com/wangcansunking/plan-harness/pull/10))
+
 ## [1.3.2] — 2026-04-20
 
 ### Fixed
