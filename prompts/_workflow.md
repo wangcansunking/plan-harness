@@ -31,7 +31,7 @@ analysis  →  design  ┬─►  state-machine  ──────────�
 
 ## Doc purpose (one-liners)
 
-- `analysis` — **problem statement**: current state, what we're solving, pain points, root causes. Describes reality; no solutions.
+- `analysis` — **problem statement + code-logic reading**: current state (product flow AND control/data flow in the touched code), what we're solving, pain points (business-level + code-level, each with file+line citations), root causes. Describes reality; no solutions.
 - `design` — the change we're going to make: architecture, data model, API, UX. Consumes `analysis` as the brief.
 - `state-machine` — entity lifecycles extracted from design.
 - `test-plan` — E2E scenarios that prove design intent.

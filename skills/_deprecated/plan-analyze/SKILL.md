@@ -3,13 +3,15 @@
 
 > **SCOPE CHANGED (2026-04).** The authoritative contract now lives in
 > `skills/plan-gen/types/analysis.md`. `analysis.html` is a **problem
-> statement** (current state → problem → pain points → root causes →
-> impact), not a codebase structural tour. The agent prompts below are
-> preserved because many of their codebase-walk instructions are still
-> useful — treat them as raw material for §1 (current state) and §4
-> (root causes) only. Do NOT produce a generic codebase overview.
+> statement + code-logic reading** (current state with product flow
+> AND touched-code control/data flow → problem → pain points business
+> AND code-level → root causes → impact). The agent-walk instructions
+> below are still directly useful: use them to produce §1 (current-state
+> code walk), §3 code-level pain points, and §4 root causes. But cite
+> file+line for every finding, and always pair the walk with the PM's
+> problem framing — never ship a generic codebase tour.
 
-Generate the analysis document as an interactive HTML file. The analysis frames *why* the team is about to design anything — it is the brief that `design.html` consumes.
+Generate the analysis document as an interactive HTML file. The analysis frames *why* the team is about to design anything AND what the relevant code actually does today — it is the brief that `design.html` consumes.
 
 ## Input
 
