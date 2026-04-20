@@ -15,6 +15,14 @@ Version fields in `.claude-plugin/plugin.json`, `.claude-plugin/marketplace.json
 
 
 
+
+## [1.3.2] — 2026-04-20
+
+### Fixed
+- **Auto-bump companion PR body rendered malformed.** The cross-repo bump script used `JSON.stringify` + shell-interpolated `--body`, which (a) let bash command-substitute any backticks in the text and (b) never translated `\n`. Script now writes the body to a tempfile and passes it via `--body-file` with `execFileSync` (no shell, no escaping surprises). Port of the same fix in `claude-config-manager#11`.
+
+([#7](https://github.com/wangcansunking/plan-harness/pull/7))
+
 ## [1.3.1] — 2026-04-20
 
 ### Changed
