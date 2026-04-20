@@ -1,9 +1,9 @@
 {
   "name": "can-claude-plugins",
-  "description": "Personal Claude Code plugin marketplace by canwa",
+  "description": "Personal Claude Code plugin marketplace by wangcansunking",
   "owner": {
-    "name": "canwa",
-    "email": "canwa@microsoft.com"
+    "name": "wangcansunking",
+    "email": "wangcansunking@gmail.com"
   },
   "plugins": [
     {
