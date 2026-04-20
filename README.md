@@ -4,145 +4,60 @@
 
 # plan-harness
 
-A Claude Code plugin for structured project planning. Generates interactive HTML documents through specialized agent teams — with composable markdown contexts that adapt the output to your project, scenario, and style.
+A Claude Code plugin that turns the spec / plan phase of a project into a repeatable, high-quality process. Specialized agent teams generate interconnected HTML plan documents — design, state-machines, test plans, test cases, implementation plans — with composable markdown contexts that adapt the output to your project, scenario, and style.
 
-## Guiding Principles
-
-### 1. Context is Everything
-
-Context files (`.md`) are the single most important input to plan quality. They are like `CLAUDE.md` but for specific scenarios — the LLM reads them and follows the instructions directly.
-
-**The more specific the context, the better the output.** A context that says "these 5 admin pages, these API endpoints, these current load times" produces dramatically better plans than "this is a React + .NET project."
-
-Contexts are composable (multi-select) and can be at any granularity:
-- Whole project → specific feature area → specific pages/APIs
-- Dev environment → build setup → team conventions
-- Generation rules: which docs, what charts, what theme
-
-### 2. Three-Tier Loading (Learned from Claude Code)
-
-Claude Code's prompt architecture uses lazy loading — skill descriptions are always in context (~450 tokens), full bodies load only when invoked. We apply the same pattern:
-
-| Tier | What | When loaded | Token cost |
-|------|------|-------------|-----------|
-| **Tier 1** | Context name + description (from frontmatter) | Always — names stored in `manifest.json`, descriptions read from frontmatter | ~50 per context |
-| **Tier 2** | Summary + details sections | When dispatching agents — filtered by `agents` frontmatter | Variable |
-| **Tier 3** | Reference data (API tables, baselines, etc.) | On demand — agents read when needed | Only when relevant |
-
-### 3. Agent Routing
-
-Not every agent needs every context. The `agents` field in frontmatter controls who sees what:
-- Writer gets generation rules (chart types, theme, anti-patterns)
-- Architect gets project architecture and API maps
-- Tester gets test conventions and coverage requirements
-- Everyone gets the summary section
-
-### 4. Markdown, Not Config
-
-Contexts, prompts, and skills are all markdown. The LLM reads them directly — no JSON schemas, no parsing layers, no rigid structures. This means:
-- Users can read and edit contexts in any text editor
-- The LLM follows natural language instructions, not configuration flags
-- New rules are just paragraphs, not schema migrations
-
-### 5. Self-Contained Output
-
-Every generated HTML file embeds all CSS and JS inline. No CDN, no external dependencies. Open in any browser, share with teammates, print to PDF.
-
----
-
-## Quick Start
+## Install
 
 ```bash
-# Install
-claude plugins marketplace add https://github.com/wangcansunking/can-claude-plugins
-claude plugins install plan-harness@can-claude-plugins
+# 1. Add the marketplace
+claude plugin marketplace add https://github.com/wangcansunking/can-claude-plugins
 
-# Import built-in context templates
-/plan-context init
+# 2. Install the plugin
+claude plugin install plan-harness@can-claude-plugins
 
-# Create a project-specific context (guided conversation)
-/plan-context create
-
-# Start planning — select contexts, create scenario
-/plan-init
-
-# Generate all documents
-/plan-full
+# 3. In any Claude Code session, bootstrap a planning workspace
+/plan-context init          # import built-in context templates
+/plan-init                  # multi-select contexts + create a scenario
+/plan-gen                   # generate docs (multi-select UI)
 ```
 
----
+![plan-harness overview](docs/screenshots/01-overview-hero.png)
 
-## How It Works
+## Why
+
+Most "AI design doc" tools run a single prompt against a vague brief. plan-harness is the opposite: a layered context + multi-agent pipeline that produces documents you can actually ship.
+
+- **Context decides everything.** Composable `.md` contexts capture project paths, conventions, API maps, and generation rules. The more specific the context, the better the plan.
+- **A real agent team**, not one prompt. Architect, PM, Frontend Dev, Backend Dev, Tester, Writer — each agent sees only the slice of context it needs.
+- **One dispatcher**, seven doc types. `/plan-gen` picks any subset (design, state-machine, test-plan, test-cases, implementation, test-report, analysis) via a multi-select UI or CLI argument.
+- **Interactive HTML**, fully self-contained. Every generated file inlines all CSS + JS. Zero CDN, zero deps. Open in any browser, print to PDF, share with teammates.
+- **Review + revise loop.** Section-by-section critiques, cross-doc consistency checks, and batched writer-agent proposals on reviewer comments.
+- **Shareable.** One command publishes a plan-set via devtunnel — public, private, or password-protected — without leaving Claude Code.
+
+## Features
+
+### Unified `/plan-gen` dispatcher
+
+One command generates any plan document. Pick one or several types via a multi-select UI, or pass a type directly:
 
 ```
-/plan-context create ──── Create markdown context files (.md)
-         │                (project knowledge, generation rules, or both)
-         │
-/plan-init ──────────── Multi-select contexts + create/select scenario
-         │              → updates manifest.json with contexts
-         │
-/plan-gen <type> ─────── Unified dispatcher — pick one or many doc types
-         │              via multi-select UI, or pass type as argument:
-         │                • design           → design.html
-         │                • state-machine    → state-machine.html
-         │                • test-plan        → test-plan.html
-         │                • test-cases       → test-cases.html
-         │                • implementation   → implementation-plan.html
-         │                • test-report      → test-report.html
-         │                • analysis         → analysis.html
-         │
-/plan-full ──────────── Orchestrate the whole workflow end-to-end
-/plan-sync ──────────── Cascade-regenerate downstream docs when upstream edits
-/plan-test ──────────── Run the test-plan scenarios via Playwright MCP
-/plan-share ─────────── Share plan docs via devtunnel (public / pw-protected)
-/plan-review ────────── Section-by-section review of one document
-/plan-review-cycle ──── Full review with cross-document consistency checks
-/plan-revise ────────── Batch-dispatch pending revise-intent comments
+/plan-gen                   # interactive multi-select
+/plan-gen design            # just design.html
+/plan-gen design test-plan  # design + test-plan, in topological order
+/plan-gen all               # delegate to /plan-full
 ```
 
-Which documents get generated depends on the selected generation rules context:
-- **feature-planning**: 7 docs (full suite with tests and state machines)
-- **performance-audit**: 4 docs (index, analysis, design, implementation)
-- **lean**: 2 docs (design + implementation)
+Dependencies between doc types (design → state-machine / test-plan → test-cases / test-report) are resolved automatically so downstream docs read the freshly generated upstream output.
 
----
+### Plugin architecture at a glance
 
-## Context System
+![Plugin architecture](docs/screenshots/02-plugin-architecture.png)
 
-### What is a Context?
+Three pieces: an MCP server with 12 tools, 10 slash commands, and 6 agent roles. They compose to produce 7 kinds of HTML output.
 
-A markdown file in `plans/.contexts/` that provides instructions to the planning pipeline. Two typical kinds:
+### Two-level context system
 
-| Kind | Example | Contains |
-|------|---------|----------|
-| **Project knowledge** | `devxapps-project.md` | Paths, build commands, architecture, conventions, known issues |
-| **Generation rules** | `performance-audit.md` | Which docs to generate, content style, chart types, theme, anti-patterns |
-
-A single context can contain both. Contexts compose — select multiple during `/plan-init`.
-
-### Context File Format
-
-```markdown
----
-name: my-context
-description: One-line description (always visible in Tier 1)
-tags: [project, generation-rules]
-agents: [architect, writer]
----
-
-# Title
-
-## Summary
-<!-- Always injected. Keep under 200 words. -->
-
-## Details
-<!-- Injected for matching agents only. -->
-
-## Reference
-<!-- Read on demand by agents that need it. -->
-```
-
-### Composition Example
+Contexts are composable markdown files. A project-level context (paths, build commands, conventions) stays persistent across every scenario; scenario-level contexts layer on top with the specifics of one feature. Later contexts override earlier ones on conflict.
 
 ```
 devxapps-project.md          (project: build, conventions, architecture)
@@ -151,29 +66,43 @@ devxapps-project.md          (project: build, conventions, architecture)
   = effective context for this plan
 ```
 
-Later contexts override earlier ones where they conflict. Order matters.
+Each context `.md` uses frontmatter (`name`, `description`, `tags`, `agents`) so only the agents that care see it — keeps the prompt tight.
 
----
+### Review + revise loops
 
-## Agent Team
+- `/plan-review` walks a doc section-by-section and dispatches role-specific reviewers.
+- `/plan-review-cycle` runs the full review matrix across every doc in the scenario and flags cross-doc contradictions.
+- `/plan-revise` batches all pending revise-intent comments and dispatches the writer agent to propose verbatim replacements, which surface as "Proposal ready" chips in the dashboard.
 
-| Role | Prompt | Focus |
-|------|--------|-------|
-| **Architect** | `prompts/architect-prompt.md` | Data models, API contracts, SVG diagrams, dependency graphs |
-| **PM** | `prompts/pm-prompt.md` | Requirements, user stories, acceptance criteria, scope |
-| **Frontend Dev** | `prompts/frontend-dev-prompt.md` | Components, state management, routing, accessibility |
-| **Backend Dev** | `prompts/backend-dev-prompt.md` | API implementation, data access, services, deployment |
-| **Tester** | `prompts/tester-prompt.md` | E2E scenarios, test cases, coverage matrices |
-| **Writer** | `prompts/writer-prompt.md` | HTML assembly, CSS themes, sidebar nav, cross-references |
+### End-to-end execution via Playwright MCP
 
----
+`/plan-test` reads the scenarios listed in `test-plan.html` and drives them against a live dashboard through Playwright MCP — the real UI, not synthetic fetches — so the run catches UX regressions that API-level smoke tests miss.
+
+### Share without leaving Claude Code
+
+`/plan-share` wraps devtunnel so you can push a plan-set to a short-lived public URL (or a password-protected private one) in one step. The tunnel self-maintains while the scenario is live.
+
+## Slash Commands
+
+| Command | What it does |
+|---|---|
+| `/plan-context` | Create, list, edit, import context files |
+| `/plan-init` | Multi-select contexts + create / select a scenario |
+| `/plan-gen` | Unified generator — pick any subset of doc types |
+| `/plan-full` | Orchestrate the whole workflow with checkpoints |
+| `/plan-sync` | Cascade-regenerate downstream docs after upstream edits |
+| `/plan-test` | Run `test-plan.html` scenarios end-to-end via Playwright MCP |
+| `/plan-share` | Share plan docs via devtunnel (public / private / password) |
+| `/plan-review` | Section-by-section review of one document |
+| `/plan-review-cycle` | Full review with cross-document consistency |
+| `/plan-revise` | Batch-dispatch pending revise-intent comments into writer proposals |
 
 ## MCP Tools
 
-12 tools via local stdio server:
+12 tools via a local stdio server — surfaces the filesystem and dashboard operations the slash commands need:
 
-| Tool | Description |
-|------|-------------|
+| Tool | Purpose |
+|---|---|
 | `plan_list_scenarios` | Scan workspace for all scenarios with file inventory |
 | `plan_create_scenario` | Create scenario directory with manifest |
 | `plan_get_files` | List plan files with metadata |
@@ -187,46 +116,60 @@ Later contexts override earlier ones where they conflict. Order matters.
 | `plan_list_pending_mentions` | List @-mention comments queued for agent personas |
 | `plan_post_persona_reply` | Post a persona reply to a queued @-mention thread |
 
----
+## Agent Team
 
-## Skills Reference
+| Role | Prompt | Focus |
+|------|--------|-------|
+| **Architect** | `prompts/architect-prompt.md` | Data models, API contracts, SVG diagrams, dependency graphs |
+| **PM** | `prompts/pm-prompt.md` | Requirements, user stories, acceptance criteria, scope |
+| **Frontend Dev** | `prompts/frontend-dev-prompt.md` | Components, state management, routing, accessibility |
+| **Backend Dev** | `prompts/backend-dev-prompt.md` | API implementation, data access, services, deployment |
+| **Tester** | `prompts/tester-prompt.md` | E2E scenarios, test cases, coverage matrices |
+| **Writer** | `prompts/writer-prompt.md` | HTML assembly, CSS themes, sidebar nav, cross-references |
 
-10 skills. Most per-doc generators were unified into `/plan-gen`.
-
-| Skill | Description |
-|-------|-------------|
-| `/plan-context` | Create, list, edit, import context files |
-| `/plan-init` | Multi-select contexts + create/select scenario |
-| `/plan-gen` | Unified generator — pick one or many doc types (design / state-machine / test-plan / test-cases / implementation / test-report / analysis) |
-| `/plan-full` | Orchestrate entire workflow with checkpoints |
-| `/plan-sync` | Cascade-regenerate downstream docs after upstream edits |
-| `/plan-test` | Run `test-plan.html` scenarios end-to-end via Playwright MCP |
-| `/plan-share` | Share plan docs via devtunnel (public / private / password) |
-| `/plan-review` | Section-by-section review of one document |
-| `/plan-review-cycle` | Full review with cross-document consistency |
-| `/plan-revise` | Batch-dispatch pending revise-intent comments into writer proposals |
-
----
-
-## Plugin Structure
+## Repository Layout
 
 ```
 plan-harness/
-├── contexts/                    Built-in context templates
-│   ├── feature-planning.md      Full 7-doc suite
-│   ├── performance-audit.md     4-doc data-driven audit
-│   ├── lean.md                  Minimal 2-doc planning
-│   └── _example-project.md     Project context template
-├── skills/                      10 skill definitions (SKILL.md)
-├── prompts/                     6 agent role templates
-├── local-proxy/                 MCP server + web dashboard
-│   ├── start.js                 Bootstrap (auto-installs deps)
-│   └── src/
-│       ├── index.js             MCP server (12 tools, stdio)
-│       ├── plan-manager.js      Plan file operations
-│       ├── web-server.js        HTTP dashboard (node:http)
-│       └── templates/base.js    HTML template system
-└── docs/
-    ├── overview.html            Static overview
-    └── context-design.md        Context system design document
+  .claude-plugin/plugin.json         Plugin metadata
+  .mcp.json                          MCP server wiring
+  contexts/                          Built-in context templates (feature-planning, performance-audit, lean)
+  prompts/                           6 agent role templates
+  skills/                            10 skill definitions (SKILL.md each)
+  local-proxy/                       Node MCP server + web dashboard
+    start.js                         Bootstrap (auto-installs deps)
+    src/
+      index.js                       MCP server (12 tools, stdio)
+      plan-manager.js                Plan file operations
+      web-server.js                  HTTP dashboard (node:http)
+      templates/base.js              Self-contained HTML template system
+  docs/
+    overview.html                    Static plugin overview (rendered in the screenshots above)
+    context-design.md                Context system design document
+    screenshots/                     Images used by this README
 ```
+
+## Development
+
+Clone and run from source:
+
+```bash
+git clone https://github.com/wangcansunking/plan-harness
+cd plan-harness/local-proxy
+npm install
+npm run dev                 # build + sync to Claude Code plugin cache
+```
+
+Other scripts (all inside `local-proxy/`):
+
+```bash
+npm run build               # esbuild src → dist/index.js
+npm run sync                # copy working tree into the Claude Code cache
+npm run prepare-release     # install + build (pre-commit / release)
+```
+
+See [DEVELOPMENT.md](DEVELOPMENT.md) for the full working-copy ↔ plugin-cache dance, including the optional symlink-to-working-copy trick for zero-copy edits.
+
+## Changelog
+
+See [CHANGELOG.md](CHANGELOG.md).
