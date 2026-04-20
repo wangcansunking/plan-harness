@@ -1,3 +1,7 @@
+**English** · [简体中文](README.zh.md)
+
+---
+
 # plan-harness
 
 A Claude Code plugin for structured project planning. Generates interactive HTML documents through specialized agent teams — with composable markdown contexts that adapt the output to your project, scenario, and style.
