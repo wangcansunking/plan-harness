@@ -17,7 +17,7 @@ Working copy (you edit here):
      └─ local-proxy/src/*.js    ← edits don't take effect until synced + restart
 
 Plugin cache (Claude Code runs from here):
-  ~/.claude/plugins/cache/canwa-claude-plugins/plan-harness/<version>/
+  ~/.claude/plugins/cache/can-claude-plugins/plan-harness/<version>/
      └─ local-proxy/dist/index.js   ← the MCP server actually loaded
 ```
 
@@ -64,7 +64,7 @@ If you want zero-copy — edits to source instantly live in the cache — replac
 **macOS / Linux:**
 ```bash
 VER=$(node -p "require('./plan-harness/.claude-plugin/plugin.json').version")
-CACHE=~/.claude/plugins/cache/canwa-claude-plugins/plan-harness/$VER
+CACHE=~/.claude/plugins/cache/can-claude-plugins/plan-harness/$VER
 rm -rf "$CACHE"
 ln -s "$(pwd)/plan-harness" "$CACHE"
 ```
@@ -72,7 +72,7 @@ ln -s "$(pwd)/plan-harness" "$CACHE"
 **Windows** (requires Developer Mode or admin):
 ```powershell
 $ver = (Get-Content plan-harness\.claude-plugin\plugin.json | ConvertFrom-Json).version
-$cache = "$env:USERPROFILE\.claude\plugins\cache\canwa-claude-plugins\plan-harness\$ver"
+$cache = "$env:USERPROFILE\.claude\plugins\cache\can-claude-plugins\plan-harness\$ver"
 Remove-Item -Recurse -Force $cache
 New-Item -ItemType SymbolicLink -Path $cache -Target "$(Resolve-Path .\plan-harness)"
 ```
@@ -134,8 +134,8 @@ plan-harness/
 ├── prompts/                        — agent role prompts (architect/PM/tester/…)
 ├── skills/
 │   ├── plan-init/SKILL.md
-│   ├── plan-design/SKILL.md
-│   └── …                           — 11 skills currently
+│   ├── plan-gen/SKILL.md
+│   └── …                           — 10 skills currently
 └── local-proxy/
     ├── package.json                — devDeps + scripts
     ├── start.js                    — launcher; imports dist/

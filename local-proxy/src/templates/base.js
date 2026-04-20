@@ -316,7 +316,7 @@ export function getThemeInitScript() {
 
 /**
  * Breadcrumb shown in the sticky header: workspace › scenario › document.
- * Workspace is the basename of the repo being planned (eg. "canwa-claude-plugins").
+ * Workspace is the basename of the repo being planned (eg. "can-claude-plugins").
  * Every segment except the last is a link; the last is non-link current state.
  *
  * @param {object} [opts]

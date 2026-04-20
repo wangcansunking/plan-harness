@@ -50,8 +50,8 @@ Every generated HTML file embeds all CSS and JS inline. No CDN, no external depe
 
 ```bash
 # Install
-claude plugins marketplace add https://github.com/wangcansunking/sunky-claude-code-marketplace
-claude plugins install plan-harness@canwa-claude-plugins
+claude plugins marketplace add https://github.com/wangcansunking/can-claude-plugins
+claude plugins install plan-harness@can-claude-plugins
 
 # Import built-in context templates
 /plan-context init
@@ -77,15 +77,23 @@ claude plugins install plan-harness@canwa-claude-plugins
 /plan-init ──────────── Multi-select contexts + create/select scenario
          │              → updates manifest.json with contexts
          │
-         ├── /plan-analyze ────── analysis.html
-         ├── /plan-design ─────── design.html
-         ├── /plan-test-plan ──── test-plan.html     (if enabled by context)
-         ├── /plan-test-cases ─── test-cases.html    (if enabled by context)
-         ├── /plan-state-machine  state-machine.html  (if enabled by context)
-         └── /plan-implementation  implementation-plan.html
-                    │
-         /plan-review ─────────── Section-by-section review
-         /plan-review-cycle ───── Full review with consistency checks
+/plan-gen <type> ─────── Unified dispatcher — pick one or many doc types
+         │              via multi-select UI, or pass type as argument:
+         │                • design           → design.html
+         │                • state-machine    → state-machine.html
+         │                • test-plan        → test-plan.html
+         │                • test-cases       → test-cases.html
+         │                • implementation   → implementation-plan.html
+         │                • test-report      → test-report.html
+         │                • analysis         → analysis.html
+         │
+/plan-full ──────────── Orchestrate the whole workflow end-to-end
+/plan-sync ──────────── Cascade-regenerate downstream docs when upstream edits
+/plan-test ──────────── Run the test-plan scenarios via Playwright MCP
+/plan-share ─────────── Share plan docs via devtunnel (public / pw-protected)
+/plan-review ────────── Section-by-section review of one document
+/plan-review-cycle ──── Full review with cross-document consistency checks
+/plan-revise ────────── Batch-dispatch pending revise-intent comments
 ```
 
 Which documents get generated depends on the selected generation rules context:
@@ -158,7 +166,7 @@ Later contexts override earlier ones where they conflict. Order matters.
 
 ## MCP Tools
 
-6 tools via local stdio server:
+12 tools via local stdio server:
 
 | Tool | Description |
 |------|-------------|
@@ -168,24 +176,31 @@ Later contexts override earlier ones where they conflict. Order matters.
 | `plan_check_completion` | Check implementation progress from code evidence |
 | `plan_get_context` | Analyze codebase: tech stack, patterns, conventions |
 | `plan_serve_dashboard` | Start local HTTP dashboard at `localhost:3847` |
+| `plan_share` | Start a devtunnel for a scenario (public / private / password) |
+| `plan_share_stop` | Stop an active devtunnel |
+| `plan_reanchor` | Repair drifted W3C-style anchors after doc edits |
+| `plan_list_pending_revises` | List revise-intent comments awaiting a writer proposal |
+| `plan_list_pending_mentions` | List @-mention comments queued for agent personas |
+| `plan_post_persona_reply` | Post a persona reply to a queued @-mention thread |
 
 ---
 
 ## Skills Reference
 
+10 skills. Most per-doc generators were unified into `/plan-gen`.
+
 | Skill | Description |
 |-------|-------------|
 | `/plan-context` | Create, list, edit, import context files |
 | `/plan-init` | Multi-select contexts + create/select scenario |
-| `/plan-analyze` | Deep codebase analysis → `analysis.html` |
-| `/plan-design` | Architecture & design → `design.html` |
-| `/plan-state-machine` | State diagrams → `state-machine.html` |
-| `/plan-test-plan` | E2E test scenarios → `test-plan.html` |
-| `/plan-test-cases` | Test case catalog → `test-cases.html` |
-| `/plan-implementation` | Implementation steps → `implementation-plan.html` |
+| `/plan-gen` | Unified generator — pick one or many doc types (design / state-machine / test-plan / test-cases / implementation / test-report / analysis) |
+| `/plan-full` | Orchestrate entire workflow with checkpoints |
+| `/plan-sync` | Cascade-regenerate downstream docs after upstream edits |
+| `/plan-test` | Run `test-plan.html` scenarios end-to-end via Playwright MCP |
+| `/plan-share` | Share plan docs via devtunnel (public / private / password) |
 | `/plan-review` | Section-by-section review of one document |
 | `/plan-review-cycle` | Full review with cross-document consistency |
-| `/plan-full` | Orchestrate entire workflow with checkpoints |
+| `/plan-revise` | Batch-dispatch pending revise-intent comments into writer proposals |
 
 ---
 
@@ -198,12 +213,12 @@ plan-harness/
 │   ├── performance-audit.md     4-doc data-driven audit
 │   ├── lean.md                  Minimal 2-doc planning
 │   └── _example-project.md     Project context template
-├── skills/                      11 skill definitions (SKILL.md)
+├── skills/                      10 skill definitions (SKILL.md)
 ├── prompts/                     6 agent role templates
 ├── local-proxy/                 MCP server + web dashboard
 │   ├── start.js                 Bootstrap (auto-installs deps)
 │   └── src/
-│       ├── index.js             MCP server (6 tools, stdio)
+│       ├── index.js             MCP server (12 tools, stdio)
 │       ├── plan-manager.js      Plan file operations
 │       ├── web-server.js        HTTP dashboard (node:http)
 │       └── templates/base.js    HTML template system

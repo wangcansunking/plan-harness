@@ -12,7 +12,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
 const PLUGIN_NAME = 'plan-harness';
-const MARKETPLACE = 'canwa-claude-plugins';
+const MARKETPLACE = 'can-claude-plugins';
 
 const __filename = fileURLToPath(import.meta.url);
 const scriptsDir = dirname(__filename);
