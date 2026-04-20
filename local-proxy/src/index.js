@@ -16,6 +16,10 @@ import {
   ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 
+import { statSync, readdirSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { dirname, basename } from "node:path";
+
 import {
   listScenarios,
   createScenario,
@@ -298,6 +302,20 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
           },
         },
         required: ["workspaceRoot", "scenario", "doc", "parentId", "persona", "body"],
+      },
+    },
+    {
+      name: "plan_restart",
+      description:
+        "Exit the current plan-harness MCP server process so Claude Code respawns it with the latest plugin bundle. Use after `claude plugins update` or after a dev `npm run dev` if the auto-detect watcher hasn't caught the new version yet. The process exits with code 0 ~300ms after this call, so the tool response lands first.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          reason: {
+            type: "string",
+            description: "Optional free-text reason, printed to stderr before exit (e.g. 'after plugins update'). Defaults to 'manual restart requested'.",
+          },
+        },
       },
     },
   ],
@@ -760,6 +778,22 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         };
       }
 
+      // ---- plan_restart -------------------------------------------------
+      case "plan_restart": {
+        const reason = (args && args.reason) || "manual restart requested";
+        // Exit ~300ms after returning so the JSON-RPC response lands before
+        // the transport dies. Claude Code treats a 0-exit of an MCP server
+        // as "disconnect; respawn", which is exactly what we want.
+        setTimeout(() => {
+          console.error(`[plan-harness] exiting for respawn — ${reason}`);
+          process.exit(0);
+        }, 300);
+        return textResult(
+          `[plan-harness] scheduled exit for respawn — ${reason}\n` +
+          `Claude Code will reconnect within a few seconds with the latest plugin bundle.`,
+        );
+      }
+
       // ---- Unknown tool -------------------------------------------------
       default:
         return {
@@ -802,6 +836,107 @@ function formatBytes(bytes) {
   const i = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
   const value = bytes / Math.pow(1024, i);
   return `${value.toFixed(i === 0 ? 0 : 1)} ${units[i]}`;
+}
+
+// ---------------------------------------------------------------------------
+// Staleness watcher — exit when a newer plugin version lands
+// ---------------------------------------------------------------------------
+//
+// Two upgrade paths to catch:
+//
+//   (a) Dev flow — `npm run dev` rewrites dist/index.js in place. Caught by
+//       watching this exact file's mtime.
+//   (b) User flow — `claude plugins update` writes a new <cache>/.../<version>/
+//       directory *beside* ours. Our own dist/index.js is untouched, so we
+//       also scan sibling directories for a higher semver.
+//
+// On either trigger, log + exit(0). The MCP SDK's stdio transport terminates
+// cleanly and Claude Code respawns us against whichever version is current.
+//
+// Env overrides:
+//   PLAN_HARNESS_NO_WATCH=1   — disable the watcher (useful in tests)
+//   PLAN_HARNESS_WATCH_MS=<n> — poll interval in ms (default 30_000)
+startStalenessWatcher();
+
+function startStalenessWatcher() {
+  if (process.env.PLAN_HARNESS_NO_WATCH === "1") return;
+  const intervalMs = Number(process.env.PLAN_HARNESS_WATCH_MS) || 30_000;
+
+  let bundleFile;
+  try {
+    bundleFile = fileURLToPath(import.meta.url);
+  } catch {
+    return;
+  }
+
+  let startupMtime;
+  try {
+    startupMtime = statSync(bundleFile).mtimeMs;
+  } catch {
+    return;
+  }
+
+  // <cache>/<mkt>/plan-harness/<version>/local-proxy/src/index.js
+  // or bundled: .../<version>/local-proxy/dist/index.js
+  // Walk up to find a dir whose basename is a semver — that's "my version".
+  const thisDir = dirname(bundleFile);
+  const localProxyDir = dirname(thisDir);
+  const maybeVersionDir = dirname(localProxyDir);
+  const pluginRoot = dirname(maybeVersionDir);
+  const myVersion = basename(maybeVersionDir);
+  const isVersioned = /^\d+\.\d+\.\d+$/.test(myVersion);
+
+  console.error(
+    `[plan-harness] bundle=${bundleFile} version=${isVersioned ? myVersion : "dev"} watcher=${intervalMs}ms`,
+  );
+
+  const timer = setInterval(() => {
+    // (a) in-place mtime drift
+    try {
+      const m = statSync(bundleFile).mtimeMs;
+      if (m !== startupMtime) {
+        clearInterval(timer);
+        exitForRespawn(`bundle rewritten in place (mtime drift at ${new Date(m).toISOString()})`);
+        return;
+      }
+    } catch {
+      // bundle moved/deleted — also a signal to restart
+      clearInterval(timer);
+      exitForRespawn("bundle file missing");
+      return;
+    }
+
+    // (b) newer sibling version dir appeared
+    if (!isVersioned) return;
+    try {
+      for (const entry of readdirSync(pluginRoot)) {
+        if (!/^\d+\.\d+\.\d+$/.test(entry)) continue;
+        if (semverGt(entry, myVersion)) {
+          clearInterval(timer);
+          exitForRespawn(`upgrade detected: ${myVersion} → ${entry}`);
+          return;
+        }
+      }
+    } catch {
+      // pluginRoot unreadable — ignore, try next tick
+    }
+  }, intervalMs);
+  timer.unref?.();
+}
+
+function semverGt(a, b) {
+  const pa = a.split(".").map(Number);
+  const pb = b.split(".").map(Number);
+  for (let i = 0; i < 3; i++) {
+    if (pa[i] > pb[i]) return true;
+    if (pa[i] < pb[i]) return false;
+  }
+  return false;
+}
+
+function exitForRespawn(reason) {
+  console.error(`[plan-harness] exiting for respawn — ${reason}`);
+  setTimeout(() => process.exit(0), 50);
 }
 
 // ---------------------------------------------------------------------------

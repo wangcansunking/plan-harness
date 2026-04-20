@@ -127,7 +127,7 @@ body.nav-open .side-nav { transform: translateX(0); }
 
 <h1>plan-harness</h1>
 <p class="meta">Claude Code Plugin &mdash; Structured Project Planning with Agent Teams<br>
-10 skills &bull; 12 MCP tools &bull; 6 agent roles &bull; 7 document types<br>
+11 skills &bull; 13 MCP tools &bull; 6 agent roles &bull; 7 document types<br>
 <span class="badge badge-blue">v1.3.2</span> <span class="badge badge-purple">Interactive HTML</span> <span class="badge badge-green">Dark/Light Theme</span></p>
 
 <!-- ===== SECTION 1: Overview ===== -->
@@ -189,7 +189,7 @@ body.nav-open .side-nav { transform: translateX(0); }
 
   <!-- MCP Server box -->
   <rect x="30" y="55" width="240" height="260" rx="12" fill="var(--glow)" stroke="var(--accent)" stroke-width="2"/>
-  <text x="150" y="78" text-anchor="middle" fill="var(--accent)" font-weight="700" font-size="13">MCP Server (12 tools)</text>
+  <text x="150" y="78" text-anchor="middle" fill="var(--accent)" font-weight="700" font-size="13">MCP Server (13 tools)</text>
   <!-- Tools: 2 columns of compact rows -->
   <rect x="42" y="88" width="100" height="20" rx="4" fill="var(--svg-node)" stroke="var(--svg-node-stroke)" stroke-width="1"/>
   <text x="92" y="102" text-anchor="middle" fill="var(--text)" font-size="9">list_scenarios</text>
@@ -215,14 +215,16 @@ body.nav-open .side-nav { transform: translateX(0); }
   <text x="92" y="222" text-anchor="middle" fill="var(--text)" font-size="9">list_pending_mentions</text>
   <rect x="148" y="208" width="114" height="20" rx="4" fill="var(--svg-node)" stroke="var(--svg-node-stroke)" stroke-width="1"/>
   <text x="205" y="222" text-anchor="middle" fill="var(--text)" font-size="9">post_persona_reply</text>
-  <text x="150" y="250" text-anchor="middle" fill="var(--muted)" font-size="9">all prefixed with plan_</text>
-  <text x="150" y="268" text-anchor="middle" fill="var(--muted)" font-size="9">stdio transport</text>
-  <text x="150" y="286" text-anchor="middle" fill="var(--muted)" font-size="9">dashboard on :3847</text>
-  <text x="150" y="304" text-anchor="middle" fill="var(--muted)" font-size="9">share via devtunnel</text>
+  <rect x="42" y="232" width="220" height="20" rx="4" fill="var(--svg-node)" stroke="var(--svg-node-stroke)" stroke-width="1"/>
+  <text x="152" y="246" text-anchor="middle" fill="var(--text)" font-size="9">restart (exit for respawn)</text>
+  <text x="150" y="266" text-anchor="middle" fill="var(--muted)" font-size="9">all prefixed with plan_</text>
+  <text x="150" y="282" text-anchor="middle" fill="var(--muted)" font-size="9">stdio transport</text>
+  <text x="150" y="298" text-anchor="middle" fill="var(--muted)" font-size="9">dashboard on :3847</text>
+  <text x="150" y="314" text-anchor="middle" fill="var(--muted)" font-size="9">share via devtunnel</text>
 
   <!-- Skills box -->
   <rect x="300" y="55" width="270" height="260" rx="12" fill="var(--glow)" stroke="var(--purple)" stroke-width="2"/>
-  <text x="435" y="78" text-anchor="middle" fill="var(--purple)" font-weight="700" font-size="13">10 Skills</text>
+  <text x="435" y="78" text-anchor="middle" fill="var(--purple)" font-weight="700" font-size="13">11 Skills</text>
 
   <text x="320" y="100" fill="var(--muted)" font-size="10" font-weight="600">CONTEXT</text>
   <rect x="320" y="106" width="110" height="24" rx="5" fill="var(--badge-purple-bg)" stroke="var(--purple)" stroke-width="1"/>
@@ -248,9 +250,11 @@ body.nav-open .side-nav { transform: translateX(0); }
   <rect x="518" y="230" width="44" height="24" rx="5" fill="var(--badge-green-bg)" stroke="var(--green)" stroke-width="1"/>
   <text x="540" y="246" text-anchor="middle" fill="var(--green)" font-size="9" font-weight="600">/plan-revise</text>
 
-  <text x="320" y="272" fill="var(--muted)" font-size="10" font-weight="600">ORCHESTRATE</text>
-  <rect x="320" y="278" width="228" height="24" rx="5" fill="var(--badge-yellow-bg)" stroke="var(--yellow)" stroke-width="1"/>
-  <text x="434" y="294" text-anchor="middle" fill="var(--yellow)" font-size="10" font-weight="600">/plan-full  (walks the whole DAG)</text>
+  <text x="320" y="272" fill="var(--muted)" font-size="10" font-weight="600">ORCHESTRATE &amp; MAINTAIN</text>
+  <rect x="320" y="278" width="148" height="24" rx="5" fill="var(--badge-yellow-bg)" stroke="var(--yellow)" stroke-width="1"/>
+  <text x="394" y="294" text-anchor="middle" fill="var(--yellow)" font-size="10" font-weight="600">/plan-full (walks DAG)</text>
+  <rect x="476" y="278" width="72" height="24" rx="5" fill="var(--badge-yellow-bg)" stroke="var(--yellow)" stroke-width="1"/>
+  <text x="512" y="294" text-anchor="middle" fill="var(--yellow)" font-size="9" font-weight="600">/plan-restart</text>
 
   <!-- Agent Prompts box -->
   <rect x="600" y="55" width="250" height="260" rx="12" fill="var(--glow)" stroke="var(--green)" stroke-width="2"/>
@@ -612,6 +616,11 @@ body.nav-open .side-nav { transform: translateX(0); }
     <p>Share a plan-set via devtunnel (public / private / password), self-maintained while scenario is live</p>
     <div class="agents"><span class="agent-badge" style="background:var(--badge-purple-bg);color:var(--purple)">Interactive</span></div>
   </div>
+  <div class="skill-card">
+    <h4>/plan-restart</h4>
+    <p>Bounce the MCP server so a newly-installed bundle takes effect; complements the built-in staleness watcher</p>
+    <div class="agents"><span class="agent-badge" style="background:var(--badge-yellow-bg);color:var(--yellow)">Ops</span></div>
+  </div>
   <div class="skill-card" style="grid-column: 1 / -1; border-color: var(--yellow);">
     <h4>/plan-full</h4>
     <p>Orchestrates the canonical workflow: analysis &rarr; design &rarr; state-machine &rarr; test-plan &rarr; test-cases &rarr; implementation &rarr; (test-report runs separately after code exists). User review checkpoints between each phase.</p>
@@ -756,6 +765,7 @@ body.nav-open .side-nav { transform: translateX(0); }
 <tr><td><code>plan_list_pending_revises</code></td><td><code>scenarioPath</code></td><td>List revise-intent comments awaiting a writer-agent proposal</td></tr>
 <tr><td><code>plan_list_pending_mentions</code></td><td><code>scenarioPath</code></td><td>List @-mention comments queued for agent personas</td></tr>
 <tr><td><code>plan_post_persona_reply</code></td><td><code>scenarioPath</code>, <code>docSlug</code>, <code>commentId</code>, <code>persona</code>, <code>body</code></td><td>Post a persona reply to a queued @-mention thread</td></tr>
+<tr><td><code>plan_restart</code></td><td><code>reason?</code></td><td>Exit the MCP server (code 0, ~300 ms delay) so Claude Code respawns it on the latest plugin bundle. Complements the built-in staleness watcher that triggers the same exit automatically on bundle mtime drift or newer-semver sibling.</td></tr>
 </table>
 
 <!-- ===== SECTION 8: File Structure ===== -->

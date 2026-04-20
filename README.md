@@ -79,7 +79,7 @@ Hard (required) vs. soft (optional) edges:
 
 ![Plugin architecture](docs/screenshots/02-plugin-architecture.png)
 
-Three pieces: an MCP server with 12 tools, 10 slash commands, and 6 agent roles. They compose to produce 7 kinds of HTML output.
+Three pieces: an MCP server with 13 tools, 11 slash commands, and 6 agent roles. They compose to produce 7 kinds of HTML output.
 
 ### Two-level context system
 
@@ -122,10 +122,11 @@ Each context `.md` uses frontmatter (`name`, `description`, `tags`, `agents`) so
 | `/plan-review` | Section-by-section review of one document |
 | `/plan-review-cycle` | Full review with cross-document consistency |
 | `/plan-revise` | Batch-dispatch pending revise-intent comments into writer proposals |
+| `/plan-restart` | Exit the MCP server so Claude Code respawns it on the newly-installed bundle |
 
 ## MCP Tools
 
-12 tools via a local stdio server — surfaces the filesystem and dashboard operations the slash commands need:
+13 tools via a local stdio server — surfaces the filesystem, dashboard, and self-restart operations the slash commands need:
 
 | Tool | Purpose |
 |---|---|
@@ -141,6 +142,7 @@ Each context `.md` uses frontmatter (`name`, `description`, `tags`, `agents`) so
 | `plan_list_pending_revises` | List revise-intent comments awaiting a writer proposal |
 | `plan_list_pending_mentions` | List @-mention comments queued for agent personas |
 | `plan_post_persona_reply` | Post a persona reply to a queued @-mention thread |
+| `plan_restart` | Exit the MCP server process for Claude Code to respawn (picks up new plugin bundles) |
 
 ## Agent Team
 
