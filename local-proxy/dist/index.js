@@ -9249,11 +9249,11 @@ function normalizePlanTabs(html, existingSiblings, scenarioDir) {
           if (!hrefMatch) return aMatch;
           const href = hrefMatch[1];
           if (/^(https?:|\/)/.test(href)) return aMatch;
-          const basename3 = href.split(/[\\/]/).pop().split(/[#?]/)[0];
-          if (!existingSiblings.has(basename3)) return aMatch;
+          const basename4 = href.split(/[\\/]/).pop().split(/[#?]/)[0];
+          if (!existingSiblings.has(basename4)) return aMatch;
           let newHref = href;
           if (scenarioDir) {
-            const absPath = scenarioDir.replace(/\\/g, "/") + "/" + basename3;
+            const absPath = scenarioDir.replace(/\\/g, "/") + "/" + basename4;
             newHref = "/view?path=" + encodeURIComponent(absPath);
           }
           let newAttrs = attrs.replace(/\s+aria-disabled\s*=\s*["'][^"']*["']/gi, "").replace(/\bhref\s*=\s*["'][^"']+["']/i, 'href="' + newHref.replace(/"/g, "&quot;") + '"');
@@ -25577,6 +25577,11 @@ var StdioServerTransport = class {
   }
 };
 
+// src/index.js
+import { statSync, readdirSync } from "node:fs";
+import { fileURLToPath as fileURLToPath2 } from "node:url";
+import { dirname as dirname2, basename as basename3 } from "node:path";
+
 // src/plan-manager.js
 import { readdir, readFile, writeFile, mkdir, stat } from "node:fs/promises";
 import { join, basename, extname, relative, sep } from "node:path";
@@ -26185,6 +26190,19 @@ server2.setRequestHandler(ListToolsRequestSchema, async () => ({
         },
         required: ["workspaceRoot", "scenario", "doc", "parentId", "persona", "body"]
       }
+    },
+    {
+      name: "plan_restart",
+      description: "Exit the current plan-harness MCP server process so Claude Code respawns it with the latest plugin bundle. Use after `claude plugins update` or after a dev `npm run dev` if the auto-detect watcher hasn't caught the new version yet. The process exits with code 0 ~300ms after this call, so the tool response lands first.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          reason: {
+            type: "string",
+            description: "Optional free-text reason, printed to stderr before exit (e.g. 'after plugins update'). Defaults to 'manual restart requested'."
+          }
+        }
+      }
     }
   ]
 }));
@@ -26564,6 +26582,18 @@ ${lines.join("\n")}` },
           ]
         };
       }
+      // ---- plan_restart -------------------------------------------------
+      case "plan_restart": {
+        const reason = args && args.reason || "manual restart requested";
+        setTimeout(() => {
+          console.error(`[plan-harness] exiting for respawn \u2014 ${reason}`);
+          process.exit(0);
+        }, 300);
+        return textResult(
+          `[plan-harness] scheduled exit for respawn \u2014 ${reason}
+Claude Code will reconnect within a few seconds with the latest plugin bundle.`
+        );
+      }
       // ---- Unknown tool -------------------------------------------------
       default:
         return {
@@ -26598,6 +26628,72 @@ function formatBytes(bytes) {
   const i = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
   const value = bytes / Math.pow(1024, i);
   return `${value.toFixed(i === 0 ? 0 : 1)} ${units[i]}`;
+}
+startStalenessWatcher();
+function startStalenessWatcher() {
+  if (process.env.PLAN_HARNESS_NO_WATCH === "1") return;
+  const intervalMs = Number(process.env.PLAN_HARNESS_WATCH_MS) || 3e4;
+  let bundleFile;
+  try {
+    bundleFile = fileURLToPath2(import.meta.url);
+  } catch {
+    return;
+  }
+  let startupMtime;
+  try {
+    startupMtime = statSync(bundleFile).mtimeMs;
+  } catch {
+    return;
+  }
+  const thisDir = dirname2(bundleFile);
+  const localProxyDir = dirname2(thisDir);
+  const maybeVersionDir = dirname2(localProxyDir);
+  const pluginRoot = dirname2(maybeVersionDir);
+  const myVersion = basename3(maybeVersionDir);
+  const isVersioned = /^\d+\.\d+\.\d+$/.test(myVersion);
+  console.error(
+    `[plan-harness] bundle=${bundleFile} version=${isVersioned ? myVersion : "dev"} watcher=${intervalMs}ms`
+  );
+  const timer = setInterval(() => {
+    try {
+      const m = statSync(bundleFile).mtimeMs;
+      if (m !== startupMtime) {
+        clearInterval(timer);
+        exitForRespawn(`bundle rewritten in place (mtime drift at ${new Date(m).toISOString()})`);
+        return;
+      }
+    } catch {
+      clearInterval(timer);
+      exitForRespawn("bundle file missing");
+      return;
+    }
+    if (!isVersioned) return;
+    try {
+      for (const entry of readdirSync(pluginRoot)) {
+        if (!/^\d+\.\d+\.\d+$/.test(entry)) continue;
+        if (semverGt(entry, myVersion)) {
+          clearInterval(timer);
+          exitForRespawn(`upgrade detected: ${myVersion} \u2192 ${entry}`);
+          return;
+        }
+      }
+    } catch {
+    }
+  }, intervalMs);
+  timer.unref?.();
+}
+function semverGt(a, b) {
+  const pa = a.split(".").map(Number);
+  const pb = b.split(".").map(Number);
+  for (let i = 0; i < 3; i++) {
+    if (pa[i] > pb[i]) return true;
+    if (pa[i] < pb[i]) return false;
+  }
+  return false;
+}
+function exitForRespawn(reason) {
+  console.error(`[plan-harness] exiting for respawn \u2014 ${reason}`);
+  setTimeout(() => process.exit(0), 50);
 }
 var transport = new StdioServerTransport();
 await server2.connect(transport);
