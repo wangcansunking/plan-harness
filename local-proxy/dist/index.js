@@ -7360,7 +7360,7 @@ function filterScenarios() {
 }
 function generateScenarioDetail(scenario, options = {}) {
   const PLAN_DEFS = [
-    { type: "analysis", label: "Analysis", blurb: "Current state, problem to solve, observed pain points, root causes", skill: "/plan-gen analysis" },
+    { type: "analysis", label: "Analysis", blurb: "Problem + code-logic walk: current state, pain points (with file/line), root causes", skill: "/plan-gen analysis" },
     { type: "design", label: "Design", blurb: "Architecture, data model, API, UX, risks", skill: "/plan-gen design" },
     { type: "state-machine", label: "State Machine", blurb: "Entity states, transitions, invariants", skill: "/plan-gen state-machine" },
     { type: "test-plan", label: "Test Plan", blurb: "E2E scenarios, entry criteria, ownership", skill: "/plan-gen test-plan" },

@@ -76,12 +76,12 @@ Update `manifest.json` with the enriched description.
 
 ### Phase 2: Generate Analysis Document
 
-Run the `/plan-gen analysis` workflow. **Analysis is the problem statement** for the whole run — current state, what we're solving, pain points, root causes, impact. No solutions (those belong in design).
+Run the `/plan-gen analysis` workflow. **Analysis is the problem statement + code-logic reading** for the whole run — current state (product flow AND the code paths this plan will touch), what we're solving, pain points (business + code-level, each cited by file/line), root causes, impact. No solutions (those belong in design).
 
 1. Read `manifest.json` for repo path + scenario context + the user's Phase 1 feature description
-2. Dispatch the PM agent (frame: problem to solve / pain points / impact / urgency / constraints, using the Phase 1 description as the brief)
-3. Dispatch the Architect agent (ground: current-state walk of the code/product area, root causes tied to each pain point)
-4. Dispatch the Writer agent (assemble sections 1–6 per `skills/plan-gen/types/analysis.md`)
+2. Dispatch the PM agent (frame: problem to solve / business-level pain points / impact / urgency / constraints, using the Phase 1 description as the brief)
+3. Dispatch the Architect agent (ground: read the actual relevant modules — control flow, data flow, surface bugs / anti-patterns / silent failures / N+1 / dead paths; cite file+line for every finding; map each finding to a root cause layer: logic / abstraction / architecture / external / historical)
+4. Dispatch the Writer agent (assemble sections 1–6 per `skills/plan-gen/types/analysis.md`; §1 and §3 must carry file+line citations)
 5. Write `{scenarioPath}/analysis.html`
 6. Update manifest.json (`analysisHtml`, `analysisGeneratedAt`)
 
