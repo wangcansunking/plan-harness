@@ -19,7 +19,7 @@ Generate 7 documents: analysis, design, state-machine, test-plan, test-cases, im
 
 | Document | Generate | Purpose |
 |----------|----------|---------|
-| analysis.html | Yes | Deep codebase analysis — architecture, patterns, conventions, code health |
+| analysis.html | Yes | Problem statement — current state, problem to solve, pain points, root causes, impact |
 | design.html | Yes | Technical design with data models, API contracts, UX flows, architecture diagrams |
 | state-machine.html | Yes | Entity state diagrams and transition tables |
 | test-plan.html | Yes | E2E test scenarios with progress tracking |
@@ -30,7 +30,7 @@ Generate 7 documents: analysis, design, state-machine, test-plan, test-cases, im
 
 ### Content Rules
 
-**analysis.html**: Architecture exploration, code patterns, tech stack deep-dive. Component graphs, dependency analysis, code health scores. SVG diagrams for architecture layers.
+**analysis.html**: Problem statement — current state, the problem to solve, observed pain points (P1, P2, …), root causes tied to each pain point, impact + urgency, optional constraints. Architecture snippets only when they clarify a pain point; no solutions (those live in design).
 
 **design.html**: Comprehensive — data models with field tables, API contracts with request/response JSON, UX component hierarchy, use cases with Given/When/Then. Code examples allowed. Architecture SVGs, ER diagrams, flow diagrams.
 
@@ -38,7 +38,7 @@ Generate 7 documents: analysis, design, state-machine, test-plan, test-cases, im
 
 ### Chart Types
 
-- analysis: component-graph, dependency-graph, layer-diagram, health-scorecards
+- analysis: current-state-diagram, pain-point-table, root-cause-tree, impact-matrix
 - design: architecture-svg, flow-diagram, er-diagram, endpoint-cards, state-transition-svg
 - implementation: dependency-graph, progress-bars, phase-cards
 

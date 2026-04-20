@@ -997,7 +997,9 @@ function groupFlatFilesIntoScenarios(fileNames, plansDir) {
 
   // Build scenario objects
   const scenarios = [];
-  const allPlanTypes = ['design', 'test-plan', 'state-machines', 'test-cases', 'impl-plan'];
+  // Must match the `type` keys emitted via planTypeMap above and the planTypes
+  // array in templates/base.js. Order = canonical workflow (prompts/_workflow.md).
+  const allPlanTypes = ['analysis', 'design', 'state-machine', 'test-plan', 'test-cases', 'implementation-plan', 'test-report'];
 
   for (const [prefix, foundFiles] of prefixMap) {
     const files = allPlanTypes.map(type => {

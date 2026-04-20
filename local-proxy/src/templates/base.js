@@ -573,7 +573,10 @@ export function generateDashboard(scenarios, options = {}) {
   // Must match the `type` keys emitted by scanScenarioDir in web-server.js.
   // Mismatched names (e.g. 'state-machines' vs 'state-machine') silently
   // render every card as missing even when the files exist.
-  const planTypes = ['design', 'test-plan', 'state-machine', 'test-cases', 'implementation-plan'];
+  // Order = canonical workflow (prompts/_workflow.md):
+  //   analysis → design → {state-machine, test-plan → test-cases}
+  //            → implementation → test-report
+  const planTypes = ['analysis', 'design', 'state-machine', 'test-plan', 'test-cases', 'implementation-plan', 'test-report'];
 
   // Cards are omitted when their count is zero — honest signal, no dead chrome.
   // Scenarios + Plan Files are always shown because they can be zero only
@@ -680,10 +683,12 @@ function filterScenarios() {
 export function generateScenarioDetail(scenario, options = {}) {
   // Types must match the keys emitted by scanScenarioDir in web-server.js.
   // Keep this list in sync with the planTypes array in generateDashboard above.
+  // Order = canonical workflow (prompts/_workflow.md).
   const PLAN_DEFS = [
+    { type: 'analysis', label: 'Analysis', blurb: 'Current state, problem to solve, observed pain points, root causes', skill: '/plan-gen analysis' },
     { type: 'design', label: 'Design', blurb: 'Architecture, data model, API, UX, risks', skill: '/plan-gen design' },
-    { type: 'test-plan', label: 'Test Plan', blurb: 'E2E scenarios, entry criteria, ownership', skill: '/plan-gen test-plan' },
     { type: 'state-machine', label: 'State Machine', blurb: 'Entity states, transitions, invariants', skill: '/plan-gen state-machine' },
+    { type: 'test-plan', label: 'Test Plan', blurb: 'E2E scenarios, entry criteria, ownership', skill: '/plan-gen test-plan' },
     { type: 'test-cases', label: 'Test Cases', blurb: 'Priority-ranked cases with expected outcomes', skill: '/plan-gen test-cases' },
     { type: 'implementation-plan', label: 'Implementation', blurb: 'File-level steps, phases, dependencies', skill: '/plan-gen implementation' },
     { type: 'test-report', label: 'Test Report', blurb: 'Last E2E run: pass/fail per scenario with evidence', skill: '/plan-gen test-report' },
