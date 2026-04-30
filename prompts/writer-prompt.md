@@ -534,7 +534,7 @@ Combine content in this order:
 3. **User Stories** (from PM)
 4. **Data Model** (from Architect: entity tables, enums, relationships, ER diagram)
 5. **API Contracts** (from Architect: endpoint definitions with request/response schemas)
-6. **Architecture** (from Architect: system architecture SVG, data flow SVG)
+6. **Architecture** (from Architect: system architecture SVG, data flow SVG) — when emitting the system-architecture or integration-points SVG, follow the structural rules in `prompts/styles/architecture-diagram-svg.md` (arrow z-order, 40px stacking gap, legend outside boundaries, component-type color map). If the diagram includes a message bus, extend the `svgMap` below with `'#fb923c': '#c2410c'` (light branch) and the inverse (dark branch).
 7. **UI Design** (from Frontend Dev: component hierarchy, interaction flows, wireframes)
 8. **State Management** (from Frontend Dev: store design, state location matrix)
 9. **Backend Implementation** (from Backend Dev: service layer, data access, error handling)
