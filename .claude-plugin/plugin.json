@@ -1,6 +1,6 @@
 {
   "name": "plan-harness",
-  "version": "1.4.0",
+  "version": "1.4.1",
   "description": "Project planning harness — one unified /plan-gen command with multi-select UI generates every plan doc type (design, state-machine, test-plan, test-cases, implementation, test-report, analysis). Adds /plan-sync cascade orchestrator, /plan-test-report interactive fix-loop, and a server-side lightbox + /asset route for evidence screenshots.",
   "icon": "./assets/icon.png",
   "author": {

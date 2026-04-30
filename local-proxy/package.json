@@ -1,6 +1,6 @@
 {
   "name": "plan-harness-server",
-  "version": "1.4.0",
+  "version": "1.4.1",
   "description": "Local MCP server for plan-harness plugin — manages plan files and serves dashboard",
   "type": "module",
   "scripts": {

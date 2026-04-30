@@ -17,6 +17,16 @@ Version fields in `.claude-plugin/plugin.json`, `.claude-plugin/marketplace.json
 
 
 
+
+## [1.4.1] — 2026-04-30
+
+### Changed
+Aggregated from commits since v1.4.0 (no `release:*` label was applied):
+
+- feat(prompts): architecture-diagram structural style guide for design.html SVGs (#11)
+
+([#scheduled](https://github.com/wangcansunking/plan-harness/actions/runs/25175555266))
+
 ## [1.4.0] — 2026-04-20
 
 ### Added
