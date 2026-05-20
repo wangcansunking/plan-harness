@@ -2,51 +2,91 @@
 
 | Field                       | Value                                                        |
 |-----------------------------|--------------------------------------------------------------|
-| Output filename             | `analysis.html`                                              |
-| Manifest fields             | `analysisHtml`, `analysisGeneratedAt`                        |
-| Required inputs             | `manifest.json`; optional repo path argument                 |
-| Downstream docs             | `design.html` (architect reads it as the problem statement)  |
+| Output filename             | `analysis.html` + `analysis.meta.json` (v2)                  |
+| Manifest fields             | `analysisHtml`, `analysisGeneratedAt`, `metaHashes.analysis` |
+| Hard upstream               | `product` (v2) — soft-block, allow `--skip-product`          |
+| Soft upstream               | `_shared/context`, `_shared/glossary`, `_shared/decisions`   |
+| Downstream                  | `design`                                                     |
 | Agent team                  | PM, Architect, Writer                                        |
-| Full workflow (read verbatim) | `skills/_deprecated/plan-analyze/SKILL.md`                 |
+| Full workflow (legacy)      | `skills/_deprecated/plan-analyze/SKILL.md`                   |
+| Mixins                      | `_grill-mixin`, `_caveman-mixin`, `_html-base`               |
 
-## Scope — what analysis is for
+## Scope
 
-`analysis.html` is the **problem statement + code-logic reading** for the whole planning run. It frames *why* we're about to design anything AND what the relevant code actually does today. The design doc answers "what are we going to build"; the analysis doc answers "what's broken in the code and the world, and why it needs fixing."
+Problem statement + code-logic reading. WHY we're designing and WHAT the code does today. Both layers (PM outside-in, Architect inside-out) — neither alone is complete.
 
-Analysis must cover both sides:
+## meta.json schema (v2)
 
-- **Outside-in (PM):** user / business / product-level pain — what hurts, who it hurts, how urgent.
-- **Inside-out (Architect):** the actual code paths this plan is going to touch — control flow, data flow, coupling, the subtle bugs and anti-patterns hiding in those paths.
+```jsonc
+{
+  "doc": "analysis",
+  "scenario": "<slug>",
+  "generatedAt": "<ISO>",
+  "upstream": { "product": "product.html" },
+  "currentState": {
+    "productFlow": "...",
+    "codeLogic": [{ "module": "...", "file": "path:line", "controlFlow": "...", "dataFlow": "..." }]
+  },
+  "problem":     "<one sentence>",
+  "successCriterion": "<one sentence>",
+  "painPoints":  [{ "id": "P1", "kind": "business|code", "summary": "...", "cite": "path:line" }],
+  "rootCauses":  [{ "painPoint": "P1", "layer": "logic|abstraction|architecture|external|historical", "cause": "..." }],
+  "hypotheses":  [{ "id": "H1", "claim": "...", "falsifiable": "If X is the cause, changing Y removes Z" }],
+  "impactUrgency": { "affected": "...", "frequency": "...", "severity": "blocking|degrading|cosmetic", "deadline": "..." },
+  "constraints": ["..."]
+}
+```
 
-If either side is missing the analysis is not done. A problem statement with no code reading is hand-waving; a code walk with no problem framing is a tour.
+`hypotheses` follows `mattpocock/skills engineering/diagnose/SKILL.md` Phase 3 format: every claim falsifiable.
 
 ## Required sections
 
-The Writer must produce these sections in order. Each section is grounded in the Architect's codebase walk + the PM's problem framing.
+1. **Current state** — product flow + code logic per module (cite files+lines).
+2. **Problem** — one sentence each: problem + success criterion.
+3. **Pain points** — IDs `P1..Pn`. Mix business and code-level. Each cites file:line.
+4. **Root causes** — every pain point ties to ≥1 cause at ≥1 layer.
+5. **Ranked hypotheses** — falsifiable statements ordered by likelihood (diagnose Phase 3).
+6. **Impact + urgency** — affected, frequency, severity, deadline.
+7. **Constraints** — what the plan must/must-not touch.
 
-1. **Current state (现状)** — what exists today. Cover two layers:
-   - *Product / flow:* the user-visible behaviour, the sequence of screens / API calls / events the plan will touch.
-   - *Code logic:* for each relevant module, the control flow + data flow as it is actually written. Cite files and functions (`path/to/file.ts:42`). Inline SVG flow / sequence / component diagrams are welcome here — they're the cheapest way to show what the code does.
-2. **Problem to solve (要解决的问题)** — the single sentence the rest of the plan hangs off. One paragraph on the goal the team has been given; one on the success criterion.
-3. **Observed pain points (当前问题)** — concrete, specific issues. Mix business-level and code-level:
-   - *Business-level:* latency numbers, bug incidents, user complaints, broken conventions, abandonment.
-   - *Code-level:* bugs the Architect found while reading (race conditions, missing nil checks, silent failures, dead paths, N+1 queries, leaky abstractions, duplicated logic, outdated comments that now lie). Each must cite the file + line.
-   Each pain point gets an ID (`P1`, `P2`, …) that later docs can reference.
-4. **Root causes (原因)** — for each pain point (or grouped cluster), the cause underneath it. Causes live at one of these layers — call out which:
-   - *Logic:* the code literally does the wrong thing (off-by-one, wrong condition).
-   - *Abstraction:* missing / wrong boundary; responsibilities leak across modules.
-   - *Architecture:* system shape forces every feature to swim upstream.
-   - *External:* dependency, platform, or data source imposes the limitation.
-   - *Historical:* accreted over time; no single decision, just drift.
-   Writer must tie every pain point to at least one cause at at least one layer.
-5. **Impact + urgency** — who is affected, how often, severity (blocking / degrading / cosmetic), any time pressure (deadline, regression trend).
-6. **Constraints** (optional but recommended) — what the plan is allowed / not allowed to touch. Hard dependencies, compatibility, regulatory.
+No solutions in analysis — those belong in `design`.
 
-No "solutions" in analysis — those belong in `design.html`. The rule: analysis describes reality (including the reality of the code); design describes the change.
+## Phase B must-ask fields
+
+1. `problem` — the one-sentence framing.
+2. `successCriterion` — measurable.
+3. `painPoints` — Architect proposes from code reading; user confirms scope.
+4. `hypotheses` — Architect proposes ranked list with falsifiable form; user accepts/reorders.
+
+## Render rules (Phase C)
+
+- §1 Current state opens with control-flow diagram (mermaid or SVG).
+- §2-3 Problem + criterion as callout.
+- §4 Pain points as a table (id · kind · summary · cite).
+- §5 Root causes as a 2-column table (pain point → cause).
+- §6 Hypotheses as ranked list (`<ol>` with falsifiable subtext).
+- §7 Impact as `<dl>`.
+- Cite EVERY code finding with `path:line`. Vague prose is not analysis.
 
 ## Notes for /plan-gen
 
-- Can run without a scenario (just a repo path) — in that case, skip the manifest and write to `plans/.analysis/<repoName>-analysis.html`.
-- Agent team: PM frames the problem + writes §2/§3 business side / §5; Architect reads the actual code paths, writes §1 code-logic / §3 code-level pain points / §4; Writer assembles.
-- The Architect should cite specific files+lines in §1, §3, §4. Vague prose ("the sync layer has issues") is not an analysis finding — "`sync/worker.ts:128` swallows `ECONNRESET` and returns `null`, which the caller treats as empty data" is.
-- When the user adds new facts after analysis is generated, re-run `/plan-gen analysis` — do not let design drift ahead of an outdated problem statement.
+- Can still run without a scenario (just a repo path) → writes to `plans/.analysis/<repoName>-analysis.html` (v1 fallback).
+- When `--cascade` (from `/plan-sync`), pass field allowlist to grill.
+- When `product.meta.json` is missing in v2 mode, prompt: "no product doc — generate first? [Y/skip]".
+
+## Task list
+
+Seed TodoWrite at the start of `/plan-gen analysis`. Tick `in_progress` → `completed` as you go.
+
+1. Phase A · read product.meta.json + _shared/context + glossary
+2. Phase A · trace currentState.productFlow + codeLogic[] from repo
+3. Phase A · draft problem + successCriterion (one sentence each)
+4. Phase A · draft painPoints[] with file:line citations
+5. Phase A · draft rootCauses[] mapping pain → layer
+6. Phase A · draft ranked hypotheses[] in falsifiable form
+7. Phase A · draft impactUrgency + constraints[]
+8. Phase B · grill problem + successCriterion framing
+9. Phase B · grill painPoints[] scope (kind + cite)
+10. Phase B · grill hypotheses[] ranking + falsifiability
+11. Phase C · render analysis.html (mermaid flow + tables)
+12. Phase C · embed canonical meta script + lint pass + record manifest hash

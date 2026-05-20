@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+# pre-commit hook: structural lint for v2 HTML docs.
+# Install once per clone:
+#   git config core.hooksPath .githooks
+#
+# Skips when no staged .html files under plan-harness/ exist.
+
+set -e
+
+staged_html=$(git diff --cached --name-only --diff-filter=ACM | grep -E '^plan-harness/.+\.html?$' || true)
+if [ -z "$staged_html" ]; then
+  exit 0
+fi
+
+echo "[pre-commit] html-lint: $(echo "$staged_html" | wc -l | tr -d ' ') file(s)"
+
+# shellcheck disable=SC2086
+node local-proxy/src/lint-cli.js $staged_html
