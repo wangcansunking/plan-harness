@@ -21,6 +21,26 @@ claude plugin install plan-harness@can-claude-plugins
 /plan-gen                   # generate docs (multi-select UI)
 ```
 
+### Dogfood / local development
+
+Hacking on plan-harness itself? Install it straight from your local clone as a marketplace — no publish step, and `/reload-plugins` picks up changes as you edit:
+
+```bash
+# 1. Clone (once)
+git clone https://github.com/wangcansunking/plan-harness ~/repos/plan-harness
+
+# 2. Register the local checkout as a marketplace
+claude plugin marketplace add ~/repos/plan-harness
+
+# 3. Install from that local marketplace
+claude plugin install plan-harness@can-claude-plugins
+
+# 4. After editing skills / prompts / commands, reload in-session
+/reload-plugins
+```
+
+The plugin cache mirrors `dist/index.js` (committed), so the local-proxy MCP server runs without a build step. If you change `local-proxy/src/*`, run `cd local-proxy && npm run dev` to rebuild + sync the cache.
+
 ![plan-harness overview](docs/screenshots/01-overview-hero.png)
 
 ## Why

@@ -21,6 +21,26 @@ claude plugin install plan-harness@can-claude-plugins
 /plan-gen                   # 生成文档（多选 UI）
 ```
 
+### Dogfood / 本地开发
+
+想直接基于本地源码迭代 plan-harness？把本地 clone 当成 marketplace 注册即可，省去发布环节，编辑后 `/reload-plugins` 就能生效：
+
+```bash
+# 1. 克隆一次
+git clone https://github.com/wangcansunking/plan-harness ~/repos/plan-harness
+
+# 2. 把本地目录注册为 marketplace
+claude plugin marketplace add ~/repos/plan-harness
+
+# 3. 从该 marketplace 安装
+claude plugin install plan-harness@can-claude-plugins
+
+# 4. 改完 skills / prompts / commands 之后，在会话里重新加载
+/reload-plugins
+```
+
+插件 cache 直接镜像已提交的 `dist/index.js`，所以 local-proxy MCP server 不用 build 就能跑。如果改了 `local-proxy/src/*`，到 `local-proxy` 目录跑 `npm run dev` 重新打包并同步 cache。
+
 ![plan-harness 总览](docs/screenshots/01-overview-hero.png)
 
 ## 为什么
