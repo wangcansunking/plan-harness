@@ -9,7 +9,8 @@
  */
 
 import { readdir, readFile, writeFile, mkdir, stat } from "node:fs/promises";
-import { join, basename, extname, relative, sep } from "node:path";
+import { join, basename, extname, relative, sep, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -37,25 +38,107 @@ async function safeStat(filePath) {
   }
 }
 
-/** Map a file extension to a human-readable plan type. */
-function planTypeFromName(fileName) {
-  const base = basename(fileName, extname(fileName)).toLowerCase();
-  const map = {
-    design: "design",
-    "test-plan": "test-plan",
-    "state-machine": "state-machine",
-    "test-cases": "test-cases",
-    "test-report": "test-report",
-    "implementation-plan": "implementation-plan",
-    dashboard: "dashboard",
-    manifest: "manifest",
-  };
-  return map[base] ?? "other";
+// ---------------------------------------------------------------------------
+// Doc-type registry (K3 fix): data-driven from skills/plan-gen/types/*.md
+//
+// v1 was hardcoded to 7 doc names. v2 docs (product/test-spec) fell through
+// to "other" and never appeared on the dashboard. Now the registry is loaded
+// from disk at module-init time and refreshed on demand.
+// ---------------------------------------------------------------------------
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+
+/** Built-in fallback registry. Used when types/ dir is unreadable.
+ *  Each entry: doc-type name -> array of acceptable file basenames. */
+const FALLBACK_REGISTRY = {
+  product:          ["product"],
+  analysis:         ["analysis"],
+  design:           ["design"],
+  "state-machine":  ["state-machine"],
+  "test-spec":      ["test-spec"],
+  implementation:   ["implementation", "implementation-plan"],
+  "test-report":    ["test-report"],
+  // v1 legacy (still readable on old scenarios)
+  "test-plan":      ["test-plan"],
+  "test-cases":     ["test-cases"],
+  // top-level
+  dashboard:        ["dashboard"],
+  manifest:         ["manifest"],
+};
+
+let _registryCache = null;
+
+/**
+ * Load the doc-type registry by scanning `skills/plan-gen/types/*.md`.
+ * Falls back to FALLBACK_REGISTRY if the dir is unreadable.
+ *
+ * Each .md file's basename is the registry key; the recognised output basenames
+ * come from the "Output filename" row of the table header. We grep for
+ * `<doc-basename>.html` so adding a 9th doc type means dropping in one .md file
+ * with no plan-manager.js edit.
+ */
+async function loadRegistry() {
+  if (_registryCache) return _registryCache;
+
+  // The plugin is installed under .claude/plugins/.../local-proxy/src/.
+  // Walk up to plan-harness/ and into skills/plan-gen/types/.
+  const candidates = [
+    join(__dirname, "..", "..", "skills", "plan-gen", "types"),    // dev: repo/local-proxy/src -> repo/skills/...
+    join(__dirname, "..", "..", "..", "skills", "plan-gen", "types"), // installed plugin layout
+  ];
+
+  const registry = { ...FALLBACK_REGISTRY };
+
+  for (const dir of candidates) {
+    let entries;
+    try {
+      entries = await readdir(dir, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    for (const entry of entries) {
+      if (!entry.isFile() || !entry.name.endsWith(".md")) continue;
+      const docType = basename(entry.name, ".md");
+      // Read the file and extract candidate filenames from "Output filename" row.
+      try {
+        const md = await readFile(join(dir, entry.name), "utf-8");
+        const m = md.match(/Output filename[^|]*\|([^|]+)\|/);
+        const candidates = [docType];
+        if (m) {
+          const matches = m[1].match(/`?([a-z0-9-]+)\.(?:html|meta\.json)`?/gi) || [];
+          for (const hit of matches) {
+            const name = hit.replace(/`/g, "").replace(/\.(html|meta\.json)$/i, "");
+            if (name && !candidates.includes(name)) candidates.push(name);
+          }
+        }
+        registry[docType] = candidates;
+      } catch {
+        // keep fallback entry for this type
+      }
+    }
+    break; // first readable candidate wins
+  }
+
+  _registryCache = registry;
+  return registry;
+}
+
+/** Map a filename to a human-readable doc-type. Async (loads registry). */
+async function planTypeFromName(fileName) {
+  const base = basename(fileName, extname(fileName)).toLowerCase()
+    .replace(/\.meta$/, "");  // foo.meta.json -> foo.meta -> foo
+  const registry = await loadRegistry();
+  for (const [docType, candidates] of Object.entries(registry)) {
+    if (candidates.includes(base)) return docType;
+  }
+  return "other";
 }
 
 /**
- * Recursively walk a directory tree looking for directories named `plans`.
- * Returns an array of absolute paths (forward-slash normalised).
+ * Recursively walk a directory tree looking for plan-root directories.
+ * v2 root is `plan-harness/`; v1 root is `plans/`. Both are returned so
+ * mixed repos continue to work. Returns absolute forward-slash paths.
  */
 async function findPlansDirs(dir, maxDepth = 5, currentDepth = 0) {
   if (currentDepth > maxDepth) return [];
@@ -71,7 +154,6 @@ async function findPlansDirs(dir, maxDepth = 5, currentDepth = 0) {
   for (const entry of entries) {
     if (!entry.isDirectory()) continue;
 
-    // Skip common heavy/irrelevant directories
     const name = entry.name;
     if (
       name === "node_modules" ||
@@ -88,10 +170,9 @@ async function findPlansDirs(dir, maxDepth = 5, currentDepth = 0) {
 
     const fullPath = join(dir, name);
 
-    if (name === "plans") {
+    if (name === "plan-harness" || name === "plans") {
       results.push(norm(fullPath));
     } else {
-      // Recurse deeper
       const nested = await findPlansDirs(fullPath, maxDepth, currentDepth + 1);
       results.push(...nested);
     }
@@ -131,24 +212,46 @@ export async function listScenarios(workspaceRoot) {
       for (const entry of scenarioEntries) {
         if (!entry.isDirectory()) continue;
 
+        // Skip `_shared/` and other non-scenario dirs at plan-harness/ root
+        if (entry.name.startsWith("_") || entry.name.startsWith(".")) continue;
+
         const scenarioPath = norm(join(plansDir, entry.name));
         const files = await getScenarioFiles(scenarioPath);
         const fileNames = files.map((f) => f.name.toLowerCase());
+
+        // K3 fix: data-driven doc presence map (any doc type in registry).
+        const registry = await loadRegistry();
+        const docs = {};
+        for (const docType of Object.keys(registry)) {
+          if (docType === "manifest" || docType === "dashboard") continue;
+          const candidates = registry[docType] || [docType];
+          docs[docType] = candidates.some((c) => fileNames.includes(`${c}.html`));
+        }
+
+        // Detect manifest schemaVersion for v1/v2 reporting.
+        const manifest = await readJson(join(scenarioPath, "manifest.json"));
+        const schemaVersion = manifest?.schemaVersion ?? 1;
 
         scenarios.push({
           repoRoot,
           scenario: entry.name,
           scenarioPath,
           files,
-          hasAnalysis: fileNames.includes("analysis.html"),
-          hasDesign: fileNames.includes("design.html"),
-          hasTestPlan: fileNames.includes("test-plan.html"),
-          hasStateMachine: fileNames.includes("state-machine.html"),
-          hasTestCases: fileNames.includes("test-cases.html"),
-          hasImplementationPlan: fileNames.includes("implementation-plan.html"),
+          schemaVersion,
+          docs,
+          // v1 back-compat flags (some consumers still read these directly)
+          hasAnalysis: !!docs.analysis,
+          hasDesign: !!docs.design,
+          hasTestPlan: !!docs["test-plan"],
+          hasStateMachine: !!docs["state-machine"],
+          hasTestCases: !!docs["test-cases"],
+          hasImplementationPlan: !!docs.implementation || !!docs["implementation-plan"],
           hasDashboard: fileNames.includes("dashboard.html"),
           hasReviewReport: fileNames.includes("review-report.html"),
-          hasTestReport: fileNames.includes("test-report.html"),
+          hasTestReport: !!docs["test-report"],
+          // v2 new
+          hasProduct: !!docs.product,
+          hasTestSpec: !!docs["test-spec"],
         });
       }
     }
@@ -169,8 +272,6 @@ export async function listScenarios(workspaceRoot) {
  */
 export async function createScenario(repoRoot, scenarioName, metadata = {}) {
   // Sanitise the scenario name for use as a directory name.
-  // Strip path-hostile chars, collapse whitespace, strip leading dots so that
-  // "../../outside" cannot escape plans/ via relative-path tricks.
   const safeName = scenarioName
     .replace(/[<>:"/\\|?*]/g, "-")
     .replace(/\s+/g, "-")
@@ -182,17 +283,21 @@ export async function createScenario(repoRoot, scenarioName, metadata = {}) {
     throw new Error(`Invalid scenario name: "${scenarioName}"`);
   }
 
-  const plansRoot = join(repoRoot, "plans");
+  // v2 default: write under plan-harness/. Legacy callers can pass
+  // `{ rootDir: "plans" }` to force the v1 path.
+  const rootDir = metadata.rootDir === "plans" ? "plans" : "plan-harness";
+  const plansRoot = join(repoRoot, rootDir);
   const scenarioPath = join(plansRoot, safeName);
 
-  // Defence in depth: assert final path stays under plans/
+  // Defence in depth: assert final path stays under the chosen root.
   const rel = relative(plansRoot, scenarioPath);
   if (rel.startsWith("..") || rel.includes(sep + "..") || rel === "") {
-    throw new Error(`Scenario path escapes plans/: "${scenarioName}" -> "${safeName}"`);
+    throw new Error(`Scenario path escapes ${rootDir}/: "${scenarioName}" -> "${safeName}"`);
   }
 
   await mkdir(scenarioPath, { recursive: true });
 
+  const isV2 = rootDir === "plan-harness";
   const manifest = {
     scenario: safeName,
     displayName: scenarioName,
@@ -201,6 +306,12 @@ export async function createScenario(repoRoot, scenarioName, metadata = {}) {
     createdAt: new Date().toISOString(),
     tags: metadata.tags ?? [],
     status: metadata.status ?? "draft",
+    ...(isV2 && {
+      schemaVersion: 2,
+      metaHashes: {},
+      upstreamHashes: {},
+      sharedAssets: {},
+    }),
   };
 
   const manifestPath = join(scenarioPath, "manifest.json");
@@ -234,7 +345,7 @@ export async function getScenarioFiles(scenarioPath) {
     files.push({
       name: entry.name,
       path: filePath,
-      type: planTypeFromName(entry.name),
+      type: await planTypeFromName(entry.name),
       size: fileStat?.size ?? 0,
       modified: fileStat?.mtime?.toISOString() ?? "",
     });

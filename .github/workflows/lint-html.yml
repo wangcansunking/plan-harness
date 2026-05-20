@@ -1,0 +1,29 @@
+name: lint-html
+
+on:
+  pull_request:
+    paths:
+      - 'plan-harness/**/*.html'
+      - 'local-proxy/src/html-lint.js'
+      - 'local-proxy/src/lint-cli.js'
+      - 'prompts/_html-base.md'
+  push:
+    branches: [main]
+    paths:
+      - 'plan-harness/**/*.html'
+      - 'local-proxy/src/html-lint.js'
+      - 'local-proxy/src/lint-cli.js'
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Install deps
+        working-directory: local-proxy
+        run: npm ci --omit=dev --no-audit --no-fund
+      - name: Lint v2 HTML
+        run: node local-proxy/src/lint-cli.js --warn-as-error

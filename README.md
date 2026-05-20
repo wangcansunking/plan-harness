@@ -4,7 +4,7 @@
 
 # plan-harness
 
-A Claude Code plugin that turns the spec / plan phase of a project into a repeatable, high-quality process. Specialized agent teams generate interconnected HTML plan documents — design, state-machines, test plans, test cases, implementation plans — with composable markdown contexts that adapt the output to your project, scenario, and style.
+A Claude Code plugin that turns the spec / plan phase of a project into a repeatable, high-quality process. Specialized agent teams generate interconnected HTML plan documents — PRD, analysis, design, state-machines, test specs, implementation plans, test reports — backed by a structured `meta.json` source-of-truth per doc, with composable markdown contexts that adapt the output to your project, scenario, and style.
 
 ## Install
 
@@ -21,6 +21,26 @@ claude plugin install plan-harness@can-claude-plugins
 /plan-gen                   # generate docs (multi-select UI)
 ```
 
+### Dogfood / local development
+
+Hacking on plan-harness itself? Install it straight from your local clone as a marketplace — no publish step, and `/reload-plugins` picks up changes as you edit:
+
+```bash
+# 1. Clone (once)
+git clone https://github.com/wangcansunking/plan-harness ~/repos/plan-harness
+
+# 2. Register the local checkout as a marketplace
+claude plugin marketplace add ~/repos/plan-harness
+
+# 3. Install from that local marketplace
+claude plugin install plan-harness@can-claude-plugins
+
+# 4. After editing skills / prompts / commands, reload in-session
+/reload-plugins
+```
+
+The plugin cache mirrors `dist/index.js` (committed), so the local-proxy MCP server runs without a build step. If you change `local-proxy/src/*`, run `cd local-proxy && npm run dev` to rebuild + sync the cache.
+
 ![plan-harness overview](docs/screenshots/01-overview-hero.png)
 
 ## Why
@@ -29,8 +49,12 @@ Most "AI design doc" tools run a single prompt against a vague brief. plan-harne
 
 - **Context decides everything.** Composable `.md` contexts capture project paths, conventions, API maps, and generation rules. The more specific the context, the better the plan.
 - **A real agent team**, not one prompt. Architect, PM, Frontend Dev, Backend Dev, Tester, Writer — each agent sees only the slice of context it needs.
-- **One dispatcher**, seven doc types. `/plan-gen` picks any subset (design, state-machine, test-plan, test-cases, implementation, test-report, analysis) via a multi-select UI or CLI argument.
-- **Interactive HTML**, fully self-contained. Every generated file inlines all CSS + JS. Zero CDN, zero deps. Open in any browser, print to PDF, share with teammates.
+- **Meta as source of truth.** Every doc has a `<doc>.meta.json` SoT plus an HTML view that re-embeds it byte-for-byte. Downstream agents read structured upstream meta — not散 prose — so generation stays deterministic.
+- **Three-phase generation.** Phase A drafts meta silently from upstream + code; Phase B grills the user one field at a time; Phase C renders the HTML view. Skip Phase B with `--no-grill` when you want speed over quality.
+- **One dispatcher**, 7 scenario doc types + 3 shared repo assets. `/plan-gen` picks any subset (product, analysis, design, state-machine, test-spec, implementation, test-report, plus shared `context` / `glossary` / `decisions`) via a multi-select UI or CLI argument.
+- **Hash-based cascade.** `/plan-sync` compares `metaHashes` to find stale downstream docs and runs a diff-aware grill that only re-asks the fields actually affected by an upstream change. `/plan-edit` lets you tweak a single doc's fields without cascading.
+- **Interactive HTML**, self-contained. Every generated file inlines CSS + JS. Open in any browser, print to PDF, share with teammates. Mermaid and SVG diagrams render offline.
+- **Auto-served dashboard.** `/plan-init` starts a local HTTP server on `localhost:3847` and opens the workspace dashboard automatically. Root-absolute links (`/<scenario>/<doc>.html`) keep cross-doc navigation working.
 - **Review + revise loop.** Section-by-section critiques, cross-doc consistency checks, and batched writer-agent proposals on reviewer comments.
 - **Shareable.** One command publishes a plan-set via devtunnel — public, private, or password-protected — without leaving Claude Code.
 
@@ -41,39 +65,39 @@ Most "AI design doc" tools run a single prompt against a vague brief. plan-harne
 One command generates any plan document. Pick one or several types via a multi-select UI, or pass a type directly:
 
 ```
-/plan-gen                   # interactive multi-select
-/plan-gen design            # just design.html
-/plan-gen design test-plan  # design + test-plan, in topological order
-/plan-gen all               # delegate to /plan-full
+/plan-gen                        # interactive multi-select
+/plan-gen design                 # just design.html (+ meta.json)
+/plan-gen analysis design        # both, in topological order
+/plan-gen all                    # delegate to /plan-full
+/plan-gen design --no-grill      # skip Phase B (faster, lower quality)
 ```
 
-Dependencies between doc types (analysis → design → state-machine / test-plan → test-cases → implementation → test-report) are resolved automatically so downstream docs read the freshly generated upstream output. See [§Canonical workflow](#canonical-workflow) below.
+Dependencies (product → analysis → design → {state-machine, test-spec} → implementation → test-report) are resolved automatically so downstream docs read freshly generated upstream meta. See [§Canonical workflow](#canonical-workflow) below.
 
 ### Canonical workflow
 
 ```
-analysis  →  design  ┬─►  state-machine  ─────────────────┐
-                     │                                      │
-                     ├─►  test-plan   ─►  test-cases  ─────┤
-                     │                                      │
-                     └─►  implementation   ◄────────────────┘
-                              │
-                              └─►  test-report
+product  →  analysis  →  design  ┬─►  state-machine  ─┐
+                                  ├─►  test-spec  ◄────┤
+                                  └─►  implementation ◄┤
+                                            └─►  test-report ◄─┘
 ```
 
 Hard (required) vs. soft (optional) edges:
 
 | Doc | Required upstream | Optional upstream |
 |---|---|---|
-| `analysis` | — | — |
-| `design` | — | `analysis` |
+| `product` | — | `_shared/glossary` |
+| `analysis` | `product` | `_shared/{context, glossary, decisions}` |
+| `design` | `analysis` | — |
 | `state-machine` | `design` | — |
-| `test-plan` | `design` | — |
-| `test-cases` | `design`, `test-plan` | — |
-| `implementation` | `design` | `state-machine`, `test-plan`, `test-cases` |
-| `test-report` | `test-plan` | `implementation` |
+| `test-spec` | `design` | `state-machine` |
+| `implementation` | `design` | `state-machine`, `test-spec` |
+| `test-report` | `test-spec` | `implementation` |
 
-`/plan-gen` topologically sorts whatever subset you pick. `/plan-full` walks the whole thing with review checkpoints. `/plan-sync` cascades a single upstream edit down to every affected doc.
+Shared assets (`context`, `glossary`, `decisions`) live in `plan-harness/_shared/` and surface via a header link on every scenario doc. They're never on the scenario DAG — `/plan-sync` flags scenarios with stale shared-asset hashes but doesn't auto-cascade them (to avoid noise).
+
+`/plan-gen` topologically sorts whatever subset you pick. `/plan-full` walks the whole thing with review checkpoints. `/plan-sync` cascades a single upstream edit down to every affected doc using `metaHashes` diffs. `/plan-edit` tweaks one doc's fields without cascading.
 
 ### Plugin architecture at a glance
 
@@ -113,11 +137,12 @@ Each context `.md` uses frontmatter (`name`, `description`, `tags`, `agents`) so
 | Command | What it does |
 |---|---|
 | `/plan-context` | Create, list, edit, import context files |
-| `/plan-init` | Multi-select contexts + create / select a scenario |
-| `/plan-gen` | Unified generator — pick any subset of doc types |
+| `/plan-init` | Multi-select contexts + create / select a scenario; auto-starts dashboard server |
+| `/plan-gen` | Unified generator — pick any subset of doc types; runs Phase A draft → Phase B grill → Phase C render |
 | `/plan-full` | Orchestrate the whole workflow with checkpoints |
-| `/plan-sync` | Cascade-regenerate downstream docs after upstream edits |
-| `/plan-test` | Run `test-plan.html` scenarios end-to-end via Playwright MCP |
+| `/plan-sync` | Hash-diff cascade — regenerate only the downstream fields actually affected by an upstream edit |
+| `/plan-edit` | Local edit of one doc's fields via a hint (no cascade) |
+| `/plan-test` | Run `test-spec.html` scenarios end-to-end via Playwright MCP |
 | `/plan-share` | Share plan docs via devtunnel (public / private / password) |
 | `/plan-review` | Section-by-section review of one document |
 | `/plan-review-cycle` | Full review with cross-document consistency |
@@ -162,19 +187,46 @@ plan-harness/
   .claude-plugin/plugin.json         Plugin metadata
   .mcp.json                          MCP server wiring
   contexts/                          Built-in context templates (feature-planning, performance-audit, lean)
-  prompts/                           6 agent role templates
-  skills/                            10 skill definitions (SKILL.md each)
+  prompts/                           6 agent role templates + 3 shared mixins
+    _html-base.md                    HTML skeleton, palette, sidebar shape, meta-embed contract
+    _grill-mixin.md                  Phase B interview rules (adapted from mattpocock/skills)
+    _caveman-mixin.md                Caveman-style render priorities
+  skills/                            Slash command definitions (SKILL.md each)
+    plan-gen/types/                  Per-doc-type contracts (product, analysis, design, ...)
   local-proxy/                       Node MCP server + web dashboard
     start.js                         Bootstrap (auto-installs deps)
     src/
-      index.js                       MCP server (12 tools, stdio)
-      plan-manager.js                Plan file operations
-      web-server.js                  HTTP dashboard (node:http)
+      index.js                       MCP server (stdio)
+      plan-manager.js                Plan file operations (v1 + v2)
+      manifest-v2.js                 v2 manifest: schemaVersion, metaHashes, hash util
+      web-server.js                  HTTP dashboard (node:http) — serves both plan-harness/ and plans/
       templates/base.js              Self-contained HTML template system
   docs/
-    overview.html                    Static plugin overview (rendered in the screenshots above)
+    overview.html                    Static plugin overview
     context-design.md                Context system design document
     screenshots/                     Images used by this README
+```
+
+Scenarios you generate land in your target repo:
+
+```
+<target-repo>/
+  plan-harness/                      v2 root (preferred; new scenarios go here)
+    _shared/                         Cross-scenario assets (header link)
+      context/                       Code architecture
+      glossary/                      Domain language
+      decisions/                     ADRs
+      dashboard.html                 Workspace dashboard
+    <scenario-slug>/
+      manifest.json                  schemaVersion: 2, metaHashes, upstreamHashes
+      product.{meta.json, html}
+      analysis.{meta.json, html}
+      design.{meta.json, html}
+      state-machine.{meta.json, html}
+      test-spec.{meta.json, html}
+      implementation.{meta.json, html}
+      test-report.{meta.json, html}
+  plans/                             v1 root (legacy; read-only, still served)
 ```
 
 ## Development

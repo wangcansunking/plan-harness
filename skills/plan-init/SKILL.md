@@ -204,7 +204,7 @@ Print a formatted summary to the user:
 Contexts:     devxapps-project + performance-audit
 Repository:   DevXApps
 Scenario:     portal-perf-opt
-Path:         C:/MCDC/DevXApps/plans/portal-perf-opt
+Path:         C:/MCDC/DevXApps/plan-harness/portal-perf-opt
 Description:  Optimize portal page load performance
 Work Item:    ADO#123456
 
@@ -223,13 +223,42 @@ Project Type: mixed (.NET + Node)
 Tech Stack:   React, TypeScript, .NET/C#, Azure Functions
 Patterns:     MSBuild traversal, Jest testing
 
+--- Dashboard ---
+Server:      http://localhost:3847 (auto-started)
+Dashboard:   http://localhost:3847/_shared/dashboard.html
+Scenario:    http://localhost:3847/scenario/portal-perf-opt
+
 --- Next Steps ---
+  /plan-gen product         Write the PRD
   /plan-gen analysis        Collect performance data
-  /plan-gen design         Design optimization strategy
-  /plan-full           Run full planning workflow (4 documents)
+  /plan-gen design          Design optimization strategy
+  /plan-full                Run full planning workflow (8 documents)
 ```
 
 The "Next Steps" section only lists skills whose documents are enabled by the selected generation rules context. For example, with `performance-audit` selected, don't suggest `/plan-gen state-machine` or `/plan-gen test-cases`.
+
+### Step 7: Auto-start the dashboard server
+
+After Step 6 completes, **always** start the local dashboard server (unless `--no-server` was passed) so the user can review live as they generate docs.
+
+1. Call MCP tool `plan_serve_dashboard` with the workspace root. It will:
+   - Reuse the existing server if already running on port 3847.
+   - Pick the next free port if 3847 is busy.
+   - Return `{ port, url }`.
+2. Open the user's browser to `http://localhost:<port>/_shared/dashboard.html` for v2 scenarios, or `http://localhost:<port>/` for v1 / mixed workspaces.
+   - macOS: `open <url>`
+   - Linux: `xdg-open <url>`
+   - Windows: `start <url>` via `cmd`
+3. If the MCP tool errors (port permission, etc.), print the error inline and continue — do NOT block plan-init on dashboard availability.
+4. If the user passed `--no-server`, skip this step entirely.
+
+Subsequent `/plan-gen` runs detect an already-running server via `isDashboardRunning()` and reuse it; no duplicate spawn.
+
+### Notes on v1 / v2 paths
+
+- New scenarios created via `plan_create_scenario` land under `plan-harness/<scenario>/` (v2 default, manifest `schemaVersion: 2`).
+- Existing scenarios under `plans/<scenario>/` remain read-only — `/plan-init` lists them in Step 3 but new `/plan-gen` runs will refuse unless `--allow-v1` is passed.
+- The dashboard surfaces both v1 and v2 scenarios in the same list, with a small `v1` / `v2` badge per row.
 
 ## How Skills Load Contexts
 

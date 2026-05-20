@@ -4,7 +4,7 @@
 
 # plan-harness
 
-一个 Claude Code 插件，把项目的 spec / plan 阶段变成可复制、高质量的流水线。专职 agent 团队生成相互关联的 HTML 规划文档 — 设计文档、状态机、测试计划、测试用例、实施计划 — 配合可组合的 markdown context 让输出贴合你自己的项目、场景和风格。
+一个 Claude Code 插件，把项目的 spec / plan 阶段变成可复制、高质量的流水线。专职 agent 团队生成相互关联的 HTML 规划文档 — PRD、analysis、design、状态机、test-spec、实施计划、test-report — 每个文档背后有结构化的 `meta.json` 作为 source-of-truth，配合可组合的 markdown context 让输出贴合你自己的项目、场景和风格。
 
 ## 安装
 
@@ -21,6 +21,26 @@ claude plugin install plan-harness@can-claude-plugins
 /plan-gen                   # 生成文档（多选 UI）
 ```
 
+### Dogfood / 本地开发
+
+想直接基于本地源码迭代 plan-harness？把本地 clone 当成 marketplace 注册即可，省去发布环节，编辑后 `/reload-plugins` 就能生效：
+
+```bash
+# 1. 克隆一次
+git clone https://github.com/wangcansunking/plan-harness ~/repos/plan-harness
+
+# 2. 把本地目录注册为 marketplace
+claude plugin marketplace add ~/repos/plan-harness
+
+# 3. 从该 marketplace 安装
+claude plugin install plan-harness@can-claude-plugins
+
+# 4. 改完 skills / prompts / commands 之后，在会话里重新加载
+/reload-plugins
+```
+
+插件 cache 直接镜像已提交的 `dist/index.js`，所以 local-proxy MCP server 不用 build 就能跑。如果改了 `local-proxy/src/*`，到 `local-proxy` 目录跑 `npm run dev` 重新打包并同步 cache。
+
 ![plan-harness 总览](docs/screenshots/01-overview-hero.png)
 
 ## 为什么
@@ -29,8 +49,12 @@ claude plugin install plan-harness@can-claude-plugins
 
 - **Context 决定一切。**可组合的 `.md` context 承载项目路径、约定、API 地图、生成规则。context 越具体，plan 越好。
 - **真正的 agent 团队**，不是单个 prompt。Architect、PM、Frontend Dev、Backend Dev、Tester、Writer — 每个 agent 只看自己需要的那部分 context。
-- **一个分派器**，七种文档。`/plan-gen` 通过多选 UI 或参数挑选任意子集（design / state-machine / test-plan / test-cases / implementation / test-report / analysis）。
-- **交互式 HTML**，完全自包含。每个生成文件内联所有 CSS + JS。无 CDN、无外部依赖。任意浏览器打开、打印 PDF、发给同事都行。
+- **Meta 作为 SoT。** 每个文档都有 `<doc>.meta.json` 作为唯一来源，HTML 是视图、内嵌 meta 与外部 `meta.json` 字节级一致。下游 agent 读结构化上游 meta，不再 parse 散文 — 生成保持确定性。
+- **三段式生成。** Phase A 静默从上游 meta + 代码起草；Phase B 一次一问 grill 用户；Phase C 渲染 HTML。`--no-grill` 跳过 Phase B（快但质量低）。
+- **一个分派器**，7 种 scenario 文档 + 3 种共享 repo 资产。`/plan-gen` 通过多选 UI 或参数挑选任意子集（product / analysis / design / state-machine / test-spec / implementation / test-report，外加共享 `context` / `glossary` / `decisions`）。
+- **基于 hash 的级联。** `/plan-sync` 比对 `metaHashes` 找出 stale 下游，跑 diff-aware grill — 只重新询问被上游变更实际影响的字段。`/plan-edit` 改单文档子字段，不级联。
+- **交互式 HTML**，自包含。每个生成文件内联 CSS + JS。任意浏览器打开、打印 PDF、发给同事都行。Mermaid 和 SVG 图离线渲染。
+- **自动起 dashboard。** `/plan-init` 完成后自动在 `localhost:3847` 起 HTTP server 并打开 workspace dashboard。Root-absolute 链接（`/<scenario>/<doc>.html`）保证跨文档跳转不挂。
 - **Review + Revise 循环。**按 section 逐段 review、跨文档一致性校验、对 reviewer 的评论批量派发 writer agent 生成提案。
 - **可分享。**一条命令通过 devtunnel 把整套 plan 发出去 — 公开、私有、或带密码 — 不用离开 Claude Code。
 
@@ -41,39 +65,39 @@ claude plugin install plan-harness@can-claude-plugins
 一条命令生成任意规划文档。多选 UI 挑选一个或多个类型，也可以直接传参：
 
 ```
-/plan-gen                   # 交互式多选
-/plan-gen design            # 只生成 design.html
-/plan-gen design test-plan  # design + test-plan，按拓扑顺序
-/plan-gen all               # 转交给 /plan-full
+/plan-gen                        # 交互式多选
+/plan-gen design                 # 只生成 design.html (+ meta.json)
+/plan-gen analysis design        # 两者按拓扑顺序
+/plan-gen all                    # 转交给 /plan-full
+/plan-gen design --no-grill      # 跳过 Phase B（更快但质量低）
 ```
 
-文档类型之间的依赖（analysis → design → state-machine / test-plan → test-cases → implementation → test-report）自动解析，下游文档读的是本次刚生成的上游输出。完整顺序见下方 [§标准工作流](#标准工作流)。
+文档类型之间的依赖（product → analysis → design → {state-machine, test-spec} → implementation → test-report）自动解析，下游文档读的是本次刚生成的上游 meta。完整顺序见下方 [§标准工作流](#标准工作流)。
 
 ### 标准工作流
 
 ```
-analysis  →  design  ┬─►  state-machine  ─────────────────┐
-                     │                                      │
-                     ├─►  test-plan   ─►  test-cases  ─────┤
-                     │                                      │
-                     └─►  implementation   ◄────────────────┘
-                              │
-                              └─►  test-report
+product  →  analysis  →  design  ┬─►  state-machine  ─┐
+                                  ├─►  test-spec  ◄────┤
+                                  └─►  implementation ◄┤
+                                            └─►  test-report ◄─┘
 ```
 
 硬依赖（必需）与软依赖（可选）：
 
 | 文档 | 必需上游 | 可选上游 |
 |---|---|---|
-| `analysis` | — | — |
-| `design` | — | `analysis` |
+| `product` | — | `_shared/glossary` |
+| `analysis` | `product` | `_shared/{context, glossary, decisions}` |
+| `design` | `analysis` | — |
 | `state-machine` | `design` | — |
-| `test-plan` | `design` | — |
-| `test-cases` | `design`, `test-plan` | — |
-| `implementation` | `design` | `state-machine`, `test-plan`, `test-cases` |
-| `test-report` | `test-plan` | `implementation` |
+| `test-spec` | `design` | `state-machine` |
+| `implementation` | `design` | `state-machine`, `test-spec` |
+| `test-report` | `test-spec` | `implementation` |
 
-`/plan-gen` 会对你挑的子集做拓扑排序;`/plan-full` 带 checkpoint 跑完整条流水线;`/plan-sync` 把某个上游的改动级联到所有下游。
+共享资产（`context` / `glossary` / `decisions`）落在 `plan-harness/_shared/`，通过 scenario 文档的 header link 出现。它们不在 scenario DAG 上 — `/plan-sync` 会标记 stale 但不自动级联（避免噪音）。
+
+`/plan-gen` 对你挑的子集做拓扑排序；`/plan-full` 带 checkpoint 跑完整条流水线；`/plan-sync` 用 `metaHashes` diff 把上游改动级联到下游；`/plan-edit` 改单文档字段，不级联。
 
 ### 插件架构一览
 
@@ -113,11 +137,12 @@ devxapps-project.md          （项目：构建、约定、架构）
 | 命令 | 作用 |
 |---|---|
 | `/plan-context` | 创建、列出、编辑、导入 context 文件 |
-| `/plan-init` | 多选 context + 创建/选择 scenario |
-| `/plan-gen` | 统一生成器 — 任意挑选文档类型子集 |
+| `/plan-init` | 多选 context + 创建/选择 scenario；自动起 dashboard server |
+| `/plan-gen` | 统一生成器 — 任意挑选文档类型子集；跑 Phase A draft → Phase B grill → Phase C render |
 | `/plan-full` | 带检查点编排整个工作流 |
-| `/plan-sync` | 上游变更后级联重生下游文档 |
-| `/plan-test` | 用 Playwright MCP 端到端跑 `test-plan.html` 场景 |
+| `/plan-sync` | Hash-diff 级联 — 只重生被上游变更实际影响的字段 |
+| `/plan-edit` | 单文档局部改字段（用 hint 定位，不级联） |
+| `/plan-test` | 用 Playwright MCP 端到端跑 `test-spec.html` 场景 |
 | `/plan-share` | 通过 devtunnel 分享 plan 文档（公开 / 私有 / 密码） |
 | `/plan-review` | 针对单个文档按 section 逐段 review |
 | `/plan-review-cycle` | 跨文档一致性的全量 review |
@@ -161,19 +186,46 @@ plan-harness/
   .claude-plugin/plugin.json         插件元数据
   .mcp.json                          MCP server 接线
   contexts/                          自带 context 模板（feature-planning、performance-audit、lean）
-  prompts/                           6 个 agent 角色模板
-  skills/                            10 个 skill 定义（各一份 SKILL.md）
+  prompts/                           6 个 agent 角色模板 + 3 个共享 mixin
+    _html-base.md                    HTML 骨架、调色板、sidebar 形状、meta 内嵌契约
+    _grill-mixin.md                  Phase B 访谈规则（改编自 mattpocock/skills）
+    _caveman-mixin.md                Caveman 风格渲染优先级
+  skills/                            Slash 命令定义（各一份 SKILL.md）
+    plan-gen/types/                  每种文档类型的契约（product / analysis / design / ...）
   local-proxy/                       Node MCP server + Web dashboard
     start.js                         启动器（自动装依赖）
     src/
-      index.js                       MCP server（12 个工具，stdio）
-      plan-manager.js                Plan 文件操作
-      web-server.js                  HTTP dashboard（node:http）
+      index.js                       MCP server（stdio）
+      plan-manager.js                Plan 文件操作（v1 + v2）
+      manifest-v2.js                 v2 manifest: schemaVersion, metaHashes, hash 工具
+      web-server.js                  HTTP dashboard（node:http）— 同时服务 plan-harness/ 与 plans/
       templates/base.js              自包含 HTML 模板系统
   docs/
-    overview.html                    静态插件总览（见上方截图）
+    overview.html                    静态插件总览
     context-design.md                Context 系统设计文档
     screenshots/                     本 README 使用的图片
+```
+
+你生成的 scenario 落在目标仓库里：
+
+```
+<target-repo>/
+  plan-harness/                      v2 根目录（推荐；新 scenario 落这里）
+    _shared/                         跨 scenario 资产（header link）
+      context/                       代码架构
+      glossary/                      域语言
+      decisions/                     ADR
+      dashboard.html                 Workspace dashboard
+    <scenario-slug>/
+      manifest.json                  schemaVersion: 2, metaHashes, upstreamHashes
+      product.{meta.json, html}
+      analysis.{meta.json, html}
+      design.{meta.json, html}
+      state-machine.{meta.json, html}
+      test-spec.{meta.json, html}
+      implementation.{meta.json, html}
+      test-report.{meta.json, html}
+  plans/                             v1 根目录（兼容只读，仍可访问）
 ```
 
 ## 开发

@@ -23,6 +23,7 @@ import * as auth from './auth.js';
 import * as commentMgr from './comment-manager.js';
 import { CommentError } from './comment-manager.js';
 import * as reviseMgr from './revise-dispatcher.js';
+import { lintHtml } from './html-lint.js';
 
 let server = null;
 let serverPort = null;
@@ -282,6 +283,51 @@ async function handleRequest(req, res) {
       method: req.method,
       actor: resolveActor(req, fromLoopback),
     });
+  }
+
+  // ---- v2 root-absolute static routes (K2 fix) ----
+  // Cross-doc links in v2 use /<scenario>/<doc>.html instead of
+  // /view?path=<absolute>. The absolute form 404'd whenever the scenario
+  // moved or the user shared a link from a different workspace.
+  //
+  // GET /_shared/<rest>.html — repo asset under plan-harness/_shared/
+  if (req.method === 'GET' && pathname.startsWith('/_shared/') && pathname.endsWith('.html')) {
+    const rest = pathname.slice('/_shared/'.length);
+    // Sanitise: no .., no leading /. The serveHtmlFile guard re-validates.
+    if (rest.includes('..')) {
+      res.writeHead(403, { 'Content-Type': 'text/plain' });
+      res.end('Path traversal not allowed');
+      return;
+    }
+    const candidate = resolve(workspaceRootPath, 'plan-harness', '_shared', rest);
+    return serveHtmlFile(req, res, candidate, { fromLoopback });
+  }
+
+  // GET /<scenario>/<doc>.html — try plan-harness/<scenario>/<doc>.html first,
+  // fall back to plans/<scenario>/<doc>.html (v1).
+  const v2DocMatch = pathname.match(/^\/([^_/][^/]*)\/([^/]+\.html)$/);
+  if (v2DocMatch && req.method === 'GET') {
+    const scenarioName = decodeURIComponent(v2DocMatch[1]);
+    const docFile = decodeURIComponent(v2DocMatch[2]);
+    if (scenarioName.includes('..') || docFile.includes('..')) {
+      res.writeHead(403, { 'Content-Type': 'text/plain' });
+      res.end('Path traversal not allowed');
+      return;
+    }
+    const v2Path = resolve(workspaceRootPath, 'plan-harness', scenarioName, docFile);
+    const v1Path = resolve(workspaceRootPath, 'plans', scenarioName, docFile);
+    // Try v2 first; if missing, fall back to v1.
+    try {
+      await stat(v2Path);
+      return serveHtmlFile(req, res, v2Path, { fromLoopback });
+    } catch {
+      try {
+        await stat(v1Path);
+        return serveHtmlFile(req, res, v1Path, { fromLoopback });
+      } catch {
+        // Both missing — let it fall through to the global 404 below.
+      }
+    }
   }
 
   // 404
@@ -617,6 +663,32 @@ async function serveHtmlFile(req, res, filePath, ctx = {}) {
   try {
     const raw = await readFile(resolved, 'utf-8');
 
+    // 0pre. v2 structural lint (mixin enforcement).
+    // Only v2 docs under plan-harness/ are expected to satisfy the mixin contract;
+    // legacy docs in plans/ are read-only and pre-date the rules.
+    const isV2 = resolved.includes(`${sep}plan-harness${sep}`) &&
+                 !resolved.includes(`${sep}_shared${sep}`);
+    let lintBanner = '';
+    let lintHeader = '';
+    if (isV2) {
+      const docBase = basename(resolved).replace(/\.html?$/i, '');
+      let metaJson;
+      try {
+        const metaRaw = await readFile(resolved.replace(/\.html?$/i, '.meta.json'), 'utf-8');
+        metaJson = JSON.parse(metaRaw);
+      } catch { /* meta missing → skip hash check, structural rules still run */ }
+      const result = lintHtml(raw, { docName: docBase, metaJson });
+      const errCount = result.errors.length;
+      const warnCount = result.warnings.length;
+      lintHeader = `${errCount} error(s), ${warnCount} warning(s)`;
+      if (errCount > 0) {
+        const items = result.errors
+          .map(e => `<li><code>${escapeHtml(e.rule)}</code>: ${escapeHtml(e.message)}</li>`)
+          .join('');
+        lintBanner = `<div id="__html_lint_banner" style="position:fixed;top:0;left:0;right:0;z-index:9999;background:#f85149;color:#fff;font:13px/1.4 -apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;padding:10px 16px;border-bottom:2px solid #8b1717;"><strong>html-lint:</strong> ${errCount} structural error(s) — this doc does not satisfy <code>prompts/_html-base.md</code>. <a href="#" onclick="document.getElementById('__html_lint_banner').remove();return false;" style="color:#fff;float:right;font-weight:bold;">×</a><ul style="margin:6px 0 0;padding-left:24px;">${items}</ul></div>`;
+      }
+    }
+
     // 0. Un-stick 'SOON' / aria-disabled from plan-tab links whose target file
     //    now exists on disk. Writer bakes these markers at generation time when
     //    siblings are missing; they go stale once siblings land.
@@ -661,12 +733,21 @@ async function serveHtmlFile(req, res, filePath, ctx = {}) {
     //    /view?path=... → 404), and inject a lightbox widget that intercepts
     //    clicks + adds prev/next navigation.
     const withAssets = normalizeAssetLinks(withBreadcrumb, scenarioDir);
-    const injected = injectLightbox(withAssets);
+    const withLightbox = injectLightbox(withAssets);
 
-    res.writeHead(200, {
+    // 6. Prepend lint banner (if any) right after <body> so it sits above all
+    //    doc content + injected widgets. Banner is fixed-position so it doesn't
+    //    push layout; it just covers the top strip with a red error summary.
+    const injected = lintBanner
+      ? withLightbox.replace(/<body\b[^>]*>/i, (m) => `${m}${lintBanner}`)
+      : withLightbox;
+
+    const headers = {
       'Content-Type': 'text/html; charset=utf-8',
-      'Cache-Control': 'no-cache'
-    });
+      'Cache-Control': 'no-cache',
+    };
+    if (lintHeader) headers['X-HTML-Lint'] = lintHeader;
+    res.writeHead(200, headers);
     res.end(injected);
   } catch (err) {
     if (err.code === 'ENOENT') {
@@ -680,17 +761,20 @@ async function serveHtmlFile(req, res, filePath, ctx = {}) {
 
 /**
  * Parse scenario and document name out of an absolute path that lives under
- * <workspaceRoot>/plans/<scenario>/<doc>. Returns { scenarioName, docLabel }
- * with nulls if the path is not under plans/.
+ * <workspaceRoot>/{plan-harness,plans}/<scenario>/<doc>. Returns
+ * { scenarioName, docLabel } with nulls if the path is not under a known root.
+ * `_shared/` under plan-harness/ returns scenarioName='_shared' so callers can
+ * detect shared-asset routes and skip scenario-only chrome.
  */
 function parseScenarioFromPath(absPath) {
   const rel = absPath.startsWith(workspaceRootPath)
     ? absPath.slice(workspaceRootPath.length).replace(/^[\\/]+/, '')
     : absPath;
   const parts = rel.split(/[\\/]/);
-  const plansIdx = parts.indexOf('plans');
-  if (plansIdx < 0 || plansIdx >= parts.length - 1) return { scenarioName: null, docLabel: null };
-  const scenarioName = parts[plansIdx + 1] || null;
+  let rootIdx = parts.indexOf('plan-harness');
+  if (rootIdx < 0) rootIdx = parts.indexOf('plans');
+  if (rootIdx < 0 || rootIdx >= parts.length - 1) return { scenarioName: null, docLabel: null };
+  const scenarioName = parts[rootIdx + 1] || null;
   const docFile = parts[parts.length - 1] || '';
   const docLabel = docFile.replace(/\.html?$/i, '') || null;
   return { scenarioName, docLabel };
