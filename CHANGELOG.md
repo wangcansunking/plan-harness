@@ -18,6 +18,38 @@ Version fields in `.claude-plugin/plugin.json`, `.claude-plugin/marketplace.json
 
 
 
+
+## [1.5.0] — 2026-05-20
+
+### Added
+- Per-doc `meta.json` source-of-truth with byte-for-byte HTML re-embed
+- Three-phase generation (Phase A draft → Phase B grill → Phase C render)
+- Hash-based cascade in `/plan-sync` with diff-aware field allowlist
+- New `/plan-edit` skill for single-doc field edits without cascade
+- New doc types: `product`, `test-spec` (merges `test-plan`+`test-cases`), `context`, `glossary`, `decisions`
+- Auto-start dashboard server + browser open in `/plan-init`
+- Shared mixins: `_html-base.md`, `_grill-mixin.md`, `_caveman-mixin.md`
+- `manifest-v2.js` with `canonicalJson` / `computeMetaHash` / `recordGeneration` / `findStaleDocs`
+- `/_shared/*.html` and root-absolute `/<scenario>/<doc>.html` routes (with v1 fallback)
+- Registry-driven doc-type detection (no more hardcoded map)
+
+### Changed
+- New scenarios land in `plan-harness/<scenario>/` instead of `plans/<scenario>/`
+- `/plan-gen` uses three-phase dispatch; topological order honors hard + soft upstreams
+- Existing type files (`analysis`, `design`, `state-machine`, `implementation`, `test-report`) upgraded to v2 schemas
+- README + README.zh updated for v2 conventions
+
+### Deprecated
+- `test-plan` + `test-cases` doc types (merged into `test-spec`); SKILLs moved to `skills/_deprecated/`
+
+### Compatibility
+- v1 manifests (`plans/<scenario>/`) remain read-only; dashboard still serves them
+- Legacy generations require `--allow-v1` flag
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+([#12](https://github.com/wangcansunking/plan-harness/pull/12))
+
 ## [1.4.1] — 2026-04-30
 
 ### Changed
