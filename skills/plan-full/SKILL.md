@@ -202,6 +202,7 @@ Open dashboard:
   http://localhost:{port}/_shared/glossary/glossary.html       ← shared assets
 
 Next steps:
+  /plan-lint <doc>              Re-lint+fix an existing doc without re-grilling
   /plan-edit <doc> <hint>       Single-doc field edit, no cascade
   /plan-sync                    Hash-based cascade if you edit any upstream
   /plan-gen test-report         Run end-to-end verification after PRs land
@@ -248,6 +249,7 @@ If the user says "redo everything" or "start over", drop back to Phase 1 with th
 | `/plan-init`                  | Prerequisite — Phase 0 invokes it if no manifest exists                      |
 | `/plan-gen <type>`            | Per-type generator — invoked seven times                                     |
 | `/plan-sync`                  | Use AFTER plan-full when an upstream is edited and downstream needs cascade  |
+| `/plan-lint <target>`         | Re-runs Phase C's lint+validate gate standalone; auto-fixes drift on existing docs |
 | `/plan-edit <doc> <hint>`     | Single-field edit between full runs — no cascade                             |
 | `/plan-gen test-report`       | Deferred from plan-full unless `--with-test-report` is passed                |
 | `prompts/_workflow.md`        | Authoritative DAG that this skill follows                                    |
