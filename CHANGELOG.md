@@ -19,6 +19,17 @@ Version fields in `.claude-plugin/plugin.json`, `.claude-plugin/marketplace.json
 
 
 
+
+## [1.5.1] — 2026-05-21
+
+### Changed
+Aggregated from commits since v1.5.0 (no `release:*` label was applied):
+
+- feat(lint): enforce first-class design visuals and section nav consistency
+- fix(local-proxy): stabilize served doc chrome parity and theme sync
+
+([#scheduled](https://github.com/wangcansunking/plan-harness/actions/runs/26240121506))
+
 ## [1.5.0] — 2026-05-20
 
 ### Added
