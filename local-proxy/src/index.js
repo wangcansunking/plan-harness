@@ -901,19 +901,30 @@ function startStalenessWatcher() {
     `[plan-harness] bundle=${bundleFile} version=${myVersion} watcher=${intervalMs}ms`,
   );
 
+  // Require N consecutive misses before triggering — antivirus / sync tools
+  // can momentarily hide the bundle file. Default 3 (so ~90s of misses with
+  // a 30s interval) before we believe the bundle is actually gone.
+  const missThreshold = Number(process.env.PLAN_HARNESS_WATCH_MISS_THRESHOLD) || 3;
+  let consecutiveMisses = 0;
+
   const timer = setInterval(() => {
     // (a) in-place mtime drift
     try {
       const m = statSync(bundleFile).mtimeMs;
+      consecutiveMisses = 0;
       if (m !== startupMtime) {
         clearInterval(timer);
         exitForRespawn(`bundle rewritten in place (mtime drift at ${new Date(m).toISOString()})`);
         return;
       }
     } catch {
-      // bundle moved/deleted — also a signal to restart
+      consecutiveMisses += 1;
+      if (consecutiveMisses < missThreshold) {
+        console.error(`[plan-harness] bundle stat failed (${consecutiveMisses}/${missThreshold}) — will retry`);
+        return;
+      }
       clearInterval(timer);
-      exitForRespawn("bundle file missing");
+      exitForRespawn(`bundle file missing for ${consecutiveMisses} consecutive polls`);
       return;
     }
 
@@ -948,6 +959,66 @@ function exitForRespawn(reason) {
   console.error(`[plan-harness] exiting for respawn — ${reason}`);
   setTimeout(() => process.exit(0), 50);
 }
+
+// ---------------------------------------------------------------------------
+// Process-wide stability guards
+//
+// The MCP server is long-lived (Claude Code keeps it spawned for the whole
+// session). A single uncaught throw or unhandled rejection in an async
+// handler — e.g. a transient ENOENT during readdir, a write to a closed
+// socket, a corrupt JSONL line — would otherwise tear the whole process
+// down and disconnect every active client.
+//
+// Policy:
+//   - Log every uncaught error/rejection but DO NOT exit.
+//   - Trust SIGTERM / SIGINT for shutdown (graceful: close HTTP, then exit).
+//   - Only exit(0) on the explicit respawn paths (watcher / plan_restart).
+//
+// Override with PLAN_HARNESS_STRICT=1 to restore Node's default (crash on
+// uncaught) — useful in CI / test runs.
+// ---------------------------------------------------------------------------
+
+const strict = process.env.PLAN_HARNESS_STRICT === "1";
+let uncaughtCount = 0;
+
+process.on("uncaughtException", (err, origin) => {
+  uncaughtCount += 1;
+  console.error(`[plan-harness] uncaughtException #${uncaughtCount} (origin=${origin}):`, err?.stack || err);
+  if (strict) process.exit(1);
+  // If we're stuck in a tight crash loop (>20 uncaught in <60s) exit so the
+  // harness can respawn us cleanly. Otherwise stay alive.
+  if (uncaughtCount > 20) {
+    console.error("[plan-harness] >20 uncaught exceptions — exiting for respawn");
+    setTimeout(() => process.exit(1), 50);
+  }
+});
+process.on("unhandledRejection", (reason, promise) => {
+  uncaughtCount += 1;
+  console.error(`[plan-harness] unhandledRejection #${uncaughtCount}:`, reason?.stack || reason);
+  if (strict) process.exit(1);
+});
+
+// Reset the crash counter periodically so transient bursts don't accumulate.
+setInterval(() => { uncaughtCount = Math.max(0, uncaughtCount - 1); }, 60_000).unref?.();
+
+let shuttingDown = false;
+async function gracefulShutdown(signal) {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  console.error(`[plan-harness] ${signal} received — shutting down gracefully`);
+  try {
+    const { stopDashboard } = await import("./web-server.js");
+    await Promise.race([
+      stopDashboard(),
+      new Promise((r) => setTimeout(r, 2000)),  // hard cap so shutdown doesn't hang
+    ]);
+  } catch (err) {
+    console.error(`[plan-harness] graceful shutdown stop error (continuing): ${err?.message}`);
+  }
+  process.exit(0);
+}
+process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
+process.on("SIGINT",  () => gracefulShutdown("SIGINT"));
 
 // ---------------------------------------------------------------------------
 // Start the transport

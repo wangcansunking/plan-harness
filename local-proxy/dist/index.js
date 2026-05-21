@@ -10639,21 +10639,21 @@ var require_he = __commonJS({
         }
         return result;
       };
-      var codePointToSymbol = function(codePoint, strict) {
+      var codePointToSymbol = function(codePoint, strict2) {
         var output = "";
         if (codePoint >= 55296 && codePoint <= 57343 || codePoint > 1114111) {
-          if (strict) {
+          if (strict2) {
             parseError("character reference outside the permissible Unicode range");
           }
           return "\uFFFD";
         }
         if (has(decodeMapNumeric, codePoint)) {
-          if (strict) {
+          if (strict2) {
             parseError("disallowed character reference");
           }
           return decodeMapNumeric[codePoint];
         }
-        if (strict && contains(invalidReferenceCodePoints, codePoint)) {
+        if (strict2 && contains(invalidReferenceCodePoints, codePoint)) {
           parseError("disallowed character reference");
         }
         if (codePoint > 65535) {
@@ -10675,8 +10675,8 @@ var require_he = __commonJS({
       };
       var encode3 = function(string3, options) {
         options = merge2(options, encode3.options);
-        var strict = options.strict;
-        if (strict && regexInvalidRawCodePoint.test(string3)) {
+        var strict2 = options.strict;
+        if (strict2 && regexInvalidRawCodePoint.test(string3)) {
           parseError("forbidden code point");
         }
         var encodeEverything = options.encodeEverything;
@@ -10730,8 +10730,8 @@ var require_he = __commonJS({
       };
       var decode3 = function(html, options) {
         options = merge2(options, decode3.options);
-        var strict = options.strict;
-        if (strict && regexInvalidEntity.test(html)) {
+        var strict2 = options.strict;
+        if (strict2 && regexInvalidEntity.test(html)) {
           parseError("malformed character reference");
         }
         return html.replace(regexDecode, function($0, $1, $2, $3, $4, $5, $6, $7, $8) {
@@ -10749,12 +10749,12 @@ var require_he = __commonJS({
             reference = $2;
             next = $3;
             if (next && options.isAttributeValue) {
-              if (strict && next == "=") {
+              if (strict2 && next == "=") {
                 parseError("`&` did not start a character reference");
               }
               return $0;
             } else {
-              if (strict) {
+              if (strict2) {
                 parseError(
                   "named character reference was not terminated by a semicolon"
                 );
@@ -10765,22 +10765,22 @@ var require_he = __commonJS({
           if ($4) {
             decDigits = $4;
             semicolon = $5;
-            if (strict && !semicolon) {
+            if (strict2 && !semicolon) {
               parseError("character reference was not terminated by a semicolon");
             }
             codePoint = parseInt(decDigits, 10);
-            return codePointToSymbol(codePoint, strict);
+            return codePointToSymbol(codePoint, strict2);
           }
           if ($6) {
             hexDigits = $6;
             semicolon = $7;
-            if (strict && !semicolon) {
+            if (strict2 && !semicolon) {
               parseError("character reference was not terminated by a semicolon");
             }
             codePoint = parseInt(hexDigits, 16);
-            return codePointToSymbol(codePoint, strict);
+            return codePointToSymbol(codePoint, strict2);
           }
-          if (strict) {
+          if (strict2) {
             parseError(
               "named character reference was not terminated by a semicolon"
             );
@@ -17048,9 +17048,25 @@ async function startDashboard(workspaceRoot, port = 3847) {
         server = null;
         startDashboard(workspaceRoot, port + 1).then(resolvePromise, rejectPromise);
       } else {
-        rejectPromise(err);
+        console.error("[plan-harness] HTTP server error (non-fatal):", err);
+        if (!serverPort) rejectPromise(err);
       }
     });
+    server.on("clientError", (err, socket) => {
+      console.error("[plan-harness] clientError (absorbed):", err?.code || err?.message);
+      try {
+        socket.destroy();
+      } catch {
+      }
+    });
+    server.on("connection", (socket) => {
+      socket.on("error", (err) => {
+        console.error("[plan-harness] socket error (absorbed):", err?.code || err?.message);
+      });
+    });
+    server.keepAliveTimeout = 12e4;
+    server.headersTimeout = 125e3;
+    server.requestTimeout = 0;
     server.listen(port, "127.0.0.1", () => {
       serverPort = port;
       const url2 = getDashboardUrl();
@@ -33388,17 +33404,25 @@ function startStalenessWatcher() {
   console.error(
     `[plan-harness] bundle=${bundleFile} version=${myVersion} watcher=${intervalMs}ms`
   );
+  const missThreshold = Number(process.env.PLAN_HARNESS_WATCH_MISS_THRESHOLD) || 3;
+  let consecutiveMisses = 0;
   const timer = setInterval(() => {
     try {
       const m = statSync(bundleFile).mtimeMs;
+      consecutiveMisses = 0;
       if (m !== startupMtime) {
         clearInterval(timer);
         exitForRespawn(`bundle rewritten in place (mtime drift at ${new Date(m).toISOString()})`);
         return;
       }
     } catch {
+      consecutiveMisses += 1;
+      if (consecutiveMisses < missThreshold) {
+        console.error(`[plan-harness] bundle stat failed (${consecutiveMisses}/${missThreshold}) \u2014 will retry`);
+        return;
+      }
       clearInterval(timer);
-      exitForRespawn("bundle file missing");
+      exitForRespawn(`bundle file missing for ${consecutiveMisses} consecutive polls`);
       return;
     }
     try {
@@ -33428,6 +33452,44 @@ function exitForRespawn(reason) {
   console.error(`[plan-harness] exiting for respawn \u2014 ${reason}`);
   setTimeout(() => process.exit(0), 50);
 }
+var strict = process.env.PLAN_HARNESS_STRICT === "1";
+var uncaughtCount = 0;
+process.on("uncaughtException", (err, origin) => {
+  uncaughtCount += 1;
+  console.error(`[plan-harness] uncaughtException #${uncaughtCount} (origin=${origin}):`, err?.stack || err);
+  if (strict) process.exit(1);
+  if (uncaughtCount > 20) {
+    console.error("[plan-harness] >20 uncaught exceptions \u2014 exiting for respawn");
+    setTimeout(() => process.exit(1), 50);
+  }
+});
+process.on("unhandledRejection", (reason, promise2) => {
+  uncaughtCount += 1;
+  console.error(`[plan-harness] unhandledRejection #${uncaughtCount}:`, reason?.stack || reason);
+  if (strict) process.exit(1);
+});
+setInterval(() => {
+  uncaughtCount = Math.max(0, uncaughtCount - 1);
+}, 6e4).unref?.();
+var shuttingDown = false;
+async function gracefulShutdown(signal) {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  console.error(`[plan-harness] ${signal} received \u2014 shutting down gracefully`);
+  try {
+    const { stopDashboard: stopDashboard2 } = await Promise.resolve().then(() => (init_web_server(), web_server_exports));
+    await Promise.race([
+      stopDashboard2(),
+      new Promise((r) => setTimeout(r, 2e3))
+      // hard cap so shutdown doesn't hang
+    ]);
+  } catch (err) {
+    console.error(`[plan-harness] graceful shutdown stop error (continuing): ${err?.message}`);
+  }
+  process.exit(0);
+}
+process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
+process.on("SIGINT", () => gracefulShutdown("SIGINT"));
 var transport = new StdioServerTransport();
 await server2.connect(transport);
 console.error("[plan-harness] MCP server running on stdio.");
