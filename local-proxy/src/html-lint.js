@@ -19,7 +19,7 @@
 
 import { parse } from 'node-html-parser';
 import crypto from 'node:crypto';
-import { canonicalJson } from './manifest-v2.js';
+import { canonicalJson } from './manifest.js';
 
 const SCENARIO_DOCS = [
   'product', 'analysis', 'design', 'state-machine',

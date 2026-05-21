@@ -6,10 +6,10 @@
 |-----------------------------|-------------------------------------------------------------|
 | Output filename             | `product.html` + `product.meta.json`                        |
 | Manifest fields             | `productHtml`, `productGeneratedAt`, `metaHashes.product`   |
-| Hard upstream               | — (root of the v2 DAG)                                      |
+| Hard upstream               | — (root of the DAG)                                         |
 | Soft upstream               | `_shared/glossary` (use canonical terms)                    |
 | Downstream                  | `analysis` (reads `problem` + `userStories`)                |
-| Agent team                  | PM (lead), Architect (constraints), Writer                  |
+| Agent team                  | PM (lead), Architect (constraints), Writer, Validator       |
 | Mixins                      | `_grill-mixin`, `_caveman-mixin`, `_html-base`              |
 
 ## Scope
@@ -78,5 +78,7 @@ Seed TodoWrite at the start of `/plan-gen product`. Tick `in_progress` → `comp
 11. Phase B · offer glossary entries for new terms
 12. Phase C · render product.html
 13. Phase C · embed canonical meta script (byte-equal to `product.meta.json`)
-14. Phase C · run html-lint on the rendered HTML; on errors retry the writer once, then write `product.lint.json` and abort (do NOT proceed to step 15)
-15. Phase C · record manifest hash + `productGeneratedAt` (only when lint is clean)
+14. Phase C · run html-lint on the rendered HTML; on errors retry the writer once, then write `product.lint.json` and abort (do NOT proceed to validate)
+15. Phase C · run meta-validate (schema + cross-doc refs + HTML semantic coverage); on errors retry the writer once, then write `product.validate.json` and abort (do NOT proceed to Validator)
+16. Phase C · dispatch Validator agent (`subagent_type: "feature-dev:code-reviewer"`, prompt: `prompts/validator-prompt.md`). On `fail` retry Writer once, then write `product.validator.json` and abort
+17. Phase C · record manifest hash + `productGeneratedAt` (only when lint, validate, AND Validator are all clean)

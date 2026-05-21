@@ -4,20 +4,19 @@
 
 | Field                       | Value                                                                |
 |-----------------------------|----------------------------------------------------------------------|
-| Output filename             | `implementation.html` + `implementation.meta.json` (v2)              |
+| Output filename             | `implementation.html` + `implementation.meta.json`                   |
 | Manifest fields             | `implementationHtml`, `implementationGeneratedAt`, `metaHashes.implementation` |
 | Hard upstream               | `design`                                                             |
 | Soft upstream               | `state-machine`, `test-spec`                                         |
 | Downstream                  | `test-report`                                                        |
-| Agent team                  | All six — Architect, PM, Frontend Dev, Backend Dev, Tester, Writer   |
-| Full workflow (legacy)      | `skills/_deprecated/plan-implementation/SKILL.md`                    |
+| Agent team                  | All seven — Architect, PM, Frontend Dev, Backend Dev, Tester, Writer, Validator |
 | Mixins                      | `_grill-mixin`, `_caveman-mixin`, `_html-base`                       |
 
 ## Scope
 
 PR plan: 1 vertical slice = 1 PR. Each PR has files, steps, blockers, release label, risks. Verifiable AFK or HITL per slice.
 
-## meta.json schema (v2)
+## meta.json schema
 
 ```jsonc
 {
@@ -88,5 +87,7 @@ Seed TodoWrite at the start of `/plan-gen implementation`. Tick `in_progress` �
 9. Phase B · grill prs[].risks + demo
 10. Phase C · render implementation.html with mermaid PR DAG + tables
 11. Phase C · embed canonical meta script (byte-equal to `implementation.meta.json`)
-12. Phase C · run html-lint on the rendered HTML; on errors retry the writer once, then write `implementation.lint.json` and abort (do NOT proceed to step 13)
-13. Phase C · record manifest hash + `implementationGeneratedAt` (only when lint is clean)
+12. Phase C · run html-lint on the rendered HTML; on errors retry the writer once, then write `implementation.lint.json` and abort (do NOT proceed to validate)
+13. Phase C · run meta-validate (schema + cross-doc refs + HTML semantic coverage); on errors retry the writer once, then write `implementation.validate.json` and abort (do NOT proceed to Validator)
+14. Phase C · dispatch Validator agent (`subagent_type: "feature-dev:code-reviewer"`, prompt: `prompts/validator-prompt.md`). On `fail` retry Writer once, then write `implementation.validator.json` and abort
+15. Phase C · record manifest hash + `implementationGeneratedAt` (only when lint, validate, AND Validator are all clean)

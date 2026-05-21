@@ -245,7 +245,7 @@ After Step 6 completes, **always** start the local dashboard server (unless `--n
    - Reuse the existing server if already running on port 3847.
    - Pick the next free port if 3847 is busy.
    - Return `{ port, url }`.
-2. Open the user's browser to `http://localhost:<port>/_shared/dashboard.html` for v2 scenarios, or `http://localhost:<port>/` for v1 / mixed workspaces.
+2. Open the user's browser to `http://localhost:<port>/` (the workspace dashboard lists every scenario).
    - macOS: `open <url>`
    - Linux: `xdg-open <url>`
    - Windows: `start <url>` via `cmd`
@@ -253,12 +253,6 @@ After Step 6 completes, **always** start the local dashboard server (unless `--n
 4. If the user passed `--no-server`, skip this step entirely.
 
 Subsequent `/plan-gen` runs detect an already-running server via `isDashboardRunning()` and reuse it; no duplicate spawn.
-
-### Notes on v1 / v2 paths
-
-- New scenarios created via `plan_create_scenario` land under `plan-harness/<scenario>/` (v2 default, manifest `schemaVersion: 2`).
-- Existing scenarios under `plans/<scenario>/` remain read-only — `/plan-init` lists them in Step 3 but new `/plan-gen` runs will refuse unless `--allow-v1` is passed.
-- The dashboard surfaces both v1 and v2 scenarios in the same list, with a small `v1` / `v2` badge per row.
 
 ## How Skills Load Contexts
 
@@ -286,7 +280,7 @@ Three-tier loading (see `docs/context-design.md`):
 | Context `.md` file not found for a name in manifest | Warn and skip. Suggest `/plan-context` to fix. |
 | Cannot detect repo from contexts | Ask user to provide the repo path explicitly |
 | `plan_get_context` MCP tool not available | Read CLAUDE.md manually from the repo root |
-| `plan_list_scenarios` fails | Fall back to scanning `{repoRoot}/plans/` directory manually |
+| `plan_list_scenarios` fails | Fall back to scanning `{repoRoot}/plan-harness/` directory manually |
 | `plan_create_scenario` fails | Create the directory and manifest.json manually using Write tool |
 
 ## Cross-Links

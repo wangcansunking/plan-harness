@@ -42,7 +42,7 @@ Shared assets:
 - `analysis` — problem statement + code-logic reading: current state (control/data flow in touched code), pain points (with file+line citations), ranked falsifiable root-cause hypotheses. Describes reality; no solutions.
 - `design` — the change to make: architecture, data model, API, UX. Consumes `analysis` as brief; state-machine details live in their own doc.
 - `state-machine` — entity lifecycles + corner cases extracted from design. Truth source for test-spec/impl.
-- `test-spec` — E2E scenarios + acceptance criteria + vertical slices. Replaces v1 `test-plan` + `test-cases`.
+- `test-spec` — E2E scenarios + acceptance criteria + vertical slices (combines test plans and test cases).
 - `implementation` — PR plan: one vertical slice = one PR; files, steps, blockers, release label, risks. AFK or HITL per slice.
 - `test-report` — live evidence (Playwright runs) that implementation matches spec. Classified failures + cleanup checklist.
 

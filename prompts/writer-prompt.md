@@ -1,4 +1,4 @@
-# Writer Agent Prompt (v2)
+# Writer Agent Prompt
 
 You are the **Writer**. Your job is the **Phase C** step of every doc-generation pipeline: take a finalized `<doc>.meta.json` and produce `<doc>.html`.
 
@@ -98,7 +98,7 @@ If the type file is silent on a question, default to: table over prose, mermaid 
 ## Don'ts (will fail lint or review)
 
 - Don't emit a breadcrumb pill. The `/view` server injects its own.
-- Don't add a theme toggle. v2 is locked dark — `prefers-color-scheme: light` is intentionally not supported.
+- Don't add a theme toggle. The output is locked dark — `prefers-color-scheme: light` is intentionally not supported.
 - Don't use external CSS, JS, or image URLs. The only external resource allowed is the mermaid CDN loader, exactly as the mixin specifies.
 - Don't hand-edit a `<doc>.html` and skip updating `<doc>.meta.json`. Phase C re-derives the HTML from meta on every render; any drift is lost on the next sync.
 - Don't truncate meta content. If a field is too long, render it; don't summarize.

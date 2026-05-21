@@ -9,7 +9,7 @@ One command to generate any plan document. Dispatches the right agent team for t
 
 ## Types
 
-### Scenario docs (v2 — 7 types, written under `plan-harness/<scenario>/`)
+### Scenario docs (7 types, written under `plan-harness/<scenario>/`)
 
 | Type                      | Aliases          | Output file                                | Per-type workflow                            |
 |---------------------------|------------------|--------------------------------------------|----------------------------------------------|
@@ -17,21 +17,17 @@ One command to generate any plan document. Dispatches the right agent team for t
 | `analysis`                | `analyze`        | `analysis.{html,meta.json}`                | [types/analysis.md](types/analysis.md)       |
 | `design`                  | —                | `design.{html,meta.json}`                  | [types/design.md](types/design.md)           |
 | `state-machine`           | `sm`             | `state-machine.{html,meta.json}`           | [types/state-machine.md](types/state-machine.md) |
-| `test-spec`               | `testspec`       | `test-spec.{html,meta.json}` (merges v1 test-plan + test-cases) | [types/test-spec.md](types/test-spec.md) |
+| `test-spec`               | `testspec`       | `test-spec.{html,meta.json}` (combines test plans + cases) | [types/test-spec.md](types/test-spec.md) |
 | `implementation`          | `impl`           | `implementation.{html,meta.json}`          | [types/implementation.md](types/implementation.md) |
 | `test-report`             | `report`         | `test-report.{html,meta.json}`             | [types/test-report.md](types/test-report.md) |
 
-### Repo assets (v2 — written under `plan-harness/_shared/`)
+### Repo assets (written under `plan-harness/_shared/`)
 
 | Type        | Output                                              | Per-type workflow                          |
 |-------------|-----------------------------------------------------|--------------------------------------------|
 | `context`   | `_shared/context/overview.{html,meta.json}`         | [types/context.md](types/context.md)       |
 | `glossary`  | `_shared/glossary/glossary.{html,meta.json}`        | [types/glossary.md](types/glossary.md)     |
 | `decisions` | `_shared/decisions/<NNNN>-<slug>.{html,meta.json}` + `index.html` | [types/decisions.md](types/decisions.md) |
-
-### Deprecated v1 types (read-only)
-
-`test-plan` and `test-cases` are merged into `test-spec`. Old per-type prompts in `skills/_deprecated/plan-<old-name>/SKILL.md` remain for history. When executing a v2 type, read its `types/<type>.md` stub PLUS any cited legacy prompt — stub defines the v2 contract (meta.json schema, mixins, Phase B fields); legacy carries the verbatim agent prompt for the agent dispatch.
 
 ## When to Use
 
@@ -54,14 +50,8 @@ One command to generate any plan document. Dispatches the right agent team for t
 ### Step 1 — Resolve the scenario
 
 1. If `--scenario <name>` was passed, use it.
-2. Otherwise, look for `manifest.json` in this preference order:
-   - **v2**: `plan-harness/<scenario>/manifest.json` (preferred)
-   - **v1 fallback**: `plans/<scenario>/manifest.json` (legacy; only run new generations if `--allow-v1` is passed)
-3. If there's no manifest, tell the user: `"Run /plan-init first to set up the planning context."` — stop.
-4. Load the manifest into memory. Check `schemaVersion`:
-   - `2` → v2 path; meta.json + hash tracking active.
-   - missing or `1` → legacy; only allow `--allow-v1` re-runs; new scenarios MUST be v2.
-5. Manifest is the context bag every per-type workflow reads.
+2. Otherwise, look for `plan-harness/<scenario>/manifest.json`. If missing, tell the user `"Run /plan-init first to set up the planning context."` and stop.
+3. Load the manifest into memory — it's the context bag every per-type workflow reads.
 
 ### Step 2 — Decide which types to run
 
@@ -83,7 +73,7 @@ One command to generate any plan document. Dispatches the right agent team for t
 
 ### Step 3 — Order the selected types topologically
 
-v2 dependency graph (see also `/plan-sync`):
+Dependency graph (see also `/plan-sync`):
 
 ```
 product → analysis → design ┬─► state-machine ─┐
@@ -92,7 +82,7 @@ product → analysis → design ┬─► state-machine ─┐
                                       └─► test-report ◄─┘
 ```
 
-Required vs. optional edges (v2):
+Required vs. optional edges:
 
 | Doc              | Hard upstream            | Soft upstream                          |
 |------------------|--------------------------|----------------------------------------|
@@ -114,15 +104,15 @@ For each type in topological order:
 
 1. Open `types/<type>.md` — the contract stub (defines meta.json schema, mixins, Phase B must-ask fields, render rules, **§Task list**).
 2. **Seed TodoWrite from the type's §Task list section.** Each type file carries an authoritative ordered list of tasks specific to that doc (e.g. design.md tasks differ from test-spec.md tasks). Create one TodoWrite entry per task with status `pending`, then mark each `in_progress` when you start it and `completed` when done. The user watches progress through these — keep the list current.
-3. Open the cited legacy `_deprecated/plan-<old-name>/SKILL.md` if any — the full v1 agent prompt block (still useful for verbose agent dispatch).
-4. **v2 — three-phase dispatch** (when `schemaVersion === 2`):
+3. **Three-phase dispatch:**
 
    **Agent team dispatch (applies to Phase A and Phase C):**
    Each `types/<type>.md` lists an "Agent team" row (e.g. design → `Architect (lead), PM, Writer`). For each role, call the `Agent` tool with a focused prompt:
    - `Architect` → `subagent_type: "feature-dev:code-architect"` — drafts schema/structure fields, traces upstream code.
    - `PM` (or `Tester`, `Engineer`) → `subagent_type: "feature-dev:code-explorer"` — drafts user-facing fields, reads repo for evidence.
    - `Writer` → `subagent_type: "general-purpose"` — renders HTML in Phase C (Architect/PM do NOT render).
-   Dispatch independent roles **in parallel** (a single message with multiple `Agent` blocks); only sequence them when a downstream role consumes the upstream role's draft. The orchestrator (this skill) reconciles their outputs into the final `<doc>.meta.json`. If the team table marks one role as "lead", that role's draft is the spine; others merge in.
+   - `Validator` → `subagent_type: "feature-dev:code-reviewer"` — audits the rendered doc in Phase C after lint+validate gates. Reads `prompts/validator-prompt.md` for the audit checklist (contract coverage, mockup rigor, cross-doc near-misses, glossary/ADR hygiene, caveman readability). Returns a JSON verdict — `pass` / `concern` / `fail`. `fail` re-dispatches the Writer.
+   Dispatch independent roles **in parallel** (a single message with multiple `Agent` blocks); only sequence them when a downstream role consumes the upstream role's draft. The orchestrator (this skill) reconciles their outputs into the final `<doc>.meta.json`. If the team table marks one role as "lead", that role's draft is the spine; others merge in. Validator is sequential — always the LAST role in Phase C.
 
    **Phase A — Draft meta (silent)**
    - Read upstream `<upstream>.meta.json` for every hard + soft upstream listed in `types/<type>.md`.
@@ -147,19 +137,19 @@ For each type in topological order:
    - After the Writer returns the HTML, the orchestrator reads `<doc>.meta.json` from disk and `replace()`s the placeholder with the file bytes verbatim — this is what guarantees byte-equality (see `prompts/_html-base.md` §"Phase C protocol").
    - Embed `<script type="application/json" id="meta">` containing the canonical meta.json content byte-for-byte.
    - Save both `<doc>.meta.json` and `<doc>.html` to the scenario dir.
-   - **Run `lintFile()` from `local-proxy/src/html-lint.js` against the rendered HTML.** Shared-asset docs (`_shared/context`, `_shared/glossary`, `_shared/decisions`) pass `skipRules: ['L1-docgroup', 'L1-active']`. On any error: retry the Writer once with the lint findings injected into its context; if still failing, write `<doc>.lint.json` next to the HTML, surface the failure, and STOP — do not advance to step 7. Only a clean lint pass (or `--no-lint`) lets the run proceed.
+   - **Run `lintFile()` from `local-proxy/src/html-lint.js` against the rendered HTML.** Shared-asset docs (`_shared/context`, `_shared/glossary`, `_shared/decisions`) pass `skipRules: ['L1-docgroup', 'L1-active']`. On any error: retry the Writer once with the lint findings injected into its context; if still failing, write `<doc>.lint.json` next to the HTML, surface the failure, and STOP — do not advance to validate. Only a clean lint pass (or `--no-lint`) lets the run proceed.
+   - **Run `validateDoc()` from `local-proxy/src/meta-validate.js`** against `<doc>.meta.json` + `<doc>.html`. This is the SECOND mandatory gate. Catches things lint can't see — schema-shape, cross-doc refs (e.g. `state-machine.perStoryFlows[].storyId ∈ product.userStories[].id`, `implementation.prs[].slice ∈ test-spec.verticalSlices[].id`), and HTML semantic coverage (every meta visual is actually rendered). Shared-asset docs pass `skipRules` per their nature. On error: retry the Writer once with the findings injected; if still failing, write `<doc>.lint.json`/`<doc>.validate.json` accordingly, surface the failure, and STOP. Both gates must be clean before the Validator agent runs.
+   - **Dispatch the Validator agent** (`Agent` tool with `subagent_type: "feature-dev:code-reviewer"`) with `prompts/validator-prompt.md`, the rendered `<doc>.html`, `<doc>.meta.json`, every upstream `<u>.meta.json`, and `types/<doc>.md`. The Validator returns JSON: `{verdict, findings[], summary}`. On `pass`, proceed to step 7. On `concern`, surface the findings and ask the user `accept [Enter] / re-grill <field>`. On `fail`, re-dispatch the Writer with the findings injected (one retry); if Validator still returns `fail`, write `<doc>.validator.json` with the findings, surface the failure, and STOP — the doc does NOT record.
 
-5. **v1 fallback** (when `schemaVersion !== 2`): follow legacy `_deprecated/plan-<old-name>/SKILL.md` Steps verbatim; write only `<doc>.html`; skip meta.json + hash tracking. Only enter this branch when `--allow-v1` is passed.
+4. Before any dispatch: stamp `manifest.json` with `<type>Generating: true` so a concurrent `/plan-gen` sees the in-progress state.
 
-6. Before any dispatch: stamp `manifest.json` with `<type>Generating: true` so a concurrent `/plan-gen` sees the in-progress state.
+5. After Phase C succeeds (HTML rendered AND both gates clean):
+   - Use `recordGeneration` from `local-proxy/src/manifest.js` to update `metaHashes[<type>]`, snapshot `upstreamHashes[<type>][<u>]` for each upstream u, and clear `<type>Generating`.
+   - Set `<type>Html` and `<type>GeneratedAt`.
+   - Mark the final TodoWrite tasks (render → lint → validate → record) as `completed` in order.
+   - **Never** set `<type>GeneratedAt` while a `<doc>.lint.json` or `<doc>.validate.json` exists; delete the stale gate file on a subsequent clean pass.
 
-7. After Phase C succeeds (HTML rendered AND lint clean):
-   - Use `recordGeneration` from `local-proxy/src/manifest-v2.js` to update `metaHashes[<type>]`, snapshot `upstreamHashes[<type>][<u>]` for each upstream u, and clear `<type>Generating`.
-   - Set `<type>Html` and `<type>GeneratedAt` (preserves v1 fields for backward-compatible reads).
-   - Mark the final TodoWrite tasks (render → lint → record) as `completed` in order.
-   - **Never** set `<type>GeneratedAt` while a `<doc>.lint.json` exists; delete the stale lint file on a subsequent clean pass.
-
-8. Emit a short per-type confirmation line:
+6. Emit a short per-type confirmation line:
    ```
    [2/4] test-spec.html    generated  (22 scenarios, P0:11 / P1:7 / P2:4 · VS1-VS8)
    ```
@@ -213,7 +203,6 @@ All types share these rules, consolidated here so per-type stubs stay tiny:
 | Agent dispatch fails                          | Retry once; if still failing, surface the error + restore manifest status         |
 | Writer produces malformed HTML                | Strip preamble before `<!doctype>`, re-validate; retry once                       |
 | Output file un-writable                       | Surface the fs error + ask the user to free the path                              |
-| Prompt template file not found                | Use the inline prompt from the `_deprecated/<old-name>/SKILL.md` file             |
 
 ## Cross-Links
 
@@ -223,10 +212,5 @@ All types share these rules, consolidated here so per-type stubs stay tiny:
 | `/plan-full`               | Orchestrator — calls `/plan-gen` for each type in turn                       |
 | `/plan-sync`               | Cascade orchestrator — calls `/plan-gen` for every downstream of an edited doc |
 | `/plan-review`             | Post-generation review pass; reads the file this skill writes                |
-| `_deprecated/plan-<name>/` | Authoritative agent prompt source for each type (preserved for history)     |
 | `manifest.json`            | Read for scenario context; written per-type after each successful run        |
 
-## Migration note
-
-This skill replaces seven individual skills that are still present in `skills/_deprecated/` as reference:
-`plan-design`, `plan-state-machine`, `plan-test-plan`, `plan-test-cases`, `plan-implementation`, `plan-test-report`, `plan-analyze`. Users who typed those slash commands before should use `/plan-gen <type>` going forward. Internal orchestrators (`/plan-full`, `/plan-sync`) have been updated to call `/plan-gen`.

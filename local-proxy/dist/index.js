@@ -16515,7 +16515,7 @@ var require_dist2 = __commonJS({
   }
 });
 
-// src/manifest-v2.js
+// src/manifest.js
 function canonicalJson(value) {
   if (value === null || typeof value !== "object") {
     return JSON.stringify(value);
@@ -16527,8 +16527,8 @@ function canonicalJson(value) {
   const parts = keys.map((k) => JSON.stringify(k) + ":" + canonicalJson(value[k]));
   return "{" + parts.join(",") + "}";
 }
-var init_manifest_v2 = __esm({
-  "src/manifest-v2.js"() {
+var init_manifest = __esm({
+  "src/manifest.js"() {
   }
 });
 
@@ -16971,7 +16971,7 @@ var import_node_html_parser, SCENARIO_DOCS, LOCKED_PALETTE_VARS, PALETTE_LOCKED_
 var init_html_lint = __esm({
   "src/html-lint.js"() {
     import_node_html_parser = __toESM(require_dist2(), 1);
-    init_manifest_v2();
+    init_manifest();
     SCENARIO_DOCS = [
       "product",
       "analysis",
@@ -17192,26 +17192,20 @@ async function handleRequest(req, res) {
     const candidate = resolve3(workspaceRootPath, "plan-harness", "_shared", rest);
     return serveHtmlFile(req, res, candidate, { fromLoopback });
   }
-  const v2DocMatch = pathname.match(/^\/([^_/][^/]*)\/([^/]+\.html)$/);
-  if (v2DocMatch && req.method === "GET") {
-    const scenarioName = decodeURIComponent(v2DocMatch[1]);
-    const docFile = decodeURIComponent(v2DocMatch[2]);
+  const docMatch = pathname.match(/^\/([^_/][^/]*)\/([^/]+\.html)$/);
+  if (docMatch && req.method === "GET") {
+    const scenarioName = decodeURIComponent(docMatch[1]);
+    const docFile = decodeURIComponent(docMatch[2]);
     if (scenarioName.includes("..") || docFile.includes("..")) {
       res.writeHead(403, { "Content-Type": "text/plain" });
       res.end("Path traversal not allowed");
       return;
     }
-    const v2Path = resolve3(workspaceRootPath, "plan-harness", scenarioName, docFile);
-    const v1Path = resolve3(workspaceRootPath, "plans", scenarioName, docFile);
+    const docPath = resolve3(workspaceRootPath, "plan-harness", scenarioName, docFile);
     try {
-      await stat2(v2Path);
-      return serveHtmlFile(req, res, v2Path, { fromLoopback });
+      await stat2(docPath);
+      return serveHtmlFile(req, res, docPath, { fromLoopback });
     } catch {
-      try {
-        await stat2(v1Path);
-        return serveHtmlFile(req, res, v1Path, { fromLoopback });
-      } catch {
-      }
     }
   }
   res.writeHead(404, { "Content-Type": "text/plain" });
@@ -17502,9 +17496,9 @@ async function serveHtmlFile(req, res, filePath, ctx = {}) {
   }
   try {
     const raw = await readFile4(resolved, "utf-8");
-    const isV2 = resolved.includes(`${sep4}plan-harness${sep4}`) && !resolved.includes(`${sep4}_shared${sep4}`);
+    const isScenarioDoc = resolved.includes(`${sep4}plan-harness${sep4}`) && !resolved.includes(`${sep4}_shared${sep4}`);
     let metaJson;
-    if (isV2) {
+    if (isScenarioDoc) {
       try {
         const metaRaw = await readFile4(resolved.replace(/\.html?$/i, ".meta.json"), "utf-8");
         metaJson = JSON.parse(metaRaw);
@@ -17519,8 +17513,8 @@ async function serveHtmlFile(req, res, filePath, ctx = {}) {
     } catch {
     }
     const withTabsFixed = normalizePlanTabs(raw, siblingSet, scenarioDir);
-    const isV2SelfContained = isV2 && /<script[^>]+id=["']meta["']/i.test(withTabsFixed);
-    const withDocChrome = isV2SelfContained ? withTabsFixed : normalizeServedDocChrome(withTabsFixed, resolved);
+    const isSelfContained = isScenarioDoc && /<script[^>]+id=["']meta["']/i.test(withTabsFixed);
+    const withDocChrome = isSelfContained ? withTabsFixed : normalizeServedDocChrome(withTabsFixed, resolved);
     const withChecklistFixed = normalizeChecklistItems(withDocChrome);
     const withSectionIds = injectSectionIds(withChecklistFixed);
     const { scenarioName, docLabel } = parseScenarioFromPath(resolved);
@@ -17533,13 +17527,13 @@ async function serveHtmlFile(req, res, filePath, ctx = {}) {
       user: req.user?.name || (fromLoopback ? "Host (local)" : "Anonymous")
     };
     const withMeta = injectPlanMeta(withSectionIds, meta3);
-    const withPanels = isV2SelfContained ? withMeta : injectSidebarPanels(withMeta);
+    const withPanels = isSelfContained ? withMeta : injectSidebarPanels(withMeta);
     const withBreadcrumb = injectBreadcrumbIntoHtml(withPanels, resolved);
     const withAssets = normalizeAssetLinks(withBreadcrumb, scenarioDir);
     const withLightbox = injectLightbox(withAssets);
     let lintBanner = "";
     let lintHeader = "";
-    if (isV2) {
+    if (isScenarioDoc) {
       const docBase = basename2(resolved).replace(/\.html?$/i, "");
       const result = lintHtml(withLightbox, { docName: docBase, metaJson });
       const errCount = result.errors.length;
@@ -32347,7 +32341,7 @@ async function findPlansDirs(dir, maxDepth = 5, currentDepth = 0) {
       continue;
     }
     const fullPath = join(dir, name);
-    if (name === "plan-harness" || name === "plans") {
+    if (name === "plan-harness") {
       results.push(norm(fullPath));
     } else {
       const nested = await findPlansDirs(fullPath, maxDepth, currentDepth + 1);
@@ -32381,28 +32375,19 @@ async function listScenarios(workspaceRoot) {
           const candidates = registry2[docType] || [docType];
           docs[docType] = candidates.some((c) => fileNames.includes(`${c}.html`));
         }
-        const manifest = await readJson(join(scenarioPath, "manifest.json"));
-        const schemaVersion = manifest?.schemaVersion ?? 1;
         scenarios.push({
           repoRoot,
           scenario: entry.name,
           scenarioPath,
           files,
-          schemaVersion,
           docs,
-          // v1 back-compat flags (some consumers still read these directly)
+          hasProduct: !!docs.product,
           hasAnalysis: !!docs.analysis,
           hasDesign: !!docs.design,
-          hasTestPlan: !!docs["test-plan"],
           hasStateMachine: !!docs["state-machine"],
-          hasTestCases: !!docs["test-cases"],
-          hasImplementationPlan: !!docs.implementation || !!docs["implementation-plan"],
-          hasDashboard: fileNames.includes("dashboard.html"),
-          hasReviewReport: fileNames.includes("review-report.html"),
-          hasTestReport: !!docs["test-report"],
-          // v2 new
-          hasProduct: !!docs.product,
-          hasTestSpec: !!docs["test-spec"]
+          hasTestSpec: !!docs["test-spec"],
+          hasImplementation: !!docs.implementation,
+          hasTestReport: !!docs["test-report"]
         });
       }
     }
@@ -32416,15 +32401,13 @@ async function createScenario(repoRoot, scenarioName, metadata = {}) {
   if (!safeName) {
     throw new Error(`Invalid scenario name: "${scenarioName}"`);
   }
-  const rootDir = metadata.rootDir === "plans" ? "plans" : "plan-harness";
-  const plansRoot = join(repoRoot, rootDir);
+  const plansRoot = join(repoRoot, "plan-harness");
   const scenarioPath = join(plansRoot, safeName);
   const rel = relative(plansRoot, scenarioPath);
   if (rel.startsWith("..") || rel.includes(sep + "..") || rel === "") {
-    throw new Error(`Scenario path escapes ${rootDir}/: "${scenarioName}" -> "${safeName}"`);
+    throw new Error(`Scenario path escapes plan-harness/: "${scenarioName}" -> "${safeName}"`);
   }
   await mkdir(scenarioPath, { recursive: true });
-  const isV2 = rootDir === "plan-harness";
   const manifest = {
     scenario: safeName,
     displayName: scenarioName,
@@ -32433,12 +32416,9 @@ async function createScenario(repoRoot, scenarioName, metadata = {}) {
     createdAt: (/* @__PURE__ */ new Date()).toISOString(),
     tags: metadata.tags ?? [],
     status: metadata.status ?? "draft",
-    ...isV2 && {
-      schemaVersion: 2,
-      metaHashes: {},
-      upstreamHashes: {},
-      sharedAssets: {}
-    }
+    metaHashes: {},
+    upstreamHashes: {},
+    sharedAssets: {}
   };
   const manifestPath = join(scenarioPath, "manifest.json");
   await writeFile(manifestPath, JSON.stringify(manifest, null, 2), "utf-8");
@@ -32960,12 +32940,13 @@ server2.setRequestHandler(CallToolRequestSchema, async (request) => {
         }
         const lines = scenarios.map((s) => {
           const flags = [
+            s.hasProduct ? "product" : null,
+            s.hasAnalysis ? "analysis" : null,
             s.hasDesign ? "design" : null,
-            s.hasTestPlan ? "test-plan" : null,
             s.hasStateMachine ? "state-machine" : null,
-            s.hasTestCases ? "test-cases" : null,
-            s.hasImplementationPlan ? "impl-plan" : null,
-            s.hasDashboard ? "dashboard" : null
+            s.hasTestSpec ? "test-spec" : null,
+            s.hasImplementation ? "implementation" : null,
+            s.hasTestReport ? "test-report" : null
           ].filter(Boolean).join(", ");
           return [
             `  Scenario: ${s.scenario}`,

@@ -5976,520 +5976,295 @@ var require_dist = __commonJS({
   }
 });
 
-// src/lint-cli.js
-import { basename, resolve, sep, dirname } from "node:path";
+// src/validate-cli.js
+import { basename, resolve, sep, dirname as dirname2 } from "node:path";
 import { readdir, stat } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 
-// src/html-lint.js
+// src/meta-validate.js
 var import_node_html_parser = __toESM(require_dist(), 1);
-import crypto from "node:crypto";
-
-// src/manifest.js
-function canonicalJson(value) {
-  if (value === null || typeof value !== "object") {
-    return JSON.stringify(value);
-  }
-  if (Array.isArray(value)) {
-    return "[" + value.map(canonicalJson).join(",") + "]";
-  }
-  const keys = Object.keys(value).sort();
-  const parts = keys.map((k) => JSON.stringify(k) + ":" + canonicalJson(value[k]));
-  return "{" + parts.join(",") + "}";
-}
-
-// src/html-lint.js
-var SCENARIO_DOCS = [
-  "product",
-  "analysis",
-  "design",
-  "state-machine",
-  "test-spec",
-  "implementation",
-  "test-report"
-];
-var LOCKED_PALETTE_VARS = [
-  "--bg",
-  "--panel",
-  "--panel2",
-  "--border",
-  "--fg",
-  "--muted",
-  "--accent"
-];
-var PALETTE_LOCKED_VALUES = {
-  "--bg": "#0d1117",
-  "--panel": "#161b22",
-  "--panel2": "#1c2128",
-  "--border": "#30363d",
-  "--fg": "#c9d1d9",
-  "--accent": "#58a6ff"
+import { readFile, access } from "node:fs/promises";
+import { dirname, join } from "node:path";
+var REQUIRED_TOP_LEVEL = {
+  product: ["doc", "scenario", "problem", "users", "userStories", "successMetrics"],
+  analysis: ["doc", "scenario", "problem", "painPoints", "rootCauses", "hypotheses"],
+  design: ["doc", "scenario", "goals", "componentDag", "uxMockups", "userFlows", "decisions", "interfaces"],
+  "state-machine": ["doc", "scenario", "stateMachines", "perStoryFlows", "cornerCases", "invariants"],
+  "test-spec": ["doc", "scenario", "verticalSlices", "scenarios", "hitlAfkMatrix"],
+  implementation: ["doc", "scenario", "prs"],
+  "test-report": ["doc", "scenario", "runs", "summary"]
 };
-var SHARED_LINK_LABELS = ["Context", "Glossary", "ADR"];
-var DIAGRAM_REQUIRED_DOCS = /* @__PURE__ */ new Set(["design", "state-machine"]);
-function nodeText(node) {
-  return String(node?.text || "").replace(/\s+/g, " ").trim();
+function listMissing(meta, required) {
+  return required.filter((field) => meta[field] === void 0 || meta[field] === null);
 }
-function slugify(text) {
-  return String(text).toLowerCase().replace(/\s+/g, "-").replace(/[^a-z0-9-]/g, "").replace(/-+/g, "-").replace(/^-|-$/g, "") || "section";
+function isArrayOf(meta, field) {
+  return Array.isArray(meta[field]) && meta[field].length > 0;
 }
-function collectHeadings(root) {
-  const seen = /* @__PURE__ */ new Map();
-  const scope = root.querySelector("main > section") || root.querySelector("main") || root;
-  return scope.querySelectorAll("h2").map((heading) => {
-    const label = nodeText(heading);
-    const explicitId = heading.getAttribute("id");
-    const base = slugify(label);
-    const count = (seen.get(base) || 0) + 1;
-    seen.set(base, count);
-    return {
-      id: explicitId || (count === 1 ? base : `${base}-${count}`),
-      label
-    };
-  }).filter((h) => h.label);
+async function readSiblingMeta(docDir, name) {
+  try {
+    const raw = await readFile(join(docDir, `${name}.meta.json`), "utf-8");
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
 }
-function hasSvgOrMermaid(root) {
-  return root.querySelectorAll("svg").length > 0 || root.querySelectorAll("pre.mermaid, .mermaid").length > 0;
-}
-function hasVisualNear(root, words) {
-  const visualNodes = root.querySelectorAll("svg, pre.mermaid, .mermaid, .diagram-box");
-  return visualNodes.some((node) => {
-    const text = nodeText(node.parentNode || node).toLowerCase();
-    return words.some((word) => text.includes(word));
-  });
-}
-function lintHtml(html, ctx = {}) {
+async function validateMeta(meta, ctx = {}) {
   const errors = [];
   const warnings = [];
-  const info = [];
   const skip = new Set(ctx.skipRules || []);
-  const root = (0, import_node_html_parser.parse)(html, { lowerCaseTagName: false, comment: false });
-  if (!skip.has("L1-skeleton")) {
-    const header = root.querySelector("header.top");
-    if (!header) {
-      errors.push({
-        rule: "L1-skeleton",
-        severity: "error",
-        message: '<header class="top"> missing \u2014 mixin \xA7File skeleton requires it'
-      });
-    } else {
-      if (!header.querySelector("h1")) {
-        errors.push({
-          rule: "L1-skeleton",
-          severity: "error",
-          message: "<header.top> missing <h1> title"
-        });
-      }
-      if (!header.querySelector(".crumb")) {
-        errors.push({
-          rule: "L1-skeleton",
-          severity: "error",
-          message: '<header.top> missing <span class="crumb">'
-        });
-      }
-      if (!header.querySelector(".links")) {
-        errors.push({
-          rule: "L1-skeleton",
-          severity: "error",
-          message: '<header.top> missing <div class="links"> for shared assets'
-        });
-      }
-    }
+  const docName = ctx.docName || meta.doc;
+  if (!docName) {
+    errors.push({
+      rule: "V0-doc-name",
+      severity: "error",
+      message: 'meta.json missing "doc" field \u2014 cannot determine which schema to validate against'
+    });
+    return { errors, warnings };
   }
-  if (!skip.has("L1-section")) {
-    const main = root.querySelector("main");
-    if (!main) {
-      errors.push({
-        rule: "L1-section",
-        severity: "error",
-        message: "<main> missing \u2014 mixin requires header + main + nav.toc + section"
-      });
-    } else {
-      const sections = main.querySelectorAll(":scope > section");
-      if (sections.length === 0) {
-        errors.push({
-          rule: "L1-section",
-          severity: "error",
-          message: "<main> has no direct child <section>"
-        });
-      }
-    }
-  }
-  if (!skip.has("L1-nav")) {
-    const nav = root.querySelector("nav.toc");
-    if (!nav) {
-      errors.push({
-        rule: "L1-nav",
-        severity: "error",
-        message: '<nav class="toc"> missing'
-      });
-    } else {
-      const h3s = nav.querySelectorAll("h3");
-      if (h3s.length < 2) {
-        errors.push({
-          rule: "L1-nav",
-          severity: "error",
-          message: `<nav.toc> must have two <h3> headings (Documents + Sections), found ${h3s.length}`
-        });
-      }
-      const sep2 = nav.querySelector(".sep");
-      if (!sep2) {
-        errors.push({
-          rule: "L1-nav",
-          severity: "error",
-          message: '<nav.toc> missing <div class="sep"> divider between Documents and Sections'
-        });
-      }
-      const sectionsWrap = nav.querySelector(".sections");
-      if (!sectionsWrap) {
-        errors.push({
-          rule: "L1-nav",
-          severity: "error",
-          message: '<nav.toc> missing <div class="sections"> wrapper for section links \u2014 L3-section-nav scans `nav.toc .sections a[href^="#"]`'
-        });
-      }
-      const docgroupWrap = nav.querySelector(".docgroup");
-      if (!docgroupWrap && !skip.has("L1-docgroup")) {
-        errors.push({
-          rule: "L1-nav",
-          severity: "error",
-          message: '<nav.toc> missing <div class="docgroup"> wrapper for the 7 scenario-doc links'
-        });
-      }
-    }
-  }
-  if (!skip.has("L1-docgroup")) {
-    const docgroup = root.querySelector("nav.toc .docgroup");
-    if (!docgroup) {
-      errors.push({
-        rule: "L1-docgroup",
-        severity: "error",
-        message: "<nav.toc .docgroup> missing \u2014 sidebar must list the 7 scenario docs"
-      });
-    } else {
-      const links = docgroup.querySelectorAll("a");
-      const hrefs = links.map((a) => (a.getAttribute("href") || "").toLowerCase());
-      const missing = SCENARIO_DOCS.filter(
-        (d) => !hrefs.some((h) => h.endsWith(`/${d}.html`))
-      );
+  if (!skip.has("V1-shape")) {
+    const required = REQUIRED_TOP_LEVEL[docName];
+    if (required) {
+      const missing = listMissing(meta, required);
       if (missing.length) {
         errors.push({
-          rule: "L1-docgroup",
+          rule: "V1-shape",
           severity: "error",
-          message: `<nav.toc .docgroup> missing links to: ${missing.join(", ")}`
+          message: `${docName}.meta.json missing required field(s): ${missing.join(", ")}`
         });
       }
     }
   }
-  if (!skip.has("L1-active") && ctx.docName) {
-    const docgroup = root.querySelector("nav.toc .docgroup");
-    if (docgroup) {
-      const active = docgroup.querySelectorAll("a.active");
-      if (active.length === 0) {
-        errors.push({
-          rule: "L1-active",
-          severity: "error",
-          message: `<nav.toc .docgroup> has no <a class="active"> \u2014 current doc (${ctx.docName}) must be highlighted`
-        });
-      } else if (active.length > 1) {
-        warnings.push({
-          rule: "L1-active",
-          severity: "warning",
-          message: `<nav.toc .docgroup> has ${active.length} active links \u2014 should be exactly 1`
-        });
-      } else {
-        const href = (active[0].getAttribute("href") || "").toLowerCase();
-        if (!href.endsWith(`/${ctx.docName}.html`)) {
-          warnings.push({
-            rule: "L1-active",
-            severity: "warning",
-            message: `Active link href "${href}" does not match docName "${ctx.docName}"`
-          });
-        }
-      }
-    }
-  }
-  const styleTags = root.querySelectorAll("style");
-  const styleText = styleTags.map((s) => s.text).join("\n");
-  if (!skip.has("L2-palette") && styleText) {
-    const missing = LOCKED_PALETTE_VARS.filter((v) => !styleText.includes(v + ":"));
-    if (missing.length) {
+  if (!skip.has("V2-product-mockups") && docName === "product" && isArrayOf(meta, "userStories")) {
+    const missingMockups = meta.userStories.map((s, i) => ({ id: s.id || `index-${i}`, hasMockup: !!s.mockup })).filter((s) => !s.hasMockup);
+    if (missingMockups.length) {
       errors.push({
-        rule: "L2-palette",
+        rule: "V2-product-mockups",
         severity: "error",
-        message: `<style> missing locked palette variables: ${missing.join(", ")}`
-      });
-    }
-    for (const [v, expected] of Object.entries(PALETTE_LOCKED_VALUES)) {
-      const re = new RegExp(`${v}\\s*:\\s*([#\\w()., ]+?)\\s*;`, "i");
-      const m = styleText.match(re);
-      if (m && m[1].trim().toLowerCase() !== expected.toLowerCase()) {
-        warnings.push({
-          rule: "L2-palette",
-          severity: "warning",
-          message: `${v} = "${m[1].trim()}" but locked value is "${expected}"`
-        });
-      }
-    }
-  }
-  if (!skip.has("L2-no-maxwidth-section") && styleText) {
-    const sectionBlockRe = /(^|\s|,)section\b[^{}]*\{([^}]*)\}/gi;
-    let m;
-    while ((m = sectionBlockRe.exec(styleText)) !== null) {
-      if (/max-width\s*:\s*[^;]+;/i.test(m[2]) && !/max-width\s*:\s*none\b/i.test(m[2])) {
-        errors.push({
-          rule: "L2-no-maxwidth-section",
-          severity: "error",
-          message: '<section> CSS rule contains "max-width" \u2014 mixin \xA7Layout forbids it. Use padding clamp() to center content instead.'
-        });
-        break;
-      }
-    }
-  }
-  if (!skip.has("L2-padding-clamp") && styleText) {
-    const sectionBlockRe = /(^|\s|,)section\b[^{}]*\{([^}]*)\}/gi;
-    let foundSection = false;
-    let foundClamp = false;
-    let m;
-    while ((m = sectionBlockRe.exec(styleText)) !== null) {
-      foundSection = true;
-      if (/padding\s*:[^;]*clamp\s*\(/i.test(m[2])) {
-        foundClamp = true;
-        break;
-      }
-    }
-    if (foundSection && !foundClamp) {
-      warnings.push({
-        rule: "L2-padding-clamp",
-        severity: "warning",
-        message: "<section> padding does not use clamp() \u2014 mixin \xA7Layout requires responsive padding (e.g. `padding: 32px clamp(24px, calc((100% - 960px) / 2), 96px);`)"
+        message: `product.userStories[] entries without a mockup field: ${missingMockups.map((s) => s.id).join(", ")}`
       });
     }
   }
-  if (!skip.has("L2-crumb-color") && styleText) {
-    const crumbBlockRe = /\.crumb\b[^{}]*\{([^}]*)\}/i;
-    const m = styleText.match(crumbBlockRe);
-    if (m && /color\s*:\s*var\(\s*--muted\s*\)/i.test(m[1])) {
-      errors.push({
-        rule: "L2-crumb-color",
-        severity: "error",
-        message: ".crumb color is var(--muted) \u2014 mixin \xA7Layout requires var(--fg) with opacity 0.85 for contrast"
-      });
-    }
-  }
-  if (!skip.has("L3-section-nav")) {
-    const headings = collectHeadings(root);
-    const navLinks = root.querySelectorAll('nav.toc .sections a[href^="#"]');
-    if (headings.length > 0 && navLinks.length === 0) {
-      errors.push({
-        rule: "L3-section-nav",
-        severity: "error",
-        message: "<nav.toc .sections> has no section links, but the document has headings"
-      });
-    } else if (navLinks.length > 0) {
-      const navTargets = navLinks.map((a) => (a.getAttribute("href") || "").replace(/^#/, ""));
-      const headingIds = headings.map((h) => h.id);
-      const missing = headingIds.filter((id) => !navTargets.includes(id));
-      const stale = navTargets.filter((id) => !headingIds.includes(id));
-      if (missing.length || stale.length) {
-        errors.push({
-          rule: "L3-section-nav",
-          severity: "error",
-          message: `Section nav is stale \u2014 missing heading ids: [${missing.join(", ") || "none"}], stale links: [${stale.join(", ") || "none"}]`
-        });
-      }
-    }
-  }
-  if (!skip.has("L3-diagrams") && DIAGRAM_REQUIRED_DOCS.has(ctx.docName)) {
-    if (!hasSvgOrMermaid(root)) {
-      errors.push({
-        rule: "L3-diagrams",
-        severity: "error",
-        message: `${ctx.docName}.html must include a first-class diagram: inline <svg> preferred, <pre class="mermaid"> accepted, table-only is not enough`
-      });
-    } else if (root.querySelectorAll("svg").length === 0) {
-      warnings.push({
-        rule: "L3-diagrams",
-        severity: "warning",
-        message: `${ctx.docName}.html uses Mermaid only \u2014 SVG is preferred; tables are fallback only`
-      });
-    }
-  }
-  if (!skip.has("L3-story-flows") && ctx.docName === "state-machine") {
-    const flows = Array.isArray(ctx.metaJson?.perStoryFlows) ? ctx.metaJson.perStoryFlows : null;
-    if (flows !== null) {
-      const visuals = root.querySelectorAll("svg, pre.mermaid, .mermaid").length;
-      const expectedVisualsPerFlow = 1;
-      if (visuals < flows.length * expectedVisualsPerFlow) {
-        errors.push({
-          rule: "L3-story-flows",
-          severity: "error",
-          message: `State-machine doc has ${visuals} diagram(s) but ${flows.length} perStoryFlows[] \u2014 every user story needs its state-path visual`
-        });
-      }
-    }
-  }
-  if (!skip.has("L3-product-mockups") && ctx.docName === "product") {
-    const mockupVisuals = root.querySelectorAll("svg, pre.mermaid, .mermaid").filter((node) => {
-      const text = nodeText(node.parentNode || node).toLowerCase();
-      return /\b(mockup|screen|wireframe|sketch)\b/.test(text);
-    });
-    const storyCount = Array.isArray(ctx.metaJson?.userStories) ? ctx.metaJson.userStories.length : 0;
-    if (mockupVisuals.length === 0) {
-      errors.push({
-        rule: "L3-product-mockups",
-        severity: "error",
-        message: "Product doc has no mockup visual \u2014 every user story needs a mockup (screen/terminal/API sketch)"
-      });
-    } else if (storyCount > 0 && mockupVisuals.length < storyCount) {
-      errors.push({
-        rule: "L3-product-mockups",
-        severity: "error",
-        message: `Product doc has ${mockupVisuals.length} mockup visual(s) but ${storyCount} userStories[] \u2014 every story needs its own mockup`
-      });
-    }
-  }
-  if (!skip.has("L3-ux-visuals") && ctx.docName === "design") {
-    if (!hasVisualNear(root, ["mockup", "wireframe", "screen"])) {
-      errors.push({
-        rule: "L3-ux-visuals",
-        severity: "error",
-        message: "Design doc has no first-class mockup/wireframe/screen visual \u2014 every design needs one (terminal/API sketches count for non-UI tools)"
-      });
-    }
-    if (!hasVisualNear(root, ["flow", "journey", "screen flow", "user flow", "workflow"])) {
-      errors.push({
-        rule: "L3-ux-visuals",
-        severity: "error",
-        message: "Design doc has no first-class user-flow/workflow visual \u2014 every design needs one (command/API sequences count for non-UI tools)"
-      });
-    }
-  }
-  if (!skip.has("L3-meta-embed")) {
-    const metaTag = root.querySelector("script#meta");
-    if (!metaTag) {
-      errors.push({
-        rule: "L3-meta-embed",
-        severity: "error",
-        message: '<script type="application/json" id="meta"> missing \u2014 mixin \xA7Meta requires it'
-      });
-    } else {
-      const type = (metaTag.getAttribute("type") || "").toLowerCase();
-      if (type !== "application/json") {
-        errors.push({
-          rule: "L3-meta-embed",
-          severity: "error",
-          message: `<script#meta> type="${type}" \u2014 must be "application/json"`
-        });
-      }
-      const raw = metaTag.text.trim();
-      let parsed;
-      try {
-        parsed = JSON.parse(raw);
-      } catch (err) {
-        errors.push({
-          rule: "L3-meta-embed",
-          severity: "error",
-          message: `<script#meta> body is not valid JSON: ${err.message}`
-        });
-      }
-      if (parsed && ctx.metaJson) {
-        const embeddedHash = crypto.createHash("sha256").update(canonicalJson(parsed), "utf8").digest("hex");
-        const externalHash = crypto.createHash("sha256").update(canonicalJson(ctx.metaJson), "utf8").digest("hex");
-        if (embeddedHash !== externalHash) {
+  if (ctx.docDir) {
+    if (!skip.has("V3-state-machine-stories") && docName === "state-machine") {
+      const product = await readSiblingMeta(ctx.docDir, "product");
+      if (product && Array.isArray(product.userStories)) {
+        const productIds = new Set(product.userStories.map((s) => s.id));
+        const flows = Array.isArray(meta.perStoryFlows) ? meta.perStoryFlows : [];
+        if (flows.length !== productIds.size) {
           errors.push({
-            rule: "L3-meta-embed",
+            rule: "V3-state-machine-stories",
             severity: "error",
-            message: `<script#meta> hash mismatch \u2014 embedded ${embeddedHash.slice(0, 12)}... vs external ${externalHash.slice(0, 12)}...`
+            message: `state-machine.perStoryFlows has ${flows.length} entries but product.userStories has ${productIds.size} \u2014 every story needs its own flow`
+          });
+        }
+        const dangling = flows.filter((f) => f.storyId && !productIds.has(f.storyId));
+        if (dangling.length) {
+          errors.push({
+            rule: "V3-state-machine-stories",
+            severity: "error",
+            message: `state-machine.perStoryFlows[].storyId not in product.userStories[].id: ${dangling.map((f) => f.storyId).join(", ")}`
+          });
+        }
+        if (Array.isArray(meta.stateMachines)) {
+          const machineIds = new Set(meta.stateMachines.map((m) => m.id));
+          const danglingMachines = flows.filter((f) => f.machine && !machineIds.has(f.machine));
+          if (danglingMachines.length) {
+            errors.push({
+              rule: "V3-state-machine-stories",
+              severity: "error",
+              message: `state-machine.perStoryFlows[].machine not in stateMachines[].id: ${danglingMachines.map((f) => f.machine).join(", ")}`
+            });
+          }
+        }
+      }
+    }
+    if (!skip.has("V3-implementation-slices") && docName === "implementation") {
+      const testSpec = await readSiblingMeta(ctx.docDir, "test-spec");
+      if (testSpec && Array.isArray(testSpec.verticalSlices)) {
+        const sliceIds = new Set(testSpec.verticalSlices.map((s) => s.id));
+        const prs = Array.isArray(meta.prs) ? meta.prs : [];
+        const dangling = prs.filter((p) => p.slice && !sliceIds.has(p.slice));
+        if (dangling.length) {
+          errors.push({
+            rule: "V3-implementation-slices",
+            severity: "error",
+            message: `implementation.prs[].slice not in test-spec.verticalSlices[].id: ${dangling.map((p) => `${p.id || "?"}\u2192${p.slice}`).join(", ")}`
+          });
+        }
+      }
+    }
+    if (!skip.has("V3-design-state-machine-refs") && docName === "design") {
+      const stateMachine = await readSiblingMeta(ctx.docDir, "state-machine");
+      if (stateMachine && Array.isArray(stateMachine.stateMachines) && Array.isArray(meta.stateMachineRefs)) {
+        const machineIds = new Set(stateMachine.stateMachines.map((m) => m.id));
+        const dangling = meta.stateMachineRefs.filter((r) => r.id && !machineIds.has(r.id));
+        if (dangling.length) {
+          warnings.push({
+            rule: "V3-design-state-machine-refs",
+            severity: "warning",
+            message: `design.stateMachineRefs[].id not (yet) in state-machine.meta.json: ${dangling.map((r) => r.id).join(", ")} \u2014 may be fine if state-machine is regenerated next`
+          });
+        }
+      }
+    }
+    if (!skip.has("V3-test-spec-slices") && docName === "test-spec" && Array.isArray(meta.scenarios) && Array.isArray(meta.verticalSlices)) {
+      const sliceIds = new Set(meta.verticalSlices.map((s) => s.id));
+      const dangling = meta.scenarios.filter((s) => s.slice && !sliceIds.has(s.slice));
+      if (dangling.length) {
+        errors.push({
+          rule: "V3-test-spec-slices",
+          severity: "error",
+          message: `test-spec.scenarios[].slice not in verticalSlices[].id: ${dangling.map((s) => s.id || s.slice).join(", ")}`
+        });
+      }
+    }
+    if (!skip.has("V3-test-report-scenarios") && docName === "test-report") {
+      const testSpec = await readSiblingMeta(ctx.docDir, "test-spec");
+      if (testSpec && Array.isArray(testSpec.scenarios) && Array.isArray(meta.runs)) {
+        const scenarioIds = new Set(testSpec.scenarios.map((s) => s.id));
+        const dangling = meta.runs.filter((r) => r.scenarioId && !scenarioIds.has(r.scenarioId));
+        if (dangling.length) {
+          errors.push({
+            rule: "V3-test-report-scenarios",
+            severity: "error",
+            message: `test-report.runs[].scenarioId not in test-spec.scenarios[].id: ${dangling.map((r) => r.scenarioId).join(", ")}`
           });
         }
       }
     }
   }
-  if (!skip.has("L3-links")) {
+  return { errors, warnings };
+}
+async function validateMetaFile(absPath, ctx = {}) {
+  const raw = await readFile(absPath, "utf-8");
+  const meta = JSON.parse(raw);
+  const inferred = {
+    docName: ctx.docName || meta.doc || absPath.replace(/\.meta\.json$/i, "").split(/[\\/]/).pop(),
+    docDir: ctx.docDir || dirname(absPath),
+    skipRules: ctx.skipRules
+  };
+  return validateMeta(meta, inferred);
+}
+async function validateHtmlSemantics(html, meta, ctx = {}) {
+  const errors = [];
+  const warnings = [];
+  const skip = new Set(ctx.skipRules || []);
+  const docName = ctx.docName || meta?.doc;
+  if (!docName) return { errors, warnings };
+  const root = (0, import_node_html_parser.parse)(html || "", { lowerCaseTagName: false, comment: false });
+  const visualsLabelled = (regex) => root.querySelectorAll("svg, pre.mermaid, .mermaid").filter((node) => {
+    const text = String(node.parentNode?.text || node.text || "").toLowerCase();
+    return regex.test(text);
+  });
+  if (!skip.has("V4-product-mockup-render") && docName === "product" && Array.isArray(meta?.userStories)) {
+    const mockups = visualsLabelled(/\b(mockup|screen|wireframe|sketch|terminal|cli)\b/);
+    if (mockups.length < meta.userStories.length) {
+      errors.push({
+        rule: "V4-product-mockup-render",
+        severity: "error",
+        message: `product.html renders ${mockups.length} mockup visual(s) but meta.userStories has ${meta.userStories.length} \u2014 every story's mockup must be visible in the HTML`
+      });
+    }
+  }
+  if (!skip.has("V4-state-machine-flow-render") && docName === "state-machine" && Array.isArray(meta?.perStoryFlows)) {
+    const diagrams = root.querySelectorAll("svg, pre.mermaid, .mermaid").length;
+    if (diagrams < meta.perStoryFlows.length) {
+      errors.push({
+        rule: "V4-state-machine-flow-render",
+        severity: "error",
+        message: `state-machine.html renders ${diagrams} diagram(s) but meta.perStoryFlows has ${meta.perStoryFlows.length} \u2014 every story's state path must be visible`
+      });
+    }
+  }
+  if (!skip.has("V4-design-visuals-render") && docName === "design") {
+    const mockupVisuals = visualsLabelled(/\b(mockup|screen|wireframe|sketch)\b/);
+    const flowVisuals = visualsLabelled(/\b(flow|journey|sequence|workflow)\b/);
+    const expectedMockups = Array.isArray(meta?.uxMockups) ? meta.uxMockups.length : 0;
+    const expectedFlows = Array.isArray(meta?.userFlows) ? meta.userFlows.length : 0;
+    if (expectedMockups > 0 && mockupVisuals.length < expectedMockups) {
+      errors.push({
+        rule: "V4-design-visuals-render",
+        severity: "error",
+        message: `design.html renders ${mockupVisuals.length} mockup visual(s) but meta.uxMockups has ${expectedMockups}`
+      });
+    }
+    if (expectedFlows > 0 && flowVisuals.length < expectedFlows) {
+      errors.push({
+        rule: "V4-design-visuals-render",
+        severity: "error",
+        message: `design.html renders ${flowVisuals.length} flow visual(s) but meta.userFlows has ${expectedFlows}`
+      });
+    }
+  }
+  if (!skip.has("V4-hrefs-resolve") && ctx.docDir) {
+    const sharedDir = ctx.sharedDir || join(dirname(ctx.docDir), "_shared");
+    const scenarioParent = dirname(ctx.docDir);
     const anchors = root.querySelectorAll("a[href]");
-    const bad = [];
+    const broken = [];
     for (const a of anchors) {
       const href = a.getAttribute("href") || "";
-      if (!href) continue;
-      if (href.startsWith("#")) continue;
-      if (href.startsWith("/")) continue;
-      if (/^https?:\/\//i.test(href)) continue;
-      if (href.startsWith("mailto:")) continue;
-      bad.push(href);
-    }
-    if (bad.length) {
-      const sample = bad.slice(0, 5).join(", ");
-      errors.push({
-        rule: "L3-links",
-        severity: "error",
-        message: `Found ${bad.length} non-root-absolute link(s): ${sample}${bad.length > 5 ? " ..." : ""}. Mixin \xA7Link rules forbid "./", "../", "file://".`
-      });
-    }
-  }
-  if (!skip.has("L3-shared-link")) {
-    const links = root.querySelectorAll("header.top .links a");
-    if (links.length !== 3) {
-      errors.push({
-        rule: "L3-shared-link",
-        severity: "error",
-        message: `<header.top .links> has ${links.length} links \u2014 must be exactly 3 (Context, Glossary, ADRs)`
-      });
-    } else {
-      const texts = links.map((a) => a.text.trim());
-      for (const expected of SHARED_LINK_LABELS) {
-        if (!texts.some((t) => t.includes(expected))) {
-          warnings.push({
-            rule: "L3-shared-link",
-            severity: "warning",
-            message: `<header.top .links> missing "${expected}" \u2014 found: [${texts.join(", ")}]`
-          });
+      if (!href.startsWith("/")) continue;
+      if (href.startsWith("/_shared/")) {
+        const rel = href.slice("/_shared/".length).split("#")[0];
+        if (!rel) continue;
+        try {
+          await access(join(sharedDir, rel));
+        } catch {
+          broken.push(href);
         }
-      }
-      for (const a of links) {
-        const href = a.getAttribute("href") || "";
-        if (!href.startsWith("/_shared/")) {
-          errors.push({
-            rule: "L3-shared-link",
-            severity: "error",
-            message: `<header.top .links> link "${href}" does not start with /_shared/`
-          });
+      } else {
+        const rel = href.slice(1).split("#")[0];
+        if (!rel || !rel.endsWith(".html")) continue;
+        try {
+          await access(join(scenarioParent, rel));
+        } catch {
+          broken.push(href);
         }
       }
     }
+    if (broken.length) {
+      const sample = broken.slice(0, 5).join(", ");
+      warnings.push({
+        rule: "V4-hrefs-resolve",
+        severity: "warning",
+        message: `${broken.length} cross-doc href(s) point at files that don't exist on disk: ${sample}${broken.length > 5 ? " ..." : ""}`
+      });
+    }
   }
-  return { errors, warnings, info };
+  return { errors, warnings };
 }
-function formatReport(filePath, result) {
+async function validateDoc(metaPath, htmlPath, ctx = {}) {
+  const metaResult = await validateMetaFile(metaPath, ctx);
+  let htmlResult = { errors: [], warnings: [] };
+  try {
+    const html = await readFile(htmlPath, "utf-8");
+    const meta = JSON.parse(await readFile(metaPath, "utf-8"));
+    htmlResult = await validateHtmlSemantics(html, meta, {
+      docName: ctx.docName,
+      docDir: ctx.docDir || dirname(metaPath),
+      sharedDir: ctx.sharedDir,
+      skipRules: ctx.skipRules
+    });
+  } catch {
+  }
+  return {
+    errors: [...metaResult.errors, ...htmlResult.errors],
+    warnings: [...metaResult.warnings, ...htmlResult.warnings]
+  };
+}
+function formatValidateReport(filePath, result) {
   const { errors, warnings } = result;
   if (errors.length === 0 && warnings.length === 0) return "";
-  const lines = [`${filePath}`];
+  const lines = [filePath];
   for (const e of errors) lines.push(`  [ERROR] ${e.rule}: ${e.message}`);
   for (const w of warnings) lines.push(`  [WARN]  ${w.rule}: ${w.message}`);
   return lines.join("\n");
 }
-async function lintFile(absPath, ctx = {}) {
-  const { readFile } = await import("node:fs/promises");
-  const html = await readFile(absPath, "utf-8");
-  if (!ctx.docName) {
-    const base = absPath.substring(absPath.lastIndexOf("/") + 1);
-    ctx.docName = base.replace(/\.html?$/i, "");
-  }
-  if (!ctx.metaJson) {
-    try {
-      const metaPath = absPath.replace(/\.html?$/i, ".meta.json");
-      const metaRaw = await readFile(metaPath, "utf-8");
-      ctx.metaJson = JSON.parse(metaRaw);
-    } catch {
-    }
-  }
-  return lintHtml(html, ctx);
-}
 
-// src/lint-cli.js
+// src/validate-cli.js
 var __filename = fileURLToPath(import.meta.url);
-var localProxyDir = dirname(dirname(__filename));
-var repoRoot = dirname(localProxyDir);
+var localProxyDir = dirname2(dirname2(__filename));
+var repoRoot = dirname2(localProxyDir);
 var args = process.argv.slice(2);
 var workspaceRoot = repoRoot;
 var warnAsError = false;
@@ -6501,7 +6276,7 @@ for (let i = 0; i < args.length; i++) {
   } else if (a === "--warn-as-error") {
     warnAsError = true;
   } else if (a === "--help" || a === "-h") {
-    process.stdout.write(`Usage: lint-cli.js [--workspace DIR] [--warn-as-error] [file.html ...]
+    process.stdout.write(`Usage: validate-cli.js [--workspace DIR] [--warn-as-error] [file.meta.json ...]
 `);
     process.exit(0);
   } else if (a.startsWith("--")) {
@@ -6525,7 +6300,7 @@ async function walkDir(dir, out) {
     const p = dir + sep + e.name;
     if (e.isDirectory()) {
       await walkDir(p, out);
-    } else if (/\.html?$/i.test(e.name)) {
+    } else if (/\.meta\.json$/i.test(e.name)) {
       out.push(p);
     }
   }
@@ -6533,48 +6308,36 @@ async function walkDir(dir, out) {
 async function collectTargets() {
   if (explicitPaths.length) return explicitPaths;
   const collected = [];
-  for (const root of ["plan-harness", "plans"]) {
-    const dir = workspaceRoot + sep + root;
-    try {
-      await stat(dir);
-      await walkDir(dir, collected);
-    } catch {
-    }
+  const dir = workspaceRoot + sep + "plan-harness";
+  try {
+    await stat(dir);
+    await walkDir(dir, collected);
+  } catch {
   }
   return collected;
 }
 var targets = await collectTargets();
 if (targets.length === 0) {
-  process.stdout.write(`No HTML files found under ${workspaceRoot}/{plan-harness,plans}
+  process.stdout.write(`No meta.json files found under ${workspaceRoot}/plan-harness
 `);
   process.exit(0);
 }
 var totalErrors = 0;
 var totalWarnings = 0;
 var filesWithFindings = 0;
-function lintCtxFor(absPath) {
-  const docName = basename(absPath).replace(/\.html?$/i, "");
-  const parts = absPath.split(sep);
-  const phIdx = parts.indexOf("plan-harness");
-  if (phIdx >= 0 && parts[phIdx + 1] === "_shared") {
-    return { docName, skipRules: ["L1-docgroup", "L1-active"] };
-  }
-  return { docName };
-}
 for (const p of targets) {
-  const result = await lintFile(p, lintCtxFor(p));
+  const htmlPath = p.replace(/\.meta\.json$/i, ".html");
+  const result = await validateDoc(p, htmlPath);
   if (result.errors.length || result.warnings.length) {
     filesWithFindings += 1;
     totalErrors += result.errors.length;
     totalWarnings += result.warnings.length;
-    process.stdout.write(formatReport(p, result) + "\n\n");
+    process.stdout.write(formatValidateReport(p, result) + "\n\n");
   }
 }
-var summary = `${targets.length} file(s) checked \xB7 ${filesWithFindings} with findings \xB7 ${totalErrors} error(s) \xB7 ${totalWarnings} warning(s)`;
-process.stdout.write(summary + "\n");
-if (totalErrors > 0 || warnAsError && totalWarnings > 0) {
-  process.exit(1);
-}
+process.stdout.write(`${targets.length} meta.json file(s) checked \xB7 ${filesWithFindings} with findings \xB7 ${totalErrors} error(s) \xB7 ${totalWarnings} warning(s)
+`);
+if (totalErrors > 0 || warnAsError && totalWarnings > 0) process.exit(1);
 process.exit(0);
 /*! Bundled license information:
 

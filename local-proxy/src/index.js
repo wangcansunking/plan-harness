@@ -342,12 +342,13 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
         const lines = scenarios.map((s) => {
           const flags = [
-            s.hasDesign ? "design" : null,
-            s.hasTestPlan ? "test-plan" : null,
-            s.hasStateMachine ? "state-machine" : null,
-            s.hasTestCases ? "test-cases" : null,
-            s.hasImplementationPlan ? "impl-plan" : null,
-            s.hasDashboard ? "dashboard" : null,
+            s.hasProduct        ? "product"        : null,
+            s.hasAnalysis       ? "analysis"       : null,
+            s.hasDesign         ? "design"         : null,
+            s.hasStateMachine   ? "state-machine"  : null,
+            s.hasTestSpec       ? "test-spec"      : null,
+            s.hasImplementation ? "implementation" : null,
+            s.hasTestReport     ? "test-report"    : null,
           ]
             .filter(Boolean)
             .join(", ");

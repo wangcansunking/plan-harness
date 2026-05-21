@@ -6,7 +6,7 @@
 | Manifest fields             | `sharedAssets.context.path`, `sharedAssets.context.hash`     |
 | Hard upstream               | — (root)                                                     |
 | Downstream                  | every scenario doc (header link)                             |
-| Agent team                  | Architect (lead), Writer                                     |
+| Agent team                  | Architect (lead), Writer, Validator                          |
 | Scope                       | Repo-wide, scenario-agnostic                                 |
 | Mixins                      | `_grill-mixin`, `_caveman-mixin`, `_html-base`               |
 
@@ -70,5 +70,7 @@ Seed TodoWrite at the start of `/plan-gen context`. Tick `in_progress` → `comp
 8. Phase B · grill keyFiles[] top-10 selection
 9. Phase C · render _shared/context/overview.html
 10. Phase C · embed canonical meta script (byte-equal to `overview.meta.json`)
-11. Phase C · run html-lint with `--skipRules L1-docgroup,L1-active` (shared-asset profile); on errors retry the writer once, then write `overview.lint.json` and abort (do NOT proceed to step 12)
-12. Phase C · record `sharedAssets.context.hash` (only when lint is clean)
+11. Phase C · run html-lint with `--skipRules L1-docgroup,L1-active` (shared-asset profile); on errors retry the writer once, then write `overview.lint.json` and abort (do NOT proceed to validate)
+12. Phase C · run meta-validate (shared-asset profile — schema + HTML semantic coverage); on errors retry the writer once, then write `overview.validate.json` and abort (do NOT proceed to Validator)
+13. Phase C · dispatch Validator agent (`subagent_type: "feature-dev:code-reviewer"`, prompt: `prompts/validator-prompt.md`). On `fail` retry Writer once, then write `overview.validator.json` and abort
+14. Phase C · record `sharedAssets.context.hash` (only when lint, validate, AND Validator are all clean)

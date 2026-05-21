@@ -4,19 +4,18 @@
 
 | Field                       | Value                                                                  |
 |-----------------------------|------------------------------------------------------------------------|
-| Output filename             | `state-machine.html` + `state-machine.meta.json` (v2)                  |
+| Output filename             | `state-machine.html` + `state-machine.meta.json`                       |
 | Manifest fields             | `stateMachineHtml`, `stateMachineGeneratedAt`, `metaHashes.state-machine` |
 | Hard upstream               | `design`, `product` (for `userStories[]` → `perStoryFlows[]` mapping)  |
 | Downstream                  | `test-spec`, `implementation`                                          |
-| Agent team                  | Architect, Writer                                                      |
-| Full workflow (legacy)      | `skills/_deprecated/plan-state-machine/SKILL.md`                       |
+| Agent team                  | Architect, Writer, Validator                                           |
 | Mixins                      | `_grill-mixin`, `_caveman-mixin`, `_html-base`                         |
 
 ## Scope
 
 Detailed lifecycle diagrams + ALL corner cases. The "source of truth" for testers and implementers. Design references SMx by id; state-machine owns the full content.
 
-## meta.json schema (v2)
+## meta.json schema
 
 ```jsonc
 {
@@ -101,5 +100,7 @@ Seed TodoWrite at the start of `/plan-gen state-machine`. Tick `in_progress` →
 11. Phase B · grill invariants[] for completeness
 12. Phase C · render state-machine.html with one mermaid block per SMx + per-story flow subsections + tables
 13. Phase C · embed canonical meta script (byte-equal to `state-machine.meta.json`)
-14. Phase C · run html-lint on the rendered HTML; on errors retry the writer once, then write `state-machine.lint.json` and abort (do NOT proceed to step 15)
-15. Phase C · record manifest hash + `stateMachineGeneratedAt` (only when lint is clean)
+14. Phase C · run html-lint on the rendered HTML; on errors retry the writer once, then write `state-machine.lint.json` and abort (do NOT proceed to validate)
+15. Phase C · run meta-validate (schema + cross-doc refs + HTML semantic coverage); on errors retry the writer once, then write `state-machine.validate.json` and abort (do NOT proceed to Validator)
+16. Phase C · dispatch Validator agent (`subagent_type: "feature-dev:code-reviewer"`, prompt: `prompts/validator-prompt.md`). On `fail` retry Writer once, then write `state-machine.validator.json` and abort
+17. Phase C · record manifest hash + `stateMachineGeneratedAt` (only when lint, validate, AND Validator are all clean)

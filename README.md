@@ -197,9 +197,9 @@ plan-harness/
     start.js                         Bootstrap (auto-installs deps)
     src/
       index.js                       MCP server (stdio)
-      plan-manager.js                Plan file operations (v1 + v2)
-      manifest-v2.js                 v2 manifest: schemaVersion, metaHashes, hash util
-      web-server.js                  HTTP dashboard (node:http) — serves both plan-harness/ and plans/
+      plan-manager.js                Plan file operations
+      manifest.js                    Manifest helpers: metaHashes, upstreamHashes, hash util
+      web-server.js                  HTTP dashboard (node:http) — serves plan-harness/
       templates/base.js              Self-contained HTML template system
   docs/
     overview.html                    Static plugin overview
@@ -211,14 +211,14 @@ Scenarios you generate land in your target repo:
 
 ```
 <target-repo>/
-  plan-harness/                      v2 root (preferred; new scenarios go here)
+  plan-harness/                      All scenarios live here
     _shared/                         Cross-scenario assets (header link)
       context/                       Code architecture
       glossary/                      Domain language
       decisions/                     ADRs
       dashboard.html                 Workspace dashboard
     <scenario-slug>/
-      manifest.json                  schemaVersion: 2, metaHashes, upstreamHashes
+      manifest.json                  metaHashes, upstreamHashes
       product.{meta.json, html}
       analysis.{meta.json, html}
       design.{meta.json, html}
@@ -226,7 +226,6 @@ Scenarios you generate land in your target repo:
       test-spec.{meta.json, html}
       implementation.{meta.json, html}
       test-report.{meta.json, html}
-  plans/                             v1 root (legacy; read-only, still served)
 ```
 
 ## Development

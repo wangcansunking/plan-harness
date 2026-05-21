@@ -2,20 +2,19 @@
 
 | Field                       | Value                                                        |
 |-----------------------------|--------------------------------------------------------------|
-| Output filename             | `design.html` + `design.meta.json` (v2)                      |
+| Output filename             | `design.html` + `design.meta.json`                           |
 | Manifest fields             | `designHtml`, `designGeneratedAt`, `metaHashes.design`       |
 | Hard upstream               | `analysis`                                                   |
 | Soft upstream               | `state-machine` (self; for cross-reference only)             |
 | Downstream                  | `state-machine`, `test-spec`, `implementation`               |
-| Agent team                  | Architect (lead), PM, Writer                                 |
-| Full workflow (legacy)      | `skills/_deprecated/plan-design/SKILL.md`                    |
+| Agent team                  | Architect (lead), PM, Writer, Validator                      |
 | Mixins                      | `_grill-mixin`, `_caveman-mixin`, `_html-base`               |
 
 ## Scope
 
 WHAT we're going to build. Concise skeleton. State-machine details live in `state-machine.html` — don't duplicate them here.
 
-## meta.json schema (v2)
+## meta.json schema
 
 ```jsonc
 {
@@ -56,7 +55,7 @@ WHAT we're going to build. Concise skeleton. State-machine details live in `stat
 3. `uxMockups` — REQUIRED. Confirm at least one mockup; for non-UI tools, agree on the form (terminal/API sketch) before drafting.
 4. `userFlows` — REQUIRED. Confirm at least one workflow visual; for non-UI tools, agree on the form (command/API sequence) before drafting.
 5. `interfaces` — Architect proposes from analysis; user confirms shape.
-6. `knownDefects` — surface v1 bugs found during analysis.
+6. `knownDefects` — surface bugs found during analysis.
 
 ## Render rules (Phase C)
 
@@ -94,9 +93,11 @@ Seed TodoWrite at the start of `/plan-gen design`. Tick `in_progress` → `compl
 8. Phase B · grill UX mockup/flow coverage (required on every design)
 9. Phase B · grill decisions[].tradeOff
 10. Phase B · grill interfaces[] shape with user
-11. Phase B · grill knownDefects[] surfacing v1 bugs
+11. Phase B · grill knownDefects[] surfacing bugs
 12. Phase C · render design.html (SVG-first diagrams; Mermaid accepted; tables fallback only)
 13. Phase C · validate first-class diagrams + UX mockup/flow coverage
 14. Phase C · embed canonical meta script (byte-equal to `design.meta.json`)
-15. Phase C · run html-lint on the rendered HTML; on errors retry the writer once, then write `design.lint.json` and abort (do NOT proceed to step 16)
-16. Phase C · record manifest hash + `designGeneratedAt` (only when lint is clean)
+15. Phase C · run html-lint on the rendered HTML; on errors retry the writer once, then write `design.lint.json` and abort (do NOT proceed to validate)
+16. Phase C · run meta-validate (schema + cross-doc refs + HTML semantic coverage); on errors retry the writer once, then write `design.validate.json` and abort (do NOT proceed to Validator)
+17. Phase C · dispatch Validator agent (`subagent_type: "feature-dev:code-reviewer"`, prompt: `prompts/validator-prompt.md`) — audits contract coverage + mockup rigor + cross-doc near-misses + glossary/ADR hygiene + caveman readability. On `fail` retry Writer once, then write `design.validator.json` and abort
+18. Phase C · record manifest hash + `designGeneratedAt` (only when lint, validate, AND Validator are all clean)
