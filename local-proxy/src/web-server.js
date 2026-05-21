@@ -42,8 +42,15 @@ const COOKIE_NAME = 'plan_session';
  * @returns {Promise<string>} The URL the server is listening on.
  */
 export async function startDashboard(workspaceRoot, port = 3847) {
+  // Truth check: if `server` is set but no longer listening (it died), drop
+  // the reference and start a fresh one. Otherwise repeated calls into a
+  // dead server return a URL that 404s on every request.
   if (server) {
-    return getDashboardUrl();
+    if (server.listening) return getDashboardUrl();
+    console.error('[plan-harness] previous HTTP server reference is dead; reaping');
+    try { server.close(); } catch { /* already closed */ }
+    server = null;
+    serverPort = null;
   }
 
   workspaceRootPath = resolve(workspaceRoot);
@@ -66,9 +73,44 @@ export async function startDashboard(workspaceRoot, port = 3847) {
         server = null;
         startDashboard(workspaceRoot, port + 1).then(resolvePromise, rejectPromise);
       } else {
-        rejectPromise(err);
+        console.error('[plan-harness] HTTP server error (non-fatal):', err);
+        // Don't reject after we've already started — surface for logging only.
+        if (!serverPort) rejectPromise(err);
       }
     });
+
+    // Absorb client-side socket errors so a misbehaving client (closed early,
+    // sent malformed request line, etc.) does NOT propagate as an uncaught
+    // 'ECONNRESET' / 'HPE_INVALID_*' and crash the process.
+    server.on('clientError', (err, socket) => {
+      console.error('[plan-harness] clientError (absorbed):', err?.code || err?.message);
+      try { socket.destroy(); } catch { /* socket already gone */ }
+    });
+    server.on('connection', (socket) => {
+      socket.on('error', (err) => {
+        console.error('[plan-harness] socket error (absorbed):', err?.code || err?.message);
+      });
+    });
+
+    // If the server emits 'close' for any reason (manual stop, fatal listener
+    // error after startup), null out the module state so the next call to
+    // startDashboard reaches the actual listen() path instead of returning a
+    // stale URL.
+    server.on('close', () => {
+      console.error('[plan-harness] HTTP server closed; clearing cached state');
+      server = null;
+      serverPort = null;
+      workspaceRootPath = null;
+    });
+
+    // Browser-friendly timeouts. Node defaults (keepAliveTimeout=5s) tear down
+    // an idle keep-alive socket aggressively, which makes interactive sessions
+    // feel like "the page died" when the user comes back from another tab.
+    // SSE handlers manage their own lifecycle (30s heartbeat) so this only
+    // affects regular HTTP traffic.
+    server.keepAliveTimeout = 120_000;     // 2 min — survive a coffee break
+    server.headersTimeout   = 125_000;     // must be > keepAliveTimeout
+    server.requestTimeout   = 0;           // 0 = unlimited (SSE streams need this)
 
     server.listen(port, '127.0.0.1', () => {
       serverPort = port;

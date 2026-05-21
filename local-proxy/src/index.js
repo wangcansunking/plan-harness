@@ -478,32 +478,15 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
       // ---- plan_serve_dashboard -----------------------------------------
       case "plan_serve_dashboard": {
-        // Return cached URL if already running
-        if (dashboardUrl) {
-          return textResult(`Dashboard already running at ${dashboardUrl}`);
-        }
-
-        // Try to import the web server module
-        let startDashboard;
-        try {
-          const webServerModule = await import("./web-server.js");
-          startDashboard = webServerModule.startDashboard;
-        } catch {
-          return textResult(
-            "Dashboard server not yet available — web-server.js could not be loaded. " +
-              "The plan management tools (list, create, check) are fully operational in the meantime."
-          );
-        }
-
+        // Source of truth is isDashboardRunning() — the cached dashboardUrl
+        // can lag behind reality (HTTP server died unobserved). When the cache
+        // disagrees with the runtime, clear it and (re-)start the server.
         const port = args.port ?? 3847;
         try {
-          const url = await startDashboard(args.workspaceRoot, port);
-          dashboardUrl = url ?? `http://localhost:${port}`;
-          return textResult(`Dashboard started at ${dashboardUrl}`);
+          const url = await ensureDashboard(args.workspaceRoot, port);
+          return textResult(`Dashboard running at ${url}`);
         } catch (err) {
-          return textResult(
-            `Failed to start dashboard server: ${err.message}`
-          );
+          return textResult(`Failed to start dashboard server: ${err.message}`);
         }
       }
 
@@ -511,16 +494,11 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       case "plan_share": {
         const { spawn } = await import("node:child_process");
 
-        // 1. Ensure dashboard is running
-        if (!dashboardUrl) {
-          try {
-            const webServerModule = await import("./web-server.js");
-            const port = 3847;
-            const url = await webServerModule.startDashboard(args.workspaceRoot, port);
-            dashboardUrl = url ?? `http://localhost:${port}`;
-          } catch (err) {
-            return textResult(`Cannot start dashboard: ${err.message}. Start it first with plan_serve_dashboard.`);
-          }
+        // 1. Ensure dashboard is running (truth-source check, not the cache)
+        try {
+          await ensureDashboard(args.workspaceRoot, 3847);
+        } catch (err) {
+          return textResult(`Cannot start dashboard: ${err.message}. Start it first with plan_serve_dashboard.`);
         }
 
         // 2. Extract port from dashboard URL
@@ -887,28 +865,48 @@ function startStalenessWatcher() {
   const myVersion = basename(maybeVersionDir);
   const isVersioned = /^\d+\.\d+\.\d+$/.test(myVersion);
 
+  // In dev (working copy, NOT under a versioned plugin-cache dir) we skip the
+  // watcher entirely. `npm run dev` rewrites dist/index.js every iteration; if
+  // we respawned on mtime drift the server would die mid-session whenever the
+  // user rebuilds. End users only ever run from the versioned cache, so they
+  // still get auto-respawn on upgrades there.
+  if (!isVersioned) {
+    console.error(`[plan-harness] bundle=${bundleFile} version=dev watcher=disabled (working-copy run)`);
+    return;
+  }
+
   console.error(
-    `[plan-harness] bundle=${bundleFile} version=${isVersioned ? myVersion : "dev"} watcher=${intervalMs}ms`,
+    `[plan-harness] bundle=${bundleFile} version=${myVersion} watcher=${intervalMs}ms`,
   );
+
+  // Require N consecutive misses before triggering — antivirus / sync tools
+  // can momentarily hide the bundle file. Default 3 (so ~90s of misses with
+  // a 30s interval) before we believe the bundle is actually gone.
+  const missThreshold = Number(process.env.PLAN_HARNESS_WATCH_MISS_THRESHOLD) || 3;
+  let consecutiveMisses = 0;
 
   const timer = setInterval(() => {
     // (a) in-place mtime drift
     try {
       const m = statSync(bundleFile).mtimeMs;
+      consecutiveMisses = 0;
       if (m !== startupMtime) {
         clearInterval(timer);
         exitForRespawn(`bundle rewritten in place (mtime drift at ${new Date(m).toISOString()})`);
         return;
       }
     } catch {
-      // bundle moved/deleted — also a signal to restart
+      consecutiveMisses += 1;
+      if (consecutiveMisses < missThreshold) {
+        console.error(`[plan-harness] bundle stat failed (${consecutiveMisses}/${missThreshold}) — will retry`);
+        return;
+      }
       clearInterval(timer);
-      exitForRespawn("bundle file missing");
+      exitForRespawn(`bundle file missing for ${consecutiveMisses} consecutive polls`);
       return;
     }
 
     // (b) newer sibling version dir appeared
-    if (!isVersioned) return;
     try {
       for (const entry of readdirSync(pluginRoot)) {
         if (!/^\d+\.\d+\.\d+$/.test(entry)) continue;
@@ -940,6 +938,89 @@ function exitForRespawn(reason) {
   setTimeout(() => process.exit(0), 50);
 }
 
+/**
+ * Start the HTTP dashboard if it isn't running and return the live URL.
+ *
+ * The cached `dashboardUrl` is unreliable as a "running?" signal — the HTTP
+ * server can die (uncaught error, manual stop) without this module being
+ * notified. The truth source is `isDashboardRunning()` from web-server.js.
+ * When the cache disagrees with the runtime, clear it and re-start.
+ */
+async function ensureDashboard(workspaceRoot, port) {
+  const ws = await import("./web-server.js");
+  if (ws.isDashboardRunning()) {
+    const liveUrl = ws.getDashboardUrl();
+    if (liveUrl) dashboardUrl = liveUrl;
+    return dashboardUrl;
+  }
+  // Cache was stale — server died or never started.
+  if (dashboardUrl) console.error(`[plan-harness] cached dashboard URL ${dashboardUrl} is stale; restarting`);
+  dashboardUrl = null;
+  const url = await ws.startDashboard(workspaceRoot ?? process.cwd(), port);
+  dashboardUrl = url ?? `http://localhost:${port}`;
+  return dashboardUrl;
+}
+
+// ---------------------------------------------------------------------------
+// Process-wide stability guards
+//
+// The MCP server is long-lived (Claude Code keeps it spawned for the whole
+// session). A single uncaught throw or unhandled rejection in an async
+// handler — e.g. a transient ENOENT during readdir, a write to a closed
+// socket, a corrupt JSONL line — would otherwise tear the whole process
+// down and disconnect every active client.
+//
+// Policy:
+//   - Log every uncaught error/rejection but DO NOT exit.
+//   - Trust SIGTERM / SIGINT for shutdown (graceful: close HTTP, then exit).
+//   - Only exit(0) on the explicit respawn paths (watcher / plan_restart).
+//
+// Override with PLAN_HARNESS_STRICT=1 to restore Node's default (crash on
+// uncaught) — useful in CI / test runs.
+// ---------------------------------------------------------------------------
+
+const strict = process.env.PLAN_HARNESS_STRICT === "1";
+let uncaughtCount = 0;
+
+process.on("uncaughtException", (err, origin) => {
+  uncaughtCount += 1;
+  console.error(`[plan-harness] uncaughtException #${uncaughtCount} (origin=${origin}):`, err?.stack || err);
+  if (strict) process.exit(1);
+  // If we're stuck in a tight crash loop (>20 uncaught in <60s) exit so the
+  // harness can respawn us cleanly. Otherwise stay alive.
+  if (uncaughtCount > 20) {
+    console.error("[plan-harness] >20 uncaught exceptions — exiting for respawn");
+    setTimeout(() => process.exit(1), 50);
+  }
+});
+process.on("unhandledRejection", (reason, promise) => {
+  uncaughtCount += 1;
+  console.error(`[plan-harness] unhandledRejection #${uncaughtCount}:`, reason?.stack || reason);
+  if (strict) process.exit(1);
+});
+
+// Reset the crash counter periodically so transient bursts don't accumulate.
+setInterval(() => { uncaughtCount = Math.max(0, uncaughtCount - 1); }, 60_000).unref?.();
+
+let shuttingDown = false;
+async function gracefulShutdown(signal) {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  console.error(`[plan-harness] ${signal} received — shutting down gracefully`);
+  try {
+    const { stopDashboard } = await import("./web-server.js");
+    await Promise.race([
+      stopDashboard(),
+      new Promise((r) => setTimeout(r, 2000)),  // hard cap so shutdown doesn't hang
+    ]);
+  } catch (err) {
+    console.error(`[plan-harness] graceful shutdown stop error (continuing): ${err?.message}`);
+  }
+  process.exit(0);
+}
+process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
+process.on("SIGINT",  () => gracefulShutdown("SIGINT"));
+
 // ---------------------------------------------------------------------------
 // Start the transport
 // ---------------------------------------------------------------------------
@@ -956,10 +1037,8 @@ console.error("[plan-harness] MCP server running on stdio.");
 if (!process.env.PLAN_HARNESS_NO_AUTO_DASHBOARD) {
   setImmediate(async () => {
     try {
-      const { startDashboard } = await import("./web-server.js");
       const port = Number(process.env.PLAN_HARNESS_DASHBOARD_PORT) || 3847;
-      const url = await startDashboard(process.cwd(), port);
-      dashboardUrl = url;
+      const url = await ensureDashboard(process.cwd(), port);
       console.error(`[plan-harness] Dashboard auto-started at ${url}`);
     } catch (err) {
       console.error(`[plan-harness] Dashboard auto-start failed (non-fatal): ${err.message}`);

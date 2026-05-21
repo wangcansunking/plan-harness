@@ -7402,7 +7402,8 @@ function generateScenarioDetail(scenario, options = {}) {
     const hasOpen = docTodos + docUnresolved > 0;
     const state = !exists ? "missing" : hasOpen ? "partial" : "complete";
     const stateBadge = !exists ? `<span class="doc-state doc-state-missing">Not generated</span>` : hasOpen ? "" : `<span class="doc-state doc-state-complete">Clear</span>`;
-    const primaryAction = exists ? `<a href="/view?path=${encodeURIComponent(f.path)}" class="doc-primary-action">Open \u2192</a>` : `<code class="doc-skill">${escapeHTML(def.skill)}${scenario.name ? " --scenario " + escapeHTML(scenario.name) : ""}</code>`;
+    const docHref = exists ? buildDocHref(f.path) : null;
+    const primaryAction = exists ? `<a href="${escapeAttr(docHref)}" class="doc-primary-action">Open \u2192</a>` : `<code class="doc-skill">${escapeHTML(def.skill)}${scenario.name ? " --scenario " + escapeHTML(scenario.name) : ""}</code>`;
     const countParts = [];
     if (docTodos > 0) countParts.push(`<span class="doc-count doc-count-todo" title="Open TODOs in this doc">${docTodos} TODOs</span>`);
     if (docUnresolved > 0) countParts.push(`<span class="doc-count doc-count-unresolved" title="Unresolved comments on this doc">${docUnresolved} unresolved</span>`);
@@ -7468,6 +7469,14 @@ ${docsHTML}
     scenarioName: scenario.name,
     ...options
   });
+}
+function buildDocHref(absPath) {
+  if (!absPath) return "";
+  const normalized = String(absPath).replace(/\\/g, "/");
+  const idx = normalized.lastIndexOf("/plan-harness/");
+  if (idx < 0) return "/view?path=" + encodeURIComponent(absPath);
+  const rest = normalized.slice(idx + "/plan-harness/".length);
+  return "/" + rest.split("/").map(encodeURIComponent).join("/");
 }
 function escapeHTML(str) {
   if (!str) return "";
@@ -9254,7 +9263,7 @@ function normalizePlanTabs(html, existingSiblings, scenarioDir) {
           let newHref = href;
           if (scenarioDir) {
             const absPath = scenarioDir.replace(/\\/g, "/") + "/" + basename4;
-            newHref = "/view?path=" + encodeURIComponent(absPath);
+            newHref = buildDocHref(absPath);
           }
           let newAttrs = attrs.replace(/\s+aria-disabled\s*=\s*["'][^"']*["']/gi, "").replace(/\bhref\s*=\s*["'][^"']+["']/i, 'href="' + newHref.replace(/"/g, "&quot;") + '"');
           const newBody = body.replace(/<span\b[^>]*class=["'][^"']*\bsoon\b[^"']*["'][^>]*>[\s\S]*?<\/span>/gi, "").trim();
@@ -10630,21 +10639,21 @@ var require_he = __commonJS({
         }
         return result;
       };
-      var codePointToSymbol = function(codePoint, strict) {
+      var codePointToSymbol = function(codePoint, strict2) {
         var output = "";
         if (codePoint >= 55296 && codePoint <= 57343 || codePoint > 1114111) {
-          if (strict) {
+          if (strict2) {
             parseError("character reference outside the permissible Unicode range");
           }
           return "\uFFFD";
         }
         if (has(decodeMapNumeric, codePoint)) {
-          if (strict) {
+          if (strict2) {
             parseError("disallowed character reference");
           }
           return decodeMapNumeric[codePoint];
         }
-        if (strict && contains(invalidReferenceCodePoints, codePoint)) {
+        if (strict2 && contains(invalidReferenceCodePoints, codePoint)) {
           parseError("disallowed character reference");
         }
         if (codePoint > 65535) {
@@ -10666,8 +10675,8 @@ var require_he = __commonJS({
       };
       var encode3 = function(string3, options) {
         options = merge2(options, encode3.options);
-        var strict = options.strict;
-        if (strict && regexInvalidRawCodePoint.test(string3)) {
+        var strict2 = options.strict;
+        if (strict2 && regexInvalidRawCodePoint.test(string3)) {
           parseError("forbidden code point");
         }
         var encodeEverything = options.encodeEverything;
@@ -10721,8 +10730,8 @@ var require_he = __commonJS({
       };
       var decode3 = function(html, options) {
         options = merge2(options, decode3.options);
-        var strict = options.strict;
-        if (strict && regexInvalidEntity.test(html)) {
+        var strict2 = options.strict;
+        if (strict2 && regexInvalidEntity.test(html)) {
           parseError("malformed character reference");
         }
         return html.replace(regexDecode, function($0, $1, $2, $3, $4, $5, $6, $7, $8) {
@@ -10740,12 +10749,12 @@ var require_he = __commonJS({
             reference = $2;
             next = $3;
             if (next && options.isAttributeValue) {
-              if (strict && next == "=") {
+              if (strict2 && next == "=") {
                 parseError("`&` did not start a character reference");
               }
               return $0;
             } else {
-              if (strict) {
+              if (strict2) {
                 parseError(
                   "named character reference was not terminated by a semicolon"
                 );
@@ -10756,22 +10765,22 @@ var require_he = __commonJS({
           if ($4) {
             decDigits = $4;
             semicolon = $5;
-            if (strict && !semicolon) {
+            if (strict2 && !semicolon) {
               parseError("character reference was not terminated by a semicolon");
             }
             codePoint = parseInt(decDigits, 10);
-            return codePointToSymbol(codePoint, strict);
+            return codePointToSymbol(codePoint, strict2);
           }
           if ($6) {
             hexDigits = $6;
             semicolon = $7;
-            if (strict && !semicolon) {
+            if (strict2 && !semicolon) {
               parseError("character reference was not terminated by a semicolon");
             }
             codePoint = parseInt(hexDigits, 16);
-            return codePointToSymbol(codePoint, strict);
+            return codePointToSymbol(codePoint, strict2);
           }
-          if (strict) {
+          if (strict2) {
             parseError(
               "named character reference was not terminated by a semicolon"
             );
@@ -17020,7 +17029,14 @@ import { join as join4, basename as basename2, extname as extname2, resolve as r
 import { URL as URL2, fileURLToPath as fileURLToPath2 } from "node:url";
 async function startDashboard(workspaceRoot, port = 3847) {
   if (server) {
-    return getDashboardUrl();
+    if (server.listening) return getDashboardUrl();
+    console.error("[plan-harness] previous HTTP server reference is dead; reaping");
+    try {
+      server.close();
+    } catch {
+    }
+    server = null;
+    serverPort = null;
   }
   workspaceRootPath = resolve3(workspaceRoot);
   return new Promise((resolvePromise, rejectPromise) => {
@@ -17039,9 +17055,31 @@ async function startDashboard(workspaceRoot, port = 3847) {
         server = null;
         startDashboard(workspaceRoot, port + 1).then(resolvePromise, rejectPromise);
       } else {
-        rejectPromise(err);
+        console.error("[plan-harness] HTTP server error (non-fatal):", err);
+        if (!serverPort) rejectPromise(err);
       }
     });
+    server.on("clientError", (err, socket) => {
+      console.error("[plan-harness] clientError (absorbed):", err?.code || err?.message);
+      try {
+        socket.destroy();
+      } catch {
+      }
+    });
+    server.on("connection", (socket) => {
+      socket.on("error", (err) => {
+        console.error("[plan-harness] socket error (absorbed):", err?.code || err?.message);
+      });
+    });
+    server.on("close", () => {
+      console.error("[plan-harness] HTTP server closed; clearing cached state");
+      server = null;
+      serverPort = null;
+      workspaceRootPath = null;
+    });
+    server.keepAliveTimeout = 12e4;
+    server.headersTimeout = 125e3;
+    server.requestTimeout = 0;
     server.listen(port, "127.0.0.1", () => {
       serverPort = port;
       const url2 = getDashboardUrl();
@@ -33052,41 +33090,21 @@ ${ctx.structure.csprojFiles.map((f) => `  ${f}`).join("\n")}` : ""
       }
       // ---- plan_serve_dashboard -----------------------------------------
       case "plan_serve_dashboard": {
-        if (dashboardUrl) {
-          return textResult(`Dashboard already running at ${dashboardUrl}`);
-        }
-        let startDashboard2;
-        try {
-          const webServerModule = await Promise.resolve().then(() => (init_web_server(), web_server_exports));
-          startDashboard2 = webServerModule.startDashboard;
-        } catch {
-          return textResult(
-            "Dashboard server not yet available \u2014 web-server.js could not be loaded. The plan management tools (list, create, check) are fully operational in the meantime."
-          );
-        }
         const port = args.port ?? 3847;
         try {
-          const url2 = await startDashboard2(args.workspaceRoot, port);
-          dashboardUrl = url2 ?? `http://localhost:${port}`;
-          return textResult(`Dashboard started at ${dashboardUrl}`);
+          const url2 = await ensureDashboard(args.workspaceRoot, port);
+          return textResult(`Dashboard running at ${url2}`);
         } catch (err) {
-          return textResult(
-            `Failed to start dashboard server: ${err.message}`
-          );
+          return textResult(`Failed to start dashboard server: ${err.message}`);
         }
       }
       // ---- plan_share ----------------------------------------------------
       case "plan_share": {
         const { spawn } = await import("node:child_process");
-        if (!dashboardUrl) {
-          try {
-            const webServerModule = await Promise.resolve().then(() => (init_web_server(), web_server_exports));
-            const port = 3847;
-            const url2 = await webServerModule.startDashboard(args.workspaceRoot, port);
-            dashboardUrl = url2 ?? `http://localhost:${port}`;
-          } catch (err) {
-            return textResult(`Cannot start dashboard: ${err.message}. Start it first with plan_serve_dashboard.`);
-          }
+        try {
+          await ensureDashboard(args.workspaceRoot, 3847);
+        } catch (err) {
+          return textResult(`Cannot start dashboard: ${err.message}. Start it first with plan_serve_dashboard.`);
         }
         const dashPort = new URL(dashboardUrl).port || "3847";
         let protectedPassword = null;
@@ -33372,23 +33390,34 @@ function startStalenessWatcher() {
   const pluginRoot = dirname3(maybeVersionDir);
   const myVersion = basename3(maybeVersionDir);
   const isVersioned = /^\d+\.\d+\.\d+$/.test(myVersion);
+  if (!isVersioned) {
+    console.error(`[plan-harness] bundle=${bundleFile} version=dev watcher=disabled (working-copy run)`);
+    return;
+  }
   console.error(
-    `[plan-harness] bundle=${bundleFile} version=${isVersioned ? myVersion : "dev"} watcher=${intervalMs}ms`
+    `[plan-harness] bundle=${bundleFile} version=${myVersion} watcher=${intervalMs}ms`
   );
+  const missThreshold = Number(process.env.PLAN_HARNESS_WATCH_MISS_THRESHOLD) || 3;
+  let consecutiveMisses = 0;
   const timer = setInterval(() => {
     try {
       const m = statSync(bundleFile).mtimeMs;
+      consecutiveMisses = 0;
       if (m !== startupMtime) {
         clearInterval(timer);
         exitForRespawn(`bundle rewritten in place (mtime drift at ${new Date(m).toISOString()})`);
         return;
       }
     } catch {
+      consecutiveMisses += 1;
+      if (consecutiveMisses < missThreshold) {
+        console.error(`[plan-harness] bundle stat failed (${consecutiveMisses}/${missThreshold}) \u2014 will retry`);
+        return;
+      }
       clearInterval(timer);
-      exitForRespawn("bundle file missing");
+      exitForRespawn(`bundle file missing for ${consecutiveMisses} consecutive polls`);
       return;
     }
-    if (!isVersioned) return;
     try {
       for (const entry of readdirSync(pluginRoot)) {
         if (!/^\d+\.\d+\.\d+$/.test(entry)) continue;
@@ -33416,16 +33445,65 @@ function exitForRespawn(reason) {
   console.error(`[plan-harness] exiting for respawn \u2014 ${reason}`);
   setTimeout(() => process.exit(0), 50);
 }
+async function ensureDashboard(workspaceRoot, port) {
+  const ws = await Promise.resolve().then(() => (init_web_server(), web_server_exports));
+  if (ws.isDashboardRunning()) {
+    const liveUrl = ws.getDashboardUrl();
+    if (liveUrl) dashboardUrl = liveUrl;
+    return dashboardUrl;
+  }
+  if (dashboardUrl) console.error(`[plan-harness] cached dashboard URL ${dashboardUrl} is stale; restarting`);
+  dashboardUrl = null;
+  const url2 = await ws.startDashboard(workspaceRoot ?? process.cwd(), port);
+  dashboardUrl = url2 ?? `http://localhost:${port}`;
+  return dashboardUrl;
+}
+var strict = process.env.PLAN_HARNESS_STRICT === "1";
+var uncaughtCount = 0;
+process.on("uncaughtException", (err, origin) => {
+  uncaughtCount += 1;
+  console.error(`[plan-harness] uncaughtException #${uncaughtCount} (origin=${origin}):`, err?.stack || err);
+  if (strict) process.exit(1);
+  if (uncaughtCount > 20) {
+    console.error("[plan-harness] >20 uncaught exceptions \u2014 exiting for respawn");
+    setTimeout(() => process.exit(1), 50);
+  }
+});
+process.on("unhandledRejection", (reason, promise2) => {
+  uncaughtCount += 1;
+  console.error(`[plan-harness] unhandledRejection #${uncaughtCount}:`, reason?.stack || reason);
+  if (strict) process.exit(1);
+});
+setInterval(() => {
+  uncaughtCount = Math.max(0, uncaughtCount - 1);
+}, 6e4).unref?.();
+var shuttingDown = false;
+async function gracefulShutdown(signal) {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  console.error(`[plan-harness] ${signal} received \u2014 shutting down gracefully`);
+  try {
+    const { stopDashboard: stopDashboard2 } = await Promise.resolve().then(() => (init_web_server(), web_server_exports));
+    await Promise.race([
+      stopDashboard2(),
+      new Promise((r) => setTimeout(r, 2e3))
+      // hard cap so shutdown doesn't hang
+    ]);
+  } catch (err) {
+    console.error(`[plan-harness] graceful shutdown stop error (continuing): ${err?.message}`);
+  }
+  process.exit(0);
+}
+process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
+process.on("SIGINT", () => gracefulShutdown("SIGINT"));
 var transport = new StdioServerTransport();
 await server2.connect(transport);
 console.error("[plan-harness] MCP server running on stdio.");
 if (!process.env.PLAN_HARNESS_NO_AUTO_DASHBOARD) {
   setImmediate(async () => {
     try {
-      const { startDashboard: startDashboard2 } = await Promise.resolve().then(() => (init_web_server(), web_server_exports));
       const port = Number(process.env.PLAN_HARNESS_DASHBOARD_PORT) || 3847;
-      const url2 = await startDashboard2(process.cwd(), port);
-      dashboardUrl = url2;
+      const url2 = await ensureDashboard(process.cwd(), port);
       console.error(`[plan-harness] Dashboard auto-started at ${url2}`);
     } catch (err) {
       console.error(`[plan-harness] Dashboard auto-start failed (non-fatal): ${err.message}`);

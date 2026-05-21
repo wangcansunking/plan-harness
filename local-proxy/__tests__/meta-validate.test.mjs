@@ -115,6 +115,42 @@ test('V3-state-machine-stories flags count mismatch with product.userStories', a
     'expected V3 count-mismatch error');
 });
 
+test('V3-design-stories flags missing perStoryDetails entry per userStories', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'meta-validate-'));
+  await writeFile(join(dir, 'product.meta.json'), JSON.stringify({
+    doc: 'product',
+    userStories: [{ id: 'US1' }, { id: 'US2' }],
+  }));
+  const designMeta = {
+    doc: 'design', scenario: 'demo',
+    goals: ['g'], componentDag: 'x',
+    uxMockups: [{ id: 'UX1' }], userFlows: [{ id: 'UF1' }],
+    perStoryDetails: [{ storyId: 'US1', uxMockupIds: ['UX1'], userFlowIds: ['UF1'] }],
+    decisions: [{ id: 'D1' }], interfaces: [{ name: 'x' }],
+  };
+  const result = await validateMeta(designMeta, { docName: 'design', docDir: dir });
+  assert.ok(result.errors.some(e => e.rule === 'V3-design-stories' && e.message.includes('1 entries but product.userStories has 2')),
+    'expected V3-design-stories count-mismatch error');
+});
+
+test('V3-design-stories flags dangling uxMockupIds reference', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'meta-validate-'));
+  await writeFile(join(dir, 'product.meta.json'), JSON.stringify({
+    doc: 'product',
+    userStories: [{ id: 'US1' }],
+  }));
+  const designMeta = {
+    doc: 'design', scenario: 'demo',
+    goals: ['g'], componentDag: 'x',
+    uxMockups: [{ id: 'UX1' }], userFlows: [{ id: 'UF1' }],
+    perStoryDetails: [{ storyId: 'US1', uxMockupIds: ['UX1', 'GHOST'], userFlowIds: ['UF1'] }],
+    decisions: [{ id: 'D1' }], interfaces: [{ name: 'x' }],
+  };
+  const result = await validateMeta(designMeta, { docName: 'design', docDir: dir });
+  assert.ok(result.errors.some(e => e.rule === 'V3-design-stories' && e.message.includes('GHOST')),
+    'expected V3-design-stories dangling-ref error');
+});
+
 test('V3-implementation-slices flags PR slice not in test-spec.verticalSlices', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'meta-validate-'));
   await writeFile(join(dir, 'test-spec.meta.json'), JSON.stringify({

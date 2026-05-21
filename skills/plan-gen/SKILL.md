@@ -137,8 +137,22 @@ For each type in topological order:
    - After the Writer returns the HTML, the orchestrator reads `<doc>.meta.json` from disk and `replace()`s the placeholder with the file bytes verbatim — this is what guarantees byte-equality (see `prompts/_html-base.md` §"Phase C protocol").
    - Embed `<script type="application/json" id="meta">` containing the canonical meta.json content byte-for-byte.
    - Save both `<doc>.meta.json` and `<doc>.html` to the scenario dir.
-   - **Run `lintFile()` from `local-proxy/src/html-lint.js` against the rendered HTML.** Shared-asset docs (`_shared/context`, `_shared/glossary`, `_shared/decisions`) pass `skipRules: ['L1-docgroup', 'L1-active']`. On any error: retry the Writer once with the lint findings injected into its context; if still failing, write `<doc>.lint.json` next to the HTML, surface the failure, and STOP — do not advance to validate. Only a clean lint pass (or `--no-lint`) lets the run proceed.
-   - **Run `validateDoc()` from `local-proxy/src/meta-validate.js`** against `<doc>.meta.json` + `<doc>.html`. This is the SECOND mandatory gate. Catches things lint can't see — schema-shape, cross-doc refs (e.g. `state-machine.perStoryFlows[].storyId ∈ product.userStories[].id`, `implementation.prs[].slice ∈ test-spec.verticalSlices[].id`), and HTML semantic coverage (every meta visual is actually rendered). Shared-asset docs pass `skipRules` per their nature. On error: retry the Writer once with the findings injected; if still failing, write `<doc>.lint.json`/`<doc>.validate.json` accordingly, surface the failure, and STOP. Both gates must be clean before the Validator agent runs.
+   - **Run `lintFile()` from `local-proxy/src/html-lint.js` against the rendered HTML.** Shared-asset docs (`_shared/context`, `_shared/glossary`, `_shared/decisions`) pass `skipRules: ['L1-docgroup', 'L1-active']`. **The retry loop is MANDATORY — do not stop at the first lint failure.** Procedure on any error:
+
+     1. Read the lint output (`result.errors[]` — rule + message per finding).
+     2. **Auto-fix** what you can directly with `Edit` / `Write` against `<doc>.html` — e.g. missing `<div class="sections">` wrapper, palette drift, missing `class="active"` on the current doc's nav link, missing shared-asset link bar. These are mechanical; the Writer doesn't need to re-render for them.
+     3. For findings that require regeneration (missing mockup visuals, missing sections, byte-mismatched meta), **re-dispatch the Writer** with the lint findings injected into its context as a "previous attempt failed lint with these errors; produce a corrected version" preamble.
+     4. Re-run `lintFile()`. If still failing after **two retries** (one auto-fix pass + one Writer re-dispatch), THEN write `<doc>.lint.json` with the residual findings, surface the failure to the user, and STOP.
+
+     **Never `STOP` on the first lint failure** — that's what "retry once" means; the user explicitly relies on this self-heal. Only a clean lint pass (or `--no-lint`) lets the run proceed to validate.
+   - **Run `validateDoc()` from `local-proxy/src/meta-validate.js`** against `<doc>.meta.json` + `<doc>.html`. This is the SECOND mandatory gate. Catches things lint can't see — schema-shape, cross-doc refs (e.g. `state-machine.perStoryFlows[].storyId ∈ product.userStories[].id`, `implementation.prs[].slice ∈ test-spec.verticalSlices[].id`), and HTML semantic coverage (every meta visual is actually rendered). Shared-asset docs pass `skipRules` per their nature.
+
+     **Same MANDATORY retry loop as lint**:
+     1. Auto-fix what's mechanical (schema-shape missing fields, hash mismatch caused by stale embed) directly with `Edit` against `<doc>.meta.json` or `<doc>.html`.
+     2. For cross-doc refs or count mismatches, re-dispatch the Writer with the validate findings as context.
+     3. Re-run `validateDoc()`. If still failing after two retries, write `<doc>.validate.json`, surface, and STOP.
+
+     Both gates must be clean before the Validator agent runs.
    - **Dispatch the Validator agent** (`Agent` tool with `subagent_type: "feature-dev:code-reviewer"`) with `prompts/validator-prompt.md`, the rendered `<doc>.html`, `<doc>.meta.json`, every upstream `<u>.meta.json`, and `types/<doc>.md`. The Validator returns JSON: `{verdict, findings[], summary}`. On `pass`, proceed to step 7. On `concern`, surface the findings and ask the user `accept [Enter] / re-grill <field>`. On `fail`, re-dispatch the Writer with the findings injected (one retry); if Validator still returns `fail`, write `<doc>.validator.json` with the findings, surface the failure, and STOP — the doc does NOT record.
 
 4. Before any dispatch: stamp `manifest.json` with `<type>Generating: true` so a concurrent `/plan-gen` sees the in-progress state.

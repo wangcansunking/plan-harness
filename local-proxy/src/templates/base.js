@@ -736,8 +736,13 @@ export function generateScenarioDetail(scenario, options = {}) {
         ? ''
         : `<span class="doc-state doc-state-complete">Clear</span>`;
 
+    // Root-absolute URL: /<scenario>/<doc>.html (or /_shared/<rest>).
+    // Falls back to /view?path=<abs> only if the path is NOT under plan-harness/
+    // (e.g. legacy fixtures during transition). This keeps cross-doc nav working
+    // and matches the URL pattern self-contained docs emit in their <nav.toc>.
+    const docHref = exists ? buildDocHref(f.path) : null;
     const primaryAction = exists
-      ? `<a href="/view?path=${encodeURIComponent(f.path)}" class="doc-primary-action">Open →</a>`
+      ? `<a href="${escapeAttr(docHref)}" class="doc-primary-action">Open →</a>`
       : `<code class="doc-skill">${escapeHTML(def.skill)}${scenario.name ? ' --scenario ' + escapeHTML(scenario.name) : ''}</code>`;
 
     // Counts row only shows non-zero items. When the doc has zero of
@@ -1407,6 +1412,24 @@ function collapseAllImpl() {
 
 
 // ---- Utility functions ----
+
+/**
+ * Convert an absolute doc path into the root-absolute URL the proxy serves it at.
+ *
+ *   .../plan-harness/<scenario>/<doc>.html  → /<scenario>/<doc>.html
+ *   .../plan-harness/_shared/<rest>         → /_shared/<rest>
+ *
+ * Anything outside `plan-harness/` falls back to `/view?path=<abs>` so legacy
+ * fixtures keep working — but new docs all live under plan-harness/.
+ */
+function buildDocHref(absPath) {
+  if (!absPath) return '';
+  const normalized = String(absPath).replace(/\\/g, '/');
+  const idx = normalized.lastIndexOf('/plan-harness/');
+  if (idx < 0) return '/view?path=' + encodeURIComponent(absPath);
+  const rest = normalized.slice(idx + '/plan-harness/'.length);
+  return '/' + rest.split('/').map(encodeURIComponent).join('/');
+}
 
 function escapeHTML(str) {
   if (!str) return '';
@@ -3316,15 +3339,15 @@ export function normalizePlanTabs(html, existingSiblings, scenarioDir) {
           const basename = href.split(/[\\/]/).pop().split(/[#?]/)[0];
           if (!existingSiblings.has(basename)) return aMatch;
 
-          // Writer-baked relative hrefs (e.g. "design.html") 404 when the doc
-          // is served via /view?path=<abs>, because the browser resolves them
-          // against the current /view URL. Rewrite to the /view form so the
-          // link lands in-place. scenarioDir is optional; when omitted we
-          // leave the href alone so file:// previews keep working.
+          // Writer-baked relative hrefs (e.g. "design.html") need rewriting to
+          // the root-absolute form (/<scenario>/<doc>.html) so they resolve
+          // regardless of which URL the parent doc was served from.
+          // scenarioDir is optional; when omitted we leave the href alone so
+          // file:// previews keep working.
           let newHref = href;
           if (scenarioDir) {
             const absPath = scenarioDir.replace(/\\/g, '/') + '/' + basename;
-            newHref = '/view?path=' + encodeURIComponent(absPath);
+            newHref = buildDocHref(absPath);
           }
 
           let newAttrs = attrs
