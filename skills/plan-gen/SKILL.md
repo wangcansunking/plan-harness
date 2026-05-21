@@ -225,6 +225,8 @@ All types share these rules, consolidated here so per-type stubs stay tiny:
 | `/plan-init`               | Prerequisite — creates the manifest this skill reads                         |
 | `/plan-full`               | Orchestrator — calls `/plan-gen` for each type in turn                       |
 | `/plan-sync`               | Cascade orchestrator — calls `/plan-gen` for every downstream of an edited doc |
+| `/plan-lint`               | Standalone re-runs of Phase C's lint+validate gate; auto-fixes drift on existing docs without re-grilling |
+| `/plan-edit`               | Single-field meta edit. Use when grilling a small subset; no cascade.        |
 | `/plan-review`             | Post-generation review pass; reads the file this skill writes                |
 | `manifest.json`            | Read for scenario context; written per-type after each successful run        |
 

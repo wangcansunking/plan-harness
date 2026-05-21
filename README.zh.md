@@ -142,6 +142,7 @@ devxapps-project.md          （项目：构建、约定、架构）
 | `/plan-full` | 带检查点编排整个工作流 |
 | `/plan-sync` | Hash-diff 级联 — 只重生被上游变更实际影响的字段 |
 | `/plan-edit` | 单文档局部改字段（用 hint 定位，不级联） |
+| `/plan-lint` | 对已生成的文档重跑 html-lint + meta-validate 并自动修复；Phase C 重试循环的独立版本 |
 | `/plan-test` | 用 Playwright MCP 端到端跑 `test-spec.html` 场景 |
 | `/plan-share` | 通过 devtunnel 分享 plan 文档（公开 / 私有 / 密码） |
 | `/plan-review` | 针对单个文档按 section 逐段 review |
