@@ -38,7 +38,7 @@ import { parse } from 'node-html-parser';
 const REQUIRED_TOP_LEVEL = {
   product:         ['doc', 'scenario', 'problem', 'users', 'userStories', 'successMetrics'],
   analysis:        ['doc', 'scenario', 'problem', 'painPoints', 'rootCauses', 'hypotheses'],
-  design:          ['doc', 'scenario', 'goals', 'componentDag', 'uxMockups', 'userFlows', 'decisions', 'interfaces'],
+  design:          ['doc', 'scenario', 'goals', 'componentDag', 'uxMockups', 'userFlows', 'perStoryDetails', 'decisions', 'interfaces'],
   'state-machine': ['doc', 'scenario', 'stateMachines', 'perStoryFlows', 'cornerCases', 'invariants'],
   'test-spec':     ['doc', 'scenario', 'verticalSlices', 'scenarios', 'hitlAfkMatrix'],
   implementation:  ['doc', 'scenario', 'prs'],
@@ -153,6 +153,37 @@ export async function validateMeta(meta, ctx = {}) {
       }
     }
 
+    if (!skip.has('V3-design-stories') && docName === 'design') {
+      const product = await readSiblingMeta(ctx.docDir, 'product');
+      if (product && Array.isArray(product.userStories)) {
+        const productIds = new Set(product.userStories.map((s) => s.id));
+        const details = Array.isArray(meta.perStoryDetails) ? meta.perStoryDetails : [];
+
+        if (details.length !== productIds.size) {
+          errors.push({ rule: 'V3-design-stories', severity: 'error',
+            message: `design.perStoryDetails has ${details.length} entries but product.userStories has ${productIds.size} — every story needs its own detail subsection` });
+        }
+
+        const dangling = details.filter((d) => d.storyId && !productIds.has(d.storyId));
+        if (dangling.length) {
+          errors.push({ rule: 'V3-design-stories', severity: 'error',
+            message: `design.perStoryDetails[].storyId not in product.userStories[].id: ${dangling.map((d) => d.storyId).join(', ')}` });
+        }
+
+        const mockupIds = new Set((meta.uxMockups || []).map((m) => m.id));
+        const flowIds   = new Set((meta.userFlows || []).map((f) => f.id));
+        const danglingRefs = [];
+        for (const d of details) {
+          for (const id of (d.uxMockupIds || [])) if (!mockupIds.has(id)) danglingRefs.push(`uxMockup ${id} (story ${d.storyId})`);
+          for (const id of (d.userFlowIds || [])) if (!flowIds.has(id))   danglingRefs.push(`userFlow ${id} (story ${d.storyId})`);
+        }
+        if (danglingRefs.length) {
+          errors.push({ rule: 'V3-design-stories', severity: 'error',
+            message: `design.perStoryDetails[] references non-existent ids: ${danglingRefs.join(', ')}` });
+        }
+      }
+    }
+
     if (!skip.has('V3-design-state-machine-refs') && docName === 'design') {
       const stateMachine = await readSiblingMeta(ctx.docDir, 'state-machine');
       if (stateMachine && Array.isArray(stateMachine.stateMachines) && Array.isArray(meta.stateMachineRefs)) {
@@ -248,6 +279,15 @@ export async function validateHtmlSemantics(html, meta, ctx = {}) {
     if (diagrams < meta.perStoryFlows.length) {
       errors.push({ rule: 'V4-state-machine-flow-render', severity: 'error',
         message: `state-machine.html renders ${diagrams} diagram(s) but meta.perStoryFlows has ${meta.perStoryFlows.length} — every story's state path must be visible` });
+    }
+  }
+
+  // V4-design-stories-render: design must render one h3 per perStoryDetails[] entry.
+  if (!skip.has('V4-design-stories-render') && docName === 'design' && Array.isArray(meta?.perStoryDetails)) {
+    const h3s = root.querySelectorAll('main h3').length;
+    if (h3s < meta.perStoryDetails.length) {
+      errors.push({ rule: 'V4-design-stories-render', severity: 'error',
+        message: `design.html has ${h3s} <h3> in <main> but meta.perStoryDetails has ${meta.perStoryDetails.length} — every story needs its own h3 subsection (e.g. "US1 — title")` });
     }
   }
 
