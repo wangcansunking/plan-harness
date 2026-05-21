@@ -15,6 +15,9 @@ import {
   injectPlanMeta,
   injectSidebarPanels,
   injectLightbox,
+  getBaseScript,
+  getThemeInitScript,
+  getThemeToggleHTML,
   normalizePlanTabs,
   normalizeAssetLinks,
   normalizeChecklistItems
@@ -663,30 +666,14 @@ async function serveHtmlFile(req, res, filePath, ctx = {}) {
   try {
     const raw = await readFile(resolved, 'utf-8');
 
-    // 0pre. v2 structural lint (mixin enforcement).
-    // Only v2 docs under plan-harness/ are expected to satisfy the mixin contract;
-    // legacy docs in plans/ are read-only and pre-date the rules.
     const isV2 = resolved.includes(`${sep}plan-harness${sep}`) &&
                  !resolved.includes(`${sep}_shared${sep}`);
-    let lintBanner = '';
-    let lintHeader = '';
+    let metaJson;
     if (isV2) {
-      const docBase = basename(resolved).replace(/\.html?$/i, '');
-      let metaJson;
       try {
         const metaRaw = await readFile(resolved.replace(/\.html?$/i, '.meta.json'), 'utf-8');
         metaJson = JSON.parse(metaRaw);
       } catch { /* meta missing → skip hash check, structural rules still run */ }
-      const result = lintHtml(raw, { docName: docBase, metaJson });
-      const errCount = result.errors.length;
-      const warnCount = result.warnings.length;
-      lintHeader = `${errCount} error(s), ${warnCount} warning(s)`;
-      if (errCount > 0) {
-        const items = result.errors
-          .map(e => `<li><code>${escapeHtml(e.rule)}</code>: ${escapeHtml(e.message)}</li>`)
-          .join('');
-        lintBanner = `<div id="__html_lint_banner" style="position:fixed;top:0;left:0;right:0;z-index:9999;background:#f85149;color:#fff;font:13px/1.4 -apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;padding:10px 16px;border-bottom:2px solid #8b1717;"><strong>html-lint:</strong> ${errCount} structural error(s) — this doc does not satisfy <code>prompts/_html-base.md</code>. <a href="#" onclick="document.getElementById('__html_lint_banner').remove();return false;" style="color:#fff;float:right;font-weight:bold;">×</a><ul style="margin:6px 0 0;padding-left:24px;">${items}</ul></div>`;
-      }
     }
 
     // 0. Un-stick 'SOON' / aria-disabled from plan-tab links whose target file
@@ -699,11 +686,12 @@ async function serveHtmlFile(req, res, filePath, ctx = {}) {
       siblingSet = new Set(siblingEntries.filter(e => /\.html?$/i.test(e)));
     } catch { /* best-effort; if readdir fails, skip normalization */ }
     const withTabsFixed = normalizePlanTabs(raw, siblingSet, scenarioDir);
+    const withDocChrome = normalizeServedDocChrome(withTabsFixed, resolved);
 
     // 0b. Collapse doubled-up checklist markers (<input type="checkbox"> paired
     //     with a redundant `[x]` / `[ ]` text marker). Syncs `checked` from the
     //     text marker, then strips the text, so only one render stays.
-    const withChecklistFixed = normalizeChecklistItems(withTabsFixed);
+    const withChecklistFixed = normalizeChecklistItems(withDocChrome);
 
     // 1. Stable content-anchors for the future comment widget (idempotent).
     const withSectionIds = injectSectionIds(withChecklistFixed);
@@ -735,9 +723,22 @@ async function serveHtmlFile(req, res, filePath, ctx = {}) {
     const withAssets = normalizeAssetLinks(withBreadcrumb, scenarioDir);
     const withLightbox = injectLightbox(withAssets);
 
-    // 6. Prepend lint banner (if any) right after <body> so it sits above all
-    //    doc content + injected widgets. Banner is fixed-position so it doesn't
-    //    push layout; it just covers the top strip with a red error summary.
+    let lintBanner = '';
+    let lintHeader = '';
+    if (isV2) {
+      const docBase = basename(resolved).replace(/\.html?$/i, '');
+      const result = lintHtml(withLightbox, { docName: docBase, metaJson });
+      const errCount = result.errors.length;
+      const warnCount = result.warnings.length;
+      lintHeader = `${errCount} error(s), ${warnCount} warning(s)`;
+      if (errCount > 0) {
+        const items = result.errors
+          .map(e => `<li><code>${escapeHtml(e.rule)}</code>: ${escapeHtml(e.message)}</li>`)
+          .join('');
+        lintBanner = `<div id="__html_lint_banner" style="position:fixed;top:0;left:0;right:0;z-index:9999;background:#f85149;color:#fff;font:13px/1.4 -apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;padding:10px 16px;border-bottom:2px solid #8b1717;"><strong>html-lint:</strong> ${errCount} structural error(s) — this doc does not satisfy <code>prompts/_html-base.md</code>. <a href="#" onclick="document.getElementById('__html_lint_banner').remove();return false;" style="color:#fff;float:right;font-weight:bold;">×</a><ul style="margin:6px 0 0;padding-left:24px;">${items}</ul></div>`;
+      }
+    }
+
     const injected = lintBanner
       ? withLightbox.replace(/<body\b[^>]*>/i, (m) => `${m}${lintBanner}`)
       : withLightbox;
@@ -785,6 +786,171 @@ function parseScenarioFromPath(absPath) {
  * Self-contained styles (no dependency on the doc's CSS vars). Works
  * whether the doc is light, dark, or has no theme.
  */
+function slugifyHeading(text) {
+  return String(text)
+    .toLowerCase()
+    .replace(/<[^>]+>/g, '')
+    .replace(/&[a-zA-Z#0-9]+;/g, ' ')
+    .replace(/\s+/g, '-')
+    .replace(/[^a-z0-9-]/g, '')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '') || 'section';
+}
+
+function stripTags(html) {
+  return String(html)
+    .replace(/<[^>]+>/g, '')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function contentSectionBounds(html) {
+  const mainMatch = html.match(/<main\b[^>]*>/i);
+  if (!mainMatch) return { start: 0, end: html.length };
+  const mainStart = (mainMatch.index || 0) + mainMatch[0].length;
+  const mainEnd = html.search(/<\/main>/i);
+  const sectionMatch = html.slice(mainStart, mainEnd > mainStart ? mainEnd : undefined).match(/<section\b[^>]*>/i);
+  if (!sectionMatch) return { start: mainStart, end: mainEnd > mainStart ? mainEnd : html.length };
+  const start = mainStart + (sectionMatch.index || 0) + sectionMatch[0].length;
+  const afterStart = html.slice(start);
+  const sectionEnd = afterStart.search(/<\/section>/i);
+  return { start, end: sectionEnd >= 0 ? start + sectionEnd : (mainEnd > mainStart ? mainEnd : html.length) };
+}
+
+function ensureHeadingIds(html) {
+  const { start, end } = contentSectionBounds(html);
+  const seen = new Map();
+  const before = html.slice(0, start);
+  const content = html.slice(start, end).replace(/<(h[23])\b([^>]*)>([\s\S]*?)<\/\1>/gi, (match, tag, attrs, inner) => {
+    if (/\bid\s*=\s*["'][^"']+["']/i.test(attrs)) return match;
+    const base = slugifyHeading(stripTags(inner));
+    const count = (seen.get(base) || 0) + 1;
+    seen.set(base, count);
+    const id = count === 1 ? base : `${base}-${count}`;
+    return `<${tag}${attrs} id="${id}">${inner}</${tag}>`;
+  });
+  return `${before}${content}${html.slice(end)}`;
+}
+
+function buildSectionsNav(html) {
+  const { start, end } = contentSectionBounds(html);
+  const links = [];
+  html.slice(start, end).replace(/<(h[23])\b([^>]*)>([\s\S]*?)<\/\1>/gi, (_match, tag, attrs, inner) => {
+    const id = (attrs.match(/\bid\s*=\s*["']([^"']+)["']/i) || [])[1];
+    if (!id) return _match;
+    const label = stripTags(inner);
+    if (!label) return _match;
+    const className = tag.toLowerCase() === 'h3' ? ' class="sub"' : '';
+    links.push(`<a${className} href="#${escapeHtml(id)}">${escapeHtml(label)}</a>`);
+    return _match;
+  });
+  return links.length ? links.join('') : '<a href="#overview">Overview</a>';
+}
+
+function normalizeSectionsNav(html) {
+  const withIds = ensureHeadingIds(html);
+  const sections = buildSectionsNav(withIds);
+  return withIds.replace(/<div\s+class=["']sections["'][^>]*>[\s\S]*?<\/div>/i, `<div class="sections">${sections}</div>`);
+}
+
+function normalizeServedDocChrome(html, filePath) {
+  const { scenarioName } = parseScenarioFromPath(filePath);
+  if (!scenarioName || scenarioName === '_shared') return html;
+
+  let out = normalizeSectionsNav(html);
+
+  const chromeStyle = `<style id="ph-served-doc-chrome">
+html[data-theme="light"] { --bg: #f7f8f8; --panel: #f3f4f5; --panel2: #eeeff1; --border: #d0d6e0; --fg: #08090a; --muted: #62666d; --accent: #5e6ad2; }
+html[data-theme="dark"] { --bg: #0d1117; --panel: #161b22; --panel2: #1c2128; --border: #30363d; --fg: #c9d1d9; --muted: #8b949e; --accent: #58a6ff; }
+/* Keep the legacy top bar links, but reserve space and hide duplicate crumb. */
+header.top {
+  position: relative;
+  padding-right: 3rem;
+  background: color-mix(in srgb, var(--panel) 92%, transparent) !important;
+  color: var(--fg) !important;
+  border-bottom: 1px solid var(--border) !important;
+}
+header.top a { color: var(--fg) !important; opacity: 0.82; transition: opacity 0.15s, color 0.15s; }
+header.top a:hover { color: var(--accent) !important; opacity: 1; }
+header.top .crumb { display: none !important; }
+/* Place theme toggle below the top bar so it never overlaps Context/Glossary/ADRs links. */
+.theme-toggle { position: fixed; top: 3.2rem; right: 1.25rem; z-index: 10001; background: color-mix(in srgb, var(--panel) 85%, transparent); border: 1px solid var(--border); border-radius: 999px; padding: 0.4rem 0.5rem; cursor: pointer; color: var(--fg); -webkit-backdrop-filter: blur(12px) saturate(180%); backdrop-filter: blur(12px) saturate(180%); display: flex; align-items: center; justify-content: center; width: 34px; height: 34px; }
+.theme-toggle:hover { border-color: var(--accent); color: var(--accent); }
+.theme-toggle svg { width: 16px; height: 16px; stroke: currentColor; fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.theme-toggle svg[data-theme-icon] { display: none; }
+.theme-toggle[data-theme-pref="system"] svg[data-theme-icon="system"], .theme-toggle[data-theme-pref="light"] svg[data-theme-icon="light"], .theme-toggle[data-theme-pref="dark"] svg[data-theme-icon="dark"] { display: block; }
+pre.mermaid { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 1rem; margin: 1rem 0; }
+.mermaid[data-processed="true"] { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 1rem; margin: 1rem 0; overflow-x: auto; }
+@media (max-width: 899px) { .theme-toggle { top: 3rem; right: 0.75rem; } }
+@media print { .theme-toggle { display: none !important; } }
+</style>`;
+
+  if (/<style\s+id=["']ph-served-doc-chrome["'][^>]*>[\s\S]*?<\/style>/i.test(out)) {
+    out = out.replace(/<style\s+id=["']ph-served-doc-chrome["'][^>]*>[\s\S]*?<\/style>/i, chromeStyle);
+  } else {
+    out = out.replace(/<\/head>/i, `${getThemeInitScript()}\n${chromeStyle}\n</head>`);
+  }
+  if (!/\bid\s*=\s*["']themeToggle["']/i.test(out)) {
+    out = out.replace(/<body\b[^>]*>/i, (m) => `${m}\n${getThemeToggleHTML()}`);
+  }
+  const runtime = `<script id="ph-served-doc-runtime">
+(function(){
+  function forceDocChrome() {
+    var root = document.documentElement;
+    var sepNodes = document.querySelectorAll('.ph-injected-breadcrumb .sep');
+    for (var i = 0; i < sepNodes.length; i++) {
+      var n = sepNodes[i];
+      n.style.setProperty('display', 'inline-flex', 'important');
+      n.style.setProperty('align-self', 'center', 'important');
+      n.style.setProperty('align-items', 'center', 'important');
+      n.style.setProperty('justify-content', 'center', 'important');
+      n.style.setProperty('line-height', '1', 'important');
+      n.style.setProperty('transform', 'translateY(-0.5px)', 'important');
+      n.style.setProperty('vertical-align', 'middle', 'important');
+    }
+
+    var hdr = document.querySelector('header.top');
+    if (hdr) {
+      var panel = getComputedStyle(root).getPropertyValue('--panel').trim() || '#f3f4f5';
+      var fg = getComputedStyle(root).getPropertyValue('--fg').trim() || '#08090a';
+      var border = getComputedStyle(root).getPropertyValue('--border').trim() || '#d0d6e0';
+      hdr.style.setProperty('background', panel, 'important');
+      hdr.style.setProperty('color', fg, 'important');
+      hdr.style.setProperty('border-bottom', '1px solid ' + border, 'important');
+      var links = hdr.querySelectorAll('a');
+      for (var j = 0; j < links.length; j++) {
+        links[j].style.setProperty('color', fg, 'important');
+      }
+    }
+  }
+
+  var blocks = Array.prototype.slice.call(document.querySelectorAll('pre.mermaid'));
+  if (blocks.length && !window.mermaid) {
+    var script = document.createElement('script');
+    script.src = 'https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js';
+    script.onload = function(){ if (window.mermaid) { window.mermaid.initialize({ startOnLoad: true, theme: document.documentElement.getAttribute('data-theme') === 'light' ? 'default' : 'dark' }); } };
+    document.head.appendChild(script);
+  }
+
+  forceDocChrome();
+  var themeObserver = new MutationObserver(function(){ forceDocChrome(); });
+  themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+  document.addEventListener('click', function(ev){ if (ev.target && ev.target.closest && ev.target.closest('#themeToggle')) setTimeout(forceDocChrome, 0); }, true);
+})();
+</script>`;
+  if (/<script\s+id=["']ph-served-doc-runtime["'][^>]*>[\s\S]*?<\/script>/i.test(out)) {
+    out = out.replace(/<script\s+id=["']ph-served-doc-runtime["'][^>]*>[\s\S]*?<\/script>/i, runtime);
+  } else {
+    out = out.replace(/<\/body>/i, `${getBaseScript()}\n${runtime}\n</body>`);
+  }
+  return out;
+}
+
 function injectBreadcrumbIntoHtml(html, filePath) {
   const { scenarioName, docLabel } = parseScenarioFromPath(filePath);
   if (!scenarioName) return html;
@@ -808,14 +974,14 @@ function injectBreadcrumbIntoHtml(html, filePath) {
   const bar = `
 <nav class="ph-injected-breadcrumb" aria-label="Breadcrumb">
   <a href="/">${esc(workspaceName)}</a>
-  <span class="sep">›</span>
+  <span class="sep" aria-hidden="true">→</span>
   <a href="/scenario/${encodeURIComponent(scenarioName)}">${esc(scenarioName)}</a>
-  ${docLabel ? `<span class="sep">›</span><span class="current">${esc(docLabel)}</span>` : ''}
+  ${docLabel ? `<span class="sep" aria-hidden="true">→</span><span class="current">${esc(docLabel)}</span>` : ''}
 </nav>
 <style>
 .ph-injected-breadcrumb {
   position: fixed; top: 0.85rem; left: 50%; transform: translateX(-50%); z-index: 10000;
-  display: flex; align-items: center; gap: 0.45rem;
+  display: flex; align-items: center; justify-content: center; gap: 0.45rem;
   padding: 0.4rem 0.9rem; border-radius: 999px;
   font: 510 13px/1.2 'Inter Variable', Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   font-feature-settings: "cv01","ss03";
@@ -823,11 +989,25 @@ function injectBreadcrumbIntoHtml(html, filePath) {
   border: 1px solid #d0d6e0;
   backdrop-filter: blur(12px) saturate(180%); -webkit-backdrop-filter: blur(12px) saturate(180%);
   box-shadow: 0 2px 8px rgba(0,0,0,0.08);
-  max-width: calc(100vw - 10rem); overflow: hidden;
+  max-width: calc(100vw - 10rem); overflow: hidden; text-align: center;
 }
 .ph-injected-breadcrumb a { color: inherit; text-decoration: none; opacity: 0.75; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 14rem; transition: opacity 0.15s, color 0.15s; }
 .ph-injected-breadcrumb a:hover { opacity: 1; color: #7170ff; }
-.ph-injected-breadcrumb .sep { opacity: 0.4; }
+.ph-injected-breadcrumb .sep,
+.ph-injected-breadcrumb > .sep {
+  color: inherit;
+  opacity: 0.5;
+  font-size: 0.9em;
+  font-weight: 600;
+  line-height: 1 !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  align-self: center !important;
+  min-height: 1em;
+  vertical-align: middle;
+  transform: translateY(-0.5px) !important;
+}
 .ph-injected-breadcrumb .current { color: #08090a; font-weight: 590; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 20rem; }
 
 html[data-theme="dark"] .ph-injected-breadcrumb {
@@ -837,7 +1017,7 @@ html[data-theme="dark"] .ph-injected-breadcrumb {
 }
 html[data-theme="dark"] .ph-injected-breadcrumb .current { color: #f7f8f8; }
 
-@media (max-width: 899px) { .ph-injected-breadcrumb { left: 3.2rem; transform: none; max-width: calc(100vw - 7rem); } }
+@media (max-width: 899px) { .ph-injected-breadcrumb { left: 3.2rem; transform: none; max-width: calc(100vw - 7rem); justify-content: flex-start; } }
 @media print { .ph-injected-breadcrumb { display: none !important; } }
 </style>`;
 
@@ -909,50 +1089,53 @@ async function serveApiScenarioStatus(req, res, scenarioName) {
  * @returns {Promise<Array>} Array of scenario objects.
  */
 async function scanScenarios() {
-  const plansDir = join(workspaceRootPath, 'plans');
+  const scenarioMap = new Map();
 
-  try {
-    await stat(plansDir);
-  } catch {
-    return [];
-  }
+  for (const rootName of ['plan-harness', 'plans']) {
+    const rootDir = join(workspaceRootPath, rootName);
+    let entries;
+    try {
+      await stat(rootDir);
+      entries = await readdir(rootDir, { withFileTypes: true });
+    } catch {
+      continue;
+    }
 
-  const entries = await readdir(plansDir, { withFileTypes: true });
+    const subdirScenarios = [];
+    const flatFiles = [];
 
-  // Check for subdirectory-based scenarios
-  const subdirScenarios = [];
-  const flatFiles = [];
+    for (const entry of entries) {
+      if (entry.name.startsWith('.') || entry.name === '_shared') continue;
+      if (entry.isDirectory()) {
+        const scenario = await scanScenarioDir(entry.name, join(rootDir, entry.name));
+        if (scenario) subdirScenarios.push(scenario);
+      } else if (rootName === 'plans' && entry.isFile() && extname(entry.name).toLowerCase() === '.html') {
+        flatFiles.push(entry.name);
+      }
+    }
 
-  for (const entry of entries) {
-    if (entry.isDirectory()) {
-      // Subdirectory = scenario
-      const scenario = await scanScenarioDir(entry.name, join(plansDir, entry.name));
-      if (scenario) subdirScenarios.push(scenario);
-    } else if (entry.isFile() && extname(entry.name).toLowerCase() === '.html') {
-      flatFiles.push(entry.name);
+    const scenarios = subdirScenarios.length > 0
+      ? subdirScenarios
+      : rootName === 'plans'
+        ? groupFlatFilesIntoScenarios(flatFiles, rootDir)
+        : [];
+
+    for (const scenario of scenarios) {
+      if (!scenarioMap.has(scenario.name)) scenarioMap.set(scenario.name, scenario);
     }
   }
 
-  // If we have subdirectory scenarios, return those
-  if (subdirScenarios.length > 0) {
-    return subdirScenarios;
-  }
-
-  // Otherwise, try to group flat files into scenarios by prefix
-  return groupFlatFilesIntoScenarios(flatFiles, plansDir);
+  return [...scenarioMap.values()];
 }
 
 async function scanScenarioDir(name, dirPath) {
-  // Support both bare filenames (generated by skills: design.html)
-  // and prefixed filenames (existing files: perm-gov-design.html)
   const planTypes = [
+    { type: 'product', suffixes: ['product.html'] },
     { type: 'analysis', suffixes: ['analysis.html', '-analysis.html'] },
     { type: 'design', suffixes: ['design.html', '-design.html', '-design-concise.html'] },
-    { type: 'test-plan', suffixes: ['test-plan.html', '-test-plan.html', '-e2e-test-plan.html'] },
     { type: 'state-machine', suffixes: ['state-machine.html', '-state-machine.html', '-state-machines.html'] },
-    { type: 'test-cases', suffixes: ['test-cases.html', '-test-cases.html'] },
-    { type: 'implementation-plan', suffixes: ['implementation-plan.html', '-implementation-plan.html', '-impl-plan.html'] },
-    { type: 'review-report', suffixes: ['review-report.html', '-review-report.html'] },
+    { type: 'test-spec', suffixes: ['test-spec.html'] },
+    { type: 'implementation', suffixes: ['implementation.html', 'implementation-plan.html', '-implementation-plan.html', '-impl-plan.html'] },
     { type: 'test-report', suffixes: ['test-report.html', '-test-report.html'] }
   ];
 
@@ -977,7 +1160,7 @@ async function scanScenarioDir(name, dirPath) {
       }
     }
     if (!found) {
-      files.push({ type: pt.type, path: join(dirPath, `${name}-${pt.type}.html`), exists: false, todos: 0, done: 0 });
+      files.push({ type: pt.type, path: join(dirPath, `${pt.type}.html`), exists: false, todos: 0, done: 0 });
     }
   }
 
@@ -1083,7 +1266,7 @@ function groupFlatFilesIntoScenarios(fileNames, plansDir) {
   const scenarios = [];
   // Must match the `type` keys emitted via planTypeMap above and the planTypes
   // array in templates/base.js. Order = canonical workflow (prompts/_workflow.md).
-  const allPlanTypes = ['analysis', 'design', 'state-machine', 'test-plan', 'test-cases', 'implementation-plan', 'test-report'];
+  const allPlanTypes = ['product', 'analysis', 'design', 'state-machine', 'test-spec', 'implementation', 'test-report'];
 
   for (const [prefix, foundFiles] of prefixMap) {
     const files = allPlanTypes.map(type => {

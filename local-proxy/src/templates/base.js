@@ -113,7 +113,7 @@ export function getBaseCSS() {
   .ph-breadcrumb { position: fixed; top: 0.85rem; left: 50%; transform: translateX(-50%); z-index: 1000; display: flex; align-items: center; gap: 0.45rem; padding: 0.4rem 0.9rem; font-size: 0.82rem; color: var(--muted); background: color-mix(in srgb, var(--surface) 85%, transparent); border: 1px solid var(--border); border-radius: 999px; -webkit-backdrop-filter: blur(12px) saturate(180%); backdrop-filter: blur(12px) saturate(180%); box-shadow: var(--shadow); max-width: calc(100vw - 10rem); overflow: hidden; }
   .ph-breadcrumb a { color: var(--muted); text-decoration: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 14rem; transition: color 0.15s; }
   .ph-breadcrumb a:hover { color: var(--accent); }
-  .ph-breadcrumb .sep { color: var(--muted); opacity: 0.4; font-size: 0.9em; }
+  .ph-breadcrumb .sep { color: var(--muted); opacity: 0.5; font-size: 0.9em; font-weight: 600; line-height: 1; display: inline-flex; align-items: center; justify-content: center; align-self: center; min-height: 1em; transform: translateY(-0.5px); }
   .ph-breadcrumb .current { color: var(--text); font-weight: 510; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 20rem; }
   @media (max-width: 899px) { .ph-breadcrumb { left: 3.2rem; transform: none; max-width: calc(100vw - 7rem); } }
 
@@ -363,7 +363,7 @@ export function getBreadcrumbHTML(opts = {}) {
  * @param {string} storageKey - localStorage key for theme preference.
  * @returns {string} Script tag with interactivity code.
  */
-function getBaseScript(_legacyStorageKey) {
+export function getBaseScript(_legacyStorageKey) {
   // _legacyStorageKey is ignored — the key is now uniformly "plan-harness-theme"
   // so a user's theme choice syncs across dashboard, scenario detail, and every
   // rendered plan document.
@@ -570,13 +570,7 @@ export function generateDashboard(scenarios, options = {}) {
   const totalTodos = scenarios.reduce((s, sc) => s + (sc.todos || 0), 0);
   const totalUnresolved = scenarios.reduce((s, sc) => s + (sc.unresolvedComments || 0), 0);
 
-  // Must match the `type` keys emitted by scanScenarioDir in web-server.js.
-  // Mismatched names (e.g. 'state-machines' vs 'state-machine') silently
-  // render every card as missing even when the files exist.
-  // Order = canonical workflow (prompts/_workflow.md):
-  //   analysis → design → {state-machine, test-plan → test-cases}
-  //            → implementation → test-report
-  const planTypes = ['analysis', 'design', 'state-machine', 'test-plan', 'test-cases', 'implementation-plan', 'test-report'];
+  const planTypes = ['product', 'analysis', 'design', 'state-machine', 'test-spec', 'implementation', 'test-report'];
 
   // Cards are omitted when their count is zero — honest signal, no dead chrome.
   // Scenarios + Plan Files are always shown because they can be zero only
@@ -681,17 +675,14 @@ function filterScenarios() {
  * @returns {string} Full self-contained HTML page.
  */
 export function generateScenarioDetail(scenario, options = {}) {
-  // Types must match the keys emitted by scanScenarioDir in web-server.js.
-  // Keep this list in sync with the planTypes array in generateDashboard above.
-  // Order = canonical workflow (prompts/_workflow.md).
   const PLAN_DEFS = [
-    { type: 'analysis', label: 'Analysis', blurb: 'Problem + code-logic walk: current state, pain points (with file/line), root causes', skill: '/plan-gen analysis' },
-    { type: 'design', label: 'Design', blurb: 'Architecture, data model, API, UX, risks', skill: '/plan-gen design' },
-    { type: 'state-machine', label: 'State Machine', blurb: 'Entity states, transitions, invariants', skill: '/plan-gen state-machine' },
-    { type: 'test-plan', label: 'Test Plan', blurb: 'E2E scenarios, entry criteria, ownership', skill: '/plan-gen test-plan' },
-    { type: 'test-cases', label: 'Test Cases', blurb: 'Priority-ranked cases with expected outcomes', skill: '/plan-gen test-cases' },
-    { type: 'implementation-plan', label: 'Implementation', blurb: 'File-level steps, phases, dependencies', skill: '/plan-gen implementation' },
-    { type: 'test-report', label: 'Test Report', blurb: 'Last E2E run: pass/fail per scenario with evidence', skill: '/plan-gen test-report' },
+    { type: 'product', label: 'Product', blurb: 'PRD: why, who, user stories, metrics, scope', skill: '/plan-gen product' },
+    { type: 'analysis', label: 'Analysis', blurb: 'Problem + code-logic walk: current state, pain points, root causes', skill: '/plan-gen analysis' },
+    { type: 'design', label: 'Design', blurb: 'Architecture skeleton, decisions, interfaces, state refs', skill: '/plan-gen design' },
+    { type: 'state-machine', label: 'State Machine', blurb: 'Lifecycle diagrams, transitions, corner cases, invariants', skill: '/plan-gen state-machine' },
+    { type: 'test-spec', label: 'Test Spec', blurb: 'Acceptance matrix, vertical slices, fixtures, HITL/AFK', skill: '/plan-gen test-spec' },
+    { type: 'implementation', label: 'Implementation', blurb: 'PR plan: one vertical slice per PR with files, risks, demos', skill: '/plan-gen implementation' },
+    { type: 'test-report', label: 'Test Report', blurb: 'Last verification run: pass/fail per scenario with evidence', skill: '/plan-gen test-report' },
   ];
 
   const files = scenario.files || [];

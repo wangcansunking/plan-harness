@@ -6907,7 +6907,7 @@ function getBaseCSS() {
   .ph-breadcrumb { position: fixed; top: 0.85rem; left: 50%; transform: translateX(-50%); z-index: 1000; display: flex; align-items: center; gap: 0.45rem; padding: 0.4rem 0.9rem; font-size: 0.82rem; color: var(--muted); background: color-mix(in srgb, var(--surface) 85%, transparent); border: 1px solid var(--border); border-radius: 999px; -webkit-backdrop-filter: blur(12px) saturate(180%); backdrop-filter: blur(12px) saturate(180%); box-shadow: var(--shadow); max-width: calc(100vw - 10rem); overflow: hidden; }
   .ph-breadcrumb a { color: var(--muted); text-decoration: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 14rem; transition: color 0.15s; }
   .ph-breadcrumb a:hover { color: var(--accent); }
-  .ph-breadcrumb .sep { color: var(--muted); opacity: 0.4; font-size: 0.9em; }
+  .ph-breadcrumb .sep { color: var(--muted); opacity: 0.5; font-size: 0.9em; font-weight: 600; line-height: 1; display: inline-flex; align-items: center; justify-content: center; align-self: center; min-height: 1em; transform: translateY(-0.5px); }
   .ph-breadcrumb .current { color: var(--text); font-weight: 510; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 20rem; }
   @media (max-width: 899px) { .ph-breadcrumb { left: 3.2rem; transform: none; max-width: calc(100vw - 7rem); } }
 
@@ -7281,7 +7281,7 @@ function generateDashboard(scenarios, options = {}) {
   const existingFiles = scenarios.reduce((s, sc) => s + (sc.files ? sc.files.filter((f) => f.exists).length : 0), 0);
   const totalTodos = scenarios.reduce((s, sc) => s + (sc.todos || 0), 0);
   const totalUnresolved = scenarios.reduce((s, sc) => s + (sc.unresolvedComments || 0), 0);
-  const planTypes = ["analysis", "design", "state-machine", "test-plan", "test-cases", "implementation-plan", "test-report"];
+  const planTypes = ["product", "analysis", "design", "state-machine", "test-spec", "implementation", "test-report"];
   let summaryCards = `
 <div class="summary-grid">
   <div class="summary-card"><div class="summary-value">${totalScenarios}</div><div class="summary-label">Scenarios</div></div>
@@ -7360,13 +7360,13 @@ function filterScenarios() {
 }
 function generateScenarioDetail(scenario, options = {}) {
   const PLAN_DEFS = [
-    { type: "analysis", label: "Analysis", blurb: "Problem + code-logic walk: current state, pain points (with file/line), root causes", skill: "/plan-gen analysis" },
-    { type: "design", label: "Design", blurb: "Architecture, data model, API, UX, risks", skill: "/plan-gen design" },
-    { type: "state-machine", label: "State Machine", blurb: "Entity states, transitions, invariants", skill: "/plan-gen state-machine" },
-    { type: "test-plan", label: "Test Plan", blurb: "E2E scenarios, entry criteria, ownership", skill: "/plan-gen test-plan" },
-    { type: "test-cases", label: "Test Cases", blurb: "Priority-ranked cases with expected outcomes", skill: "/plan-gen test-cases" },
-    { type: "implementation-plan", label: "Implementation", blurb: "File-level steps, phases, dependencies", skill: "/plan-gen implementation" },
-    { type: "test-report", label: "Test Report", blurb: "Last E2E run: pass/fail per scenario with evidence", skill: "/plan-gen test-report" }
+    { type: "product", label: "Product", blurb: "PRD: why, who, user stories, metrics, scope", skill: "/plan-gen product" },
+    { type: "analysis", label: "Analysis", blurb: "Problem + code-logic walk: current state, pain points, root causes", skill: "/plan-gen analysis" },
+    { type: "design", label: "Design", blurb: "Architecture skeleton, decisions, interfaces, state refs", skill: "/plan-gen design" },
+    { type: "state-machine", label: "State Machine", blurb: "Lifecycle diagrams, transitions, corner cases, invariants", skill: "/plan-gen state-machine" },
+    { type: "test-spec", label: "Test Spec", blurb: "Acceptance matrix, vertical slices, fixtures, HITL/AFK", skill: "/plan-gen test-spec" },
+    { type: "implementation", label: "Implementation", blurb: "PR plan: one vertical slice per PR with files, risks, demos", skill: "/plan-gen implementation" },
+    { type: "test-report", label: "Test Report", blurb: "Last verification run: pass/fail per scenario with evidence", skill: "/plan-gen test-report" }
   ];
   const files = scenario.files || [];
   const byType = Object.fromEntries(files.map((f) => [f.type, f]));
@@ -16534,6 +16534,44 @@ var init_manifest_v2 = __esm({
 
 // src/html-lint.js
 import crypto from "node:crypto";
+function nodeText(node) {
+  return String(node?.text || "").replace(/\s+/g, " ").trim();
+}
+function slugify2(text) {
+  return String(text).toLowerCase().replace(/\s+/g, "-").replace(/[^a-z0-9-]/g, "").replace(/-+/g, "-").replace(/^-|-$/g, "") || "section";
+}
+function collectHeadings(root) {
+  const seen = /* @__PURE__ */ new Map();
+  const scope = root.querySelector("main > section") || root.querySelector("main") || root;
+  return scope.querySelectorAll("h2, h3").map((heading) => {
+    const label = nodeText(heading);
+    const explicitId = heading.getAttribute("id");
+    const base = slugify2(label);
+    const count = (seen.get(base) || 0) + 1;
+    seen.set(base, count);
+    return {
+      id: explicitId || (count === 1 ? base : `${base}-${count}`),
+      label
+    };
+  }).filter((h) => h.label);
+}
+function hasSvgOrMermaid(root) {
+  return root.querySelectorAll("svg").length > 0 || root.querySelectorAll("pre.mermaid, .mermaid").length > 0;
+}
+function docMentionsUx(root, metaJson) {
+  if (Array.isArray(metaJson?.uxMockups) && metaJson.uxMockups.length > 0) return true;
+  if (Array.isArray(metaJson?.userFlows) && metaJson.userFlows.length > 0) return true;
+  const scope = root.querySelector("main > section") || root.querySelector("main") || root;
+  const text = nodeText(scope).toLowerCase();
+  return /\b(ux|ui|user interface|screen|modal|form|mockup|wireframe|user flow|screen flow|journey)\b/.test(text);
+}
+function hasVisualNear(root, words) {
+  const visualNodes = root.querySelectorAll("svg, pre.mermaid, .mermaid, .diagram-box");
+  return visualNodes.some((node) => {
+    const text = nodeText(node.parentNode || node).toLowerCase();
+    return words.some((word) => text.includes(word));
+  });
+}
 function lintHtml(html, ctx = {}) {
   const errors = [];
   const warnings = [];
@@ -16737,6 +16775,60 @@ function lintHtml(html, ctx = {}) {
       });
     }
   }
+  if (!skip.has("L3-section-nav")) {
+    const headings = collectHeadings(root);
+    const navLinks = root.querySelectorAll('nav.toc .sections a[href^="#"]');
+    if (headings.length > 0 && navLinks.length === 0) {
+      errors.push({
+        rule: "L3-section-nav",
+        severity: "error",
+        message: "<nav.toc .sections> has no section links, but the document has headings"
+      });
+    } else if (navLinks.length > 0) {
+      const navTargets = navLinks.map((a) => (a.getAttribute("href") || "").replace(/^#/, ""));
+      const headingIds = headings.map((h) => h.id);
+      const missing = headingIds.filter((id) => !navTargets.includes(id));
+      const stale = navTargets.filter((id) => !headingIds.includes(id));
+      if (missing.length || stale.length) {
+        errors.push({
+          rule: "L3-section-nav",
+          severity: "error",
+          message: `Section nav is stale \u2014 missing heading ids: [${missing.join(", ") || "none"}], stale links: [${stale.join(", ") || "none"}]`
+        });
+      }
+    }
+  }
+  if (!skip.has("L3-diagrams") && DIAGRAM_REQUIRED_DOCS.has(ctx.docName)) {
+    if (!hasSvgOrMermaid(root)) {
+      errors.push({
+        rule: "L3-diagrams",
+        severity: "error",
+        message: `${ctx.docName}.html must include a first-class diagram: inline <svg> preferred, <pre class="mermaid"> accepted, table-only is not enough`
+      });
+    } else if (root.querySelectorAll("svg").length === 0) {
+      warnings.push({
+        rule: "L3-diagrams",
+        severity: "warning",
+        message: `${ctx.docName}.html uses Mermaid only \u2014 SVG is preferred; tables are fallback only`
+      });
+    }
+  }
+  if (!skip.has("L3-ux-visuals") && ctx.docName === "design" && docMentionsUx(root, ctx.metaJson)) {
+    if (!hasVisualNear(root, ["mockup", "wireframe", "screen"])) {
+      errors.push({
+        rule: "L3-ux-visuals",
+        severity: "error",
+        message: "Design doc mentions UX/UI but has no first-class mockup/wireframe/screen visual"
+      });
+    }
+    if (!hasVisualNear(root, ["flow", "journey", "screen flow", "user flow"])) {
+      errors.push({
+        rule: "L3-ux-visuals",
+        severity: "error",
+        message: "Design doc mentions UX/UI but has no first-class user-flow visual"
+      });
+    }
+  }
   if (!skip.has("L3-meta-embed")) {
     const metaTag = root.querySelector("script#meta");
     if (!metaTag) {
@@ -16832,7 +16924,7 @@ function lintHtml(html, ctx = {}) {
   }
   return { errors, warnings, info };
 }
-var import_node_html_parser, SCENARIO_DOCS, LOCKED_PALETTE_VARS, PALETTE_LOCKED_VALUES, SHARED_LINK_LABELS;
+var import_node_html_parser, SCENARIO_DOCS, LOCKED_PALETTE_VARS, PALETTE_LOCKED_VALUES, SHARED_LINK_LABELS, DIAGRAM_REQUIRED_DOCS;
 var init_html_lint = __esm({
   "src/html-lint.js"() {
     import_node_html_parser = __toESM(require_dist2(), 1);
@@ -16864,6 +16956,7 @@ var init_html_lint = __esm({
       "--accent": "#58a6ff"
     };
     SHARED_LINK_LABELS = ["Context", "Glossary", "ADR"];
+    DIAGRAM_REQUIRED_DOCS = /* @__PURE__ */ new Set(["design", "state-machine"]);
   }
 });
 
@@ -17367,23 +17460,12 @@ async function serveHtmlFile(req, res, filePath, ctx = {}) {
   try {
     const raw = await readFile4(resolved, "utf-8");
     const isV2 = resolved.includes(`${sep4}plan-harness${sep4}`) && !resolved.includes(`${sep4}_shared${sep4}`);
-    let lintBanner = "";
-    let lintHeader = "";
+    let metaJson;
     if (isV2) {
-      const docBase = basename2(resolved).replace(/\.html?$/i, "");
-      let metaJson;
       try {
         const metaRaw = await readFile4(resolved.replace(/\.html?$/i, ".meta.json"), "utf-8");
         metaJson = JSON.parse(metaRaw);
       } catch {
-      }
-      const result = lintHtml(raw, { docName: docBase, metaJson });
-      const errCount = result.errors.length;
-      const warnCount = result.warnings.length;
-      lintHeader = `${errCount} error(s), ${warnCount} warning(s)`;
-      if (errCount > 0) {
-        const items = result.errors.map((e) => `<li><code>${escapeHtml(e.rule)}</code>: ${escapeHtml(e.message)}</li>`).join("");
-        lintBanner = `<div id="__html_lint_banner" style="position:fixed;top:0;left:0;right:0;z-index:9999;background:#f85149;color:#fff;font:13px/1.4 -apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;padding:10px 16px;border-bottom:2px solid #8b1717;"><strong>html-lint:</strong> ${errCount} structural error(s) \u2014 this doc does not satisfy <code>prompts/_html-base.md</code>. <a href="#" onclick="document.getElementById('__html_lint_banner').remove();return false;" style="color:#fff;float:right;font-weight:bold;">\xD7</a><ul style="margin:6px 0 0;padding-left:24px;">${items}</ul></div>`;
       }
     }
     const scenarioDir = resolved.substring(0, resolved.lastIndexOf(sep4));
@@ -17394,7 +17476,8 @@ async function serveHtmlFile(req, res, filePath, ctx = {}) {
     } catch {
     }
     const withTabsFixed = normalizePlanTabs(raw, siblingSet, scenarioDir);
-    const withChecklistFixed = normalizeChecklistItems(withTabsFixed);
+    const withDocChrome = normalizeServedDocChrome(withTabsFixed, resolved);
+    const withChecklistFixed = normalizeChecklistItems(withDocChrome);
     const withSectionIds = injectSectionIds(withChecklistFixed);
     const { scenarioName, docLabel } = parseScenarioFromPath(resolved);
     const fromLoopback = !!ctx.fromLoopback;
@@ -17410,6 +17493,19 @@ async function serveHtmlFile(req, res, filePath, ctx = {}) {
     const withBreadcrumb = injectBreadcrumbIntoHtml(withPanels, resolved);
     const withAssets = normalizeAssetLinks(withBreadcrumb, scenarioDir);
     const withLightbox = injectLightbox(withAssets);
+    let lintBanner = "";
+    let lintHeader = "";
+    if (isV2) {
+      const docBase = basename2(resolved).replace(/\.html?$/i, "");
+      const result = lintHtml(withLightbox, { docName: docBase, metaJson });
+      const errCount = result.errors.length;
+      const warnCount = result.warnings.length;
+      lintHeader = `${errCount} error(s), ${warnCount} warning(s)`;
+      if (errCount > 0) {
+        const items = result.errors.map((e) => `<li><code>${escapeHtml(e.rule)}</code>: ${escapeHtml(e.message)}</li>`).join("");
+        lintBanner = `<div id="__html_lint_banner" style="position:fixed;top:0;left:0;right:0;z-index:9999;background:#f85149;color:#fff;font:13px/1.4 -apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;padding:10px 16px;border-bottom:2px solid #8b1717;"><strong>html-lint:</strong> ${errCount} structural error(s) \u2014 this doc does not satisfy <code>prompts/_html-base.md</code>. <a href="#" onclick="document.getElementById('__html_lint_banner').remove();return false;" style="color:#fff;float:right;font-weight:bold;">\xD7</a><ul style="margin:6px 0 0;padding-left:24px;">${items}</ul></div>`;
+      }
+    }
     const injected = lintBanner ? withLightbox.replace(/<body\b[^>]*>/i, (m) => `${m}${lintBanner}`) : withLightbox;
     const headers = {
       "Content-Type": "text/html; charset=utf-8",
@@ -17438,6 +17534,113 @@ function parseScenarioFromPath(absPath) {
   const docLabel = docFile.replace(/\.html?$/i, "") || null;
   return { scenarioName, docLabel };
 }
+function slugifyHeading(text) {
+  return String(text).toLowerCase().replace(/<[^>]+>/g, "").replace(/&[a-zA-Z#0-9]+;/g, " ").replace(/\s+/g, "-").replace(/[^a-z0-9-]/g, "").replace(/-+/g, "-").replace(/^-|-$/g, "") || "section";
+}
+function stripTags(html) {
+  return String(html).replace(/<[^>]+>/g, "").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/\s+/g, " ").trim();
+}
+function contentSectionBounds(html) {
+  const mainMatch = html.match(/<main\b[^>]*>/i);
+  if (!mainMatch) return { start: 0, end: html.length };
+  const mainStart = (mainMatch.index || 0) + mainMatch[0].length;
+  const mainEnd = html.search(/<\/main>/i);
+  const sectionMatch = html.slice(mainStart, mainEnd > mainStart ? mainEnd : void 0).match(/<section\b[^>]*>/i);
+  if (!sectionMatch) return { start: mainStart, end: mainEnd > mainStart ? mainEnd : html.length };
+  const start = mainStart + (sectionMatch.index || 0) + sectionMatch[0].length;
+  const afterStart = html.slice(start);
+  const sectionEnd = afterStart.search(/<\/section>/i);
+  return { start, end: sectionEnd >= 0 ? start + sectionEnd : mainEnd > mainStart ? mainEnd : html.length };
+}
+function ensureHeadingIds(html) {
+  const { start, end } = contentSectionBounds(html);
+  const seen = /* @__PURE__ */ new Map();
+  const before = html.slice(0, start);
+  const content = html.slice(start, end).replace(/<(h[23])\b([^>]*)>([\s\S]*?)<\/\1>/gi, (match, tag, attrs, inner) => {
+    if (/\bid\s*=\s*["'][^"']+["']/i.test(attrs)) return match;
+    const base = slugifyHeading(stripTags(inner));
+    const count = (seen.get(base) || 0) + 1;
+    seen.set(base, count);
+    const id = count === 1 ? base : `${base}-${count}`;
+    return `<${tag}${attrs} id="${id}">${inner}</${tag}>`;
+  });
+  return `${before}${content}${html.slice(end)}`;
+}
+function buildSectionsNav(html) {
+  const { start, end } = contentSectionBounds(html);
+  const links = [];
+  html.slice(start, end).replace(/<(h[23])\b([^>]*)>([\s\S]*?)<\/\1>/gi, (_match, tag, attrs, inner) => {
+    const id = (attrs.match(/\bid\s*=\s*["']([^"']+)["']/i) || [])[1];
+    if (!id) return _match;
+    const label = stripTags(inner);
+    if (!label) return _match;
+    const className = tag.toLowerCase() === "h3" ? ' class="sub"' : "";
+    links.push(`<a${className} href="#${escapeHtml(id)}">${escapeHtml(label)}</a>`);
+    return _match;
+  });
+  return links.length ? links.join("") : '<a href="#overview">Overview</a>';
+}
+function normalizeSectionsNav(html) {
+  const withIds = ensureHeadingIds(html);
+  const sections = buildSectionsNav(withIds);
+  return withIds.replace(/<div\s+class=["']sections["'][^>]*>[\s\S]*?<\/div>/i, `<div class="sections">${sections}</div>`);
+}
+function normalizeServedDocChrome(html, filePath) {
+  const { scenarioName } = parseScenarioFromPath(filePath);
+  if (!scenarioName || scenarioName === "_shared") return html;
+  let out = normalizeSectionsNav(html);
+  const chromeStyle = `<style id="ph-served-doc-chrome">
+html[data-theme="light"] { --bg: #f7f8f8; --panel: #f3f4f5; --panel2: #eeeff1; --border: #d0d6e0; --fg: #08090a; --muted: #62666d; --accent: #5e6ad2; }
+html[data-theme="dark"] { --bg: #0d1117; --panel: #161b22; --panel2: #1c2128; --border: #30363d; --fg: #c9d1d9; --muted: #8b949e; --accent: #58a6ff; }
+/* Keep the legacy top bar links, but reserve space and hide duplicate crumb. */
+header.top {
+  position: relative;
+  padding-right: 3rem;
+  background: color-mix(in srgb, var(--panel) 92%, transparent) !important;
+  color: var(--fg) !important;
+  border-bottom: 1px solid var(--border) !important;
+}
+header.top a { color: var(--fg) !important; opacity: 0.82; transition: opacity 0.15s, color 0.15s; }
+header.top a:hover { color: var(--accent) !important; opacity: 1; }
+header.top .crumb { display: none !important; }
+/* Place theme toggle below the top bar so it never overlaps Context/Glossary/ADRs links. */
+.theme-toggle { position: fixed; top: 3.2rem; right: 1.25rem; z-index: 10001; background: color-mix(in srgb, var(--panel) 85%, transparent); border: 1px solid var(--border); border-radius: 999px; padding: 0.4rem 0.5rem; cursor: pointer; color: var(--fg); -webkit-backdrop-filter: blur(12px) saturate(180%); backdrop-filter: blur(12px) saturate(180%); display: flex; align-items: center; justify-content: center; width: 34px; height: 34px; }
+.theme-toggle:hover { border-color: var(--accent); color: var(--accent); }
+.theme-toggle svg { width: 16px; height: 16px; stroke: currentColor; fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.theme-toggle svg[data-theme-icon] { display: none; }
+.theme-toggle[data-theme-pref="system"] svg[data-theme-icon="system"], .theme-toggle[data-theme-pref="light"] svg[data-theme-icon="light"], .theme-toggle[data-theme-pref="dark"] svg[data-theme-icon="dark"] { display: block; }
+pre.mermaid { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 1rem; margin: 1rem 0; }
+.mermaid[data-processed="true"] { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 1rem; margin: 1rem 0; overflow-x: auto; }
+@media (max-width: 899px) { .theme-toggle { top: 3rem; right: 0.75rem; } }
+@media print { .theme-toggle { display: none !important; } }
+</style>`;
+  if (!out.includes('id="ph-served-doc-chrome"')) {
+    out = out.replace(/<\/head>/i, `${getThemeInitScript()}
+${chromeStyle}
+</head>`);
+  }
+  if (!/\bid\s*=\s*["']themeToggle["']/i.test(out)) {
+    out = out.replace(/<body\b[^>]*>/i, (m) => `${m}
+${getThemeToggleHTML()}`);
+  }
+  if (!out.includes("ph-served-doc-runtime")) {
+    const runtime = `<script id="ph-served-doc-runtime">
+(function(){
+  var blocks = Array.prototype.slice.call(document.querySelectorAll('pre.mermaid'));
+  if (blocks.length && !window.mermaid) {
+    var script = document.createElement('script');
+    script.src = 'https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js';
+    script.onload = function(){ if (window.mermaid) { window.mermaid.initialize({ startOnLoad: true, theme: document.documentElement.getAttribute('data-theme') === 'light' ? 'default' : 'dark' }); } };
+    document.head.appendChild(script);
+  }
+})();
+</script>`;
+    out = out.replace(/<\/body>/i, `${getBaseScript()}
+${runtime}
+</body>`);
+  }
+  return out;
+}
 function injectBreadcrumbIntoHtml(html, filePath) {
   const { scenarioName, docLabel } = parseScenarioFromPath(filePath);
   if (!scenarioName) return html;
@@ -17453,14 +17656,14 @@ function injectBreadcrumbIntoHtml(html, filePath) {
   const bar = `
 <nav class="ph-injected-breadcrumb" aria-label="Breadcrumb">
   <a href="/">${esc2(workspaceName)}</a>
-  <span class="sep">\u203A</span>
+  <span class="sep" aria-hidden="true">\u2192</span>
   <a href="/scenario/${encodeURIComponent(scenarioName)}">${esc2(scenarioName)}</a>
-  ${docLabel ? `<span class="sep">\u203A</span><span class="current">${esc2(docLabel)}</span>` : ""}
+  ${docLabel ? `<span class="sep" aria-hidden="true">\u2192</span><span class="current">${esc2(docLabel)}</span>` : ""}
 </nav>
 <style>
 .ph-injected-breadcrumb {
   position: fixed; top: 0.85rem; left: 50%; transform: translateX(-50%); z-index: 10000;
-  display: flex; align-items: center; gap: 0.45rem;
+  display: flex; align-items: center; justify-content: center; gap: 0.45rem;
   padding: 0.4rem 0.9rem; border-radius: 999px;
   font: 510 13px/1.2 'Inter Variable', Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   font-feature-settings: "cv01","ss03";
@@ -17468,11 +17671,25 @@ function injectBreadcrumbIntoHtml(html, filePath) {
   border: 1px solid #d0d6e0;
   backdrop-filter: blur(12px) saturate(180%); -webkit-backdrop-filter: blur(12px) saturate(180%);
   box-shadow: 0 2px 8px rgba(0,0,0,0.08);
-  max-width: calc(100vw - 10rem); overflow: hidden;
+  max-width: calc(100vw - 10rem); overflow: hidden; text-align: center;
 }
 .ph-injected-breadcrumb a { color: inherit; text-decoration: none; opacity: 0.75; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 14rem; transition: opacity 0.15s, color 0.15s; }
 .ph-injected-breadcrumb a:hover { opacity: 1; color: #7170ff; }
-.ph-injected-breadcrumb .sep { opacity: 0.4; }
+.ph-injected-breadcrumb .sep,
+.ph-injected-breadcrumb > .sep {
+  color: inherit;
+  opacity: 0.5;
+  font-size: 0.9em;
+  font-weight: 600;
+  line-height: 1 !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  align-self: center !important;
+  min-height: 1em;
+  vertical-align: middle;
+  transform: translateY(-0.5px) !important;
+}
 .ph-injected-breadcrumb .current { color: #08090a; font-weight: 590; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 20rem; }
 
 html[data-theme="dark"] .ph-injected-breadcrumb {
@@ -17482,7 +17699,7 @@ html[data-theme="dark"] .ph-injected-breadcrumb {
 }
 html[data-theme="dark"] .ph-injected-breadcrumb .current { color: #f7f8f8; }
 
-@media (max-width: 899px) { .ph-injected-breadcrumb { left: 3.2rem; transform: none; max-width: calc(100vw - 7rem); } }
+@media (max-width: 899px) { .ph-injected-breadcrumb { left: 3.2rem; transform: none; max-width: calc(100vw - 7rem); justify-content: flex-start; } }
 @media print { .ph-injected-breadcrumb { display: none !important; } }
 </style>`;
   const bodyMatch = html.match(/<body[^>]*>/i);
@@ -17532,37 +17749,42 @@ async function serveApiScenarioStatus(req, res, scenarioName) {
   }, null, 2));
 }
 async function scanScenarios() {
-  const plansDir = join4(workspaceRootPath, "plans");
-  try {
-    await stat2(plansDir);
-  } catch {
-    return [];
-  }
-  const entries = await readdir2(plansDir, { withFileTypes: true });
-  const subdirScenarios = [];
-  const flatFiles = [];
-  for (const entry of entries) {
-    if (entry.isDirectory()) {
-      const scenario = await scanScenarioDir(entry.name, join4(plansDir, entry.name));
-      if (scenario) subdirScenarios.push(scenario);
-    } else if (entry.isFile() && extname2(entry.name).toLowerCase() === ".html") {
-      flatFiles.push(entry.name);
+  const scenarioMap = /* @__PURE__ */ new Map();
+  for (const rootName of ["plan-harness", "plans"]) {
+    const rootDir = join4(workspaceRootPath, rootName);
+    let entries;
+    try {
+      await stat2(rootDir);
+      entries = await readdir2(rootDir, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    const subdirScenarios = [];
+    const flatFiles = [];
+    for (const entry of entries) {
+      if (entry.name.startsWith(".") || entry.name === "_shared") continue;
+      if (entry.isDirectory()) {
+        const scenario = await scanScenarioDir(entry.name, join4(rootDir, entry.name));
+        if (scenario) subdirScenarios.push(scenario);
+      } else if (rootName === "plans" && entry.isFile() && extname2(entry.name).toLowerCase() === ".html") {
+        flatFiles.push(entry.name);
+      }
+    }
+    const scenarios = subdirScenarios.length > 0 ? subdirScenarios : rootName === "plans" ? groupFlatFilesIntoScenarios(flatFiles, rootDir) : [];
+    for (const scenario of scenarios) {
+      if (!scenarioMap.has(scenario.name)) scenarioMap.set(scenario.name, scenario);
     }
   }
-  if (subdirScenarios.length > 0) {
-    return subdirScenarios;
-  }
-  return groupFlatFilesIntoScenarios(flatFiles, plansDir);
+  return [...scenarioMap.values()];
 }
 async function scanScenarioDir(name, dirPath) {
   const planTypes = [
+    { type: "product", suffixes: ["product.html"] },
     { type: "analysis", suffixes: ["analysis.html", "-analysis.html"] },
     { type: "design", suffixes: ["design.html", "-design.html", "-design-concise.html"] },
-    { type: "test-plan", suffixes: ["test-plan.html", "-test-plan.html", "-e2e-test-plan.html"] },
     { type: "state-machine", suffixes: ["state-machine.html", "-state-machine.html", "-state-machines.html"] },
-    { type: "test-cases", suffixes: ["test-cases.html", "-test-cases.html"] },
-    { type: "implementation-plan", suffixes: ["implementation-plan.html", "-implementation-plan.html", "-impl-plan.html"] },
-    { type: "review-report", suffixes: ["review-report.html", "-review-report.html"] },
+    { type: "test-spec", suffixes: ["test-spec.html"] },
+    { type: "implementation", suffixes: ["implementation.html", "implementation-plan.html", "-implementation-plan.html", "-impl-plan.html"] },
     { type: "test-report", suffixes: ["test-report.html", "-test-report.html"] }
   ];
   let entries;
@@ -17585,7 +17807,7 @@ async function scanScenarioDir(name, dirPath) {
       }
     }
     if (!found) {
-      files.push({ type: pt.type, path: join4(dirPath, `${name}-${pt.type}.html`), exists: false, todos: 0, done: 0 });
+      files.push({ type: pt.type, path: join4(dirPath, `${pt.type}.html`), exists: false, todos: 0, done: 0 });
     }
   }
   const totalTodos = files.reduce((s, f) => s + (f.todos || 0), 0);
@@ -17679,7 +17901,7 @@ function groupFlatFilesIntoScenarios(fileNames, plansDir) {
     }
   }
   const scenarios = [];
-  const allPlanTypes = ["analysis", "design", "state-machine", "test-plan", "test-cases", "implementation-plan", "test-report"];
+  const allPlanTypes = ["product", "analysis", "design", "state-machine", "test-spec", "implementation", "test-report"];
   for (const [prefix, foundFiles] of prefixMap) {
     const files = allPlanTypes.map((type) => {
       const found = foundFiles.find((f) => f.type === type);
