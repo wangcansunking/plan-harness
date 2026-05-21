@@ -32274,7 +32274,7 @@ var StdioServerTransport = class {
 };
 
 // src/index.js
-import { statSync, readdirSync } from "node:fs";
+import { statSync } from "node:fs";
 import { fileURLToPath as fileURLToPath3 } from "node:url";
 import { dirname as dirname3, basename as basename3 } from "node:path";
 
@@ -33387,7 +33387,6 @@ function startStalenessWatcher() {
   const thisDir = dirname3(bundleFile);
   const localProxyDir = dirname3(thisDir);
   const maybeVersionDir = dirname3(localProxyDir);
-  const pluginRoot = dirname3(maybeVersionDir);
   const myVersion = basename3(maybeVersionDir);
   const isVersioned = /^\d+\.\d+\.\d+$/.test(myVersion);
   if (!isVersioned) {
@@ -33418,28 +33417,8 @@ function startStalenessWatcher() {
       exitForRespawn(`bundle file missing for ${consecutiveMisses} consecutive polls`);
       return;
     }
-    try {
-      for (const entry of readdirSync(pluginRoot)) {
-        if (!/^\d+\.\d+\.\d+$/.test(entry)) continue;
-        if (semverGt(entry, myVersion)) {
-          clearInterval(timer);
-          exitForRespawn(`upgrade detected: ${myVersion} \u2192 ${entry}`);
-          return;
-        }
-      }
-    } catch {
-    }
   }, intervalMs);
   timer.unref?.();
-}
-function semverGt(a, b) {
-  const pa = a.split(".").map(Number);
-  const pb = b.split(".").map(Number);
-  for (let i = 0; i < 3; i++) {
-    if (pa[i] > pb[i]) return true;
-    if (pa[i] < pb[i]) return false;
-  }
-  return false;
 }
 function exitForRespawn(reason) {
   console.error(`[plan-harness] exiting for respawn \u2014 ${reason}`);
