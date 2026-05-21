@@ -17029,7 +17029,14 @@ import { join as join4, basename as basename2, extname as extname2, resolve as r
 import { URL as URL2, fileURLToPath as fileURLToPath2 } from "node:url";
 async function startDashboard(workspaceRoot, port = 3847) {
   if (server) {
-    return getDashboardUrl();
+    if (server.listening) return getDashboardUrl();
+    console.error("[plan-harness] previous HTTP server reference is dead; reaping");
+    try {
+      server.close();
+    } catch {
+    }
+    server = null;
+    serverPort = null;
   }
   workspaceRootPath = resolve3(workspaceRoot);
   return new Promise((resolvePromise, rejectPromise) => {
@@ -17063,6 +17070,12 @@ async function startDashboard(workspaceRoot, port = 3847) {
       socket.on("error", (err) => {
         console.error("[plan-harness] socket error (absorbed):", err?.code || err?.message);
       });
+    });
+    server.on("close", () => {
+      console.error("[plan-harness] HTTP server closed; clearing cached state");
+      server = null;
+      serverPort = null;
+      workspaceRootPath = null;
     });
     server.keepAliveTimeout = 12e4;
     server.headersTimeout = 125e3;
@@ -33077,41 +33090,21 @@ ${ctx.structure.csprojFiles.map((f) => `  ${f}`).join("\n")}` : ""
       }
       // ---- plan_serve_dashboard -----------------------------------------
       case "plan_serve_dashboard": {
-        if (dashboardUrl) {
-          return textResult(`Dashboard already running at ${dashboardUrl}`);
-        }
-        let startDashboard2;
-        try {
-          const webServerModule = await Promise.resolve().then(() => (init_web_server(), web_server_exports));
-          startDashboard2 = webServerModule.startDashboard;
-        } catch {
-          return textResult(
-            "Dashboard server not yet available \u2014 web-server.js could not be loaded. The plan management tools (list, create, check) are fully operational in the meantime."
-          );
-        }
         const port = args.port ?? 3847;
         try {
-          const url2 = await startDashboard2(args.workspaceRoot, port);
-          dashboardUrl = url2 ?? `http://localhost:${port}`;
-          return textResult(`Dashboard started at ${dashboardUrl}`);
+          const url2 = await ensureDashboard(args.workspaceRoot, port);
+          return textResult(`Dashboard running at ${url2}`);
         } catch (err) {
-          return textResult(
-            `Failed to start dashboard server: ${err.message}`
-          );
+          return textResult(`Failed to start dashboard server: ${err.message}`);
         }
       }
       // ---- plan_share ----------------------------------------------------
       case "plan_share": {
         const { spawn } = await import("node:child_process");
-        if (!dashboardUrl) {
-          try {
-            const webServerModule = await Promise.resolve().then(() => (init_web_server(), web_server_exports));
-            const port = 3847;
-            const url2 = await webServerModule.startDashboard(args.workspaceRoot, port);
-            dashboardUrl = url2 ?? `http://localhost:${port}`;
-          } catch (err) {
-            return textResult(`Cannot start dashboard: ${err.message}. Start it first with plan_serve_dashboard.`);
-          }
+        try {
+          await ensureDashboard(args.workspaceRoot, 3847);
+        } catch (err) {
+          return textResult(`Cannot start dashboard: ${err.message}. Start it first with plan_serve_dashboard.`);
         }
         const dashPort = new URL(dashboardUrl).port || "3847";
         let protectedPassword = null;
@@ -33452,6 +33445,19 @@ function exitForRespawn(reason) {
   console.error(`[plan-harness] exiting for respawn \u2014 ${reason}`);
   setTimeout(() => process.exit(0), 50);
 }
+async function ensureDashboard(workspaceRoot, port) {
+  const ws = await Promise.resolve().then(() => (init_web_server(), web_server_exports));
+  if (ws.isDashboardRunning()) {
+    const liveUrl = ws.getDashboardUrl();
+    if (liveUrl) dashboardUrl = liveUrl;
+    return dashboardUrl;
+  }
+  if (dashboardUrl) console.error(`[plan-harness] cached dashboard URL ${dashboardUrl} is stale; restarting`);
+  dashboardUrl = null;
+  const url2 = await ws.startDashboard(workspaceRoot ?? process.cwd(), port);
+  dashboardUrl = url2 ?? `http://localhost:${port}`;
+  return dashboardUrl;
+}
 var strict = process.env.PLAN_HARNESS_STRICT === "1";
 var uncaughtCount = 0;
 process.on("uncaughtException", (err, origin) => {
@@ -33496,10 +33502,8 @@ console.error("[plan-harness] MCP server running on stdio.");
 if (!process.env.PLAN_HARNESS_NO_AUTO_DASHBOARD) {
   setImmediate(async () => {
     try {
-      const { startDashboard: startDashboard2 } = await Promise.resolve().then(() => (init_web_server(), web_server_exports));
       const port = Number(process.env.PLAN_HARNESS_DASHBOARD_PORT) || 3847;
-      const url2 = await startDashboard2(process.cwd(), port);
-      dashboardUrl = url2;
+      const url2 = await ensureDashboard(process.cwd(), port);
       console.error(`[plan-harness] Dashboard auto-started at ${url2}`);
     } catch (err) {
       console.error(`[plan-harness] Dashboard auto-start failed (non-fatal): ${err.message}`);

@@ -478,32 +478,15 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
       // ---- plan_serve_dashboard -----------------------------------------
       case "plan_serve_dashboard": {
-        // Return cached URL if already running
-        if (dashboardUrl) {
-          return textResult(`Dashboard already running at ${dashboardUrl}`);
-        }
-
-        // Try to import the web server module
-        let startDashboard;
-        try {
-          const webServerModule = await import("./web-server.js");
-          startDashboard = webServerModule.startDashboard;
-        } catch {
-          return textResult(
-            "Dashboard server not yet available — web-server.js could not be loaded. " +
-              "The plan management tools (list, create, check) are fully operational in the meantime."
-          );
-        }
-
+        // Source of truth is isDashboardRunning() — the cached dashboardUrl
+        // can lag behind reality (HTTP server died unobserved). When the cache
+        // disagrees with the runtime, clear it and (re-)start the server.
         const port = args.port ?? 3847;
         try {
-          const url = await startDashboard(args.workspaceRoot, port);
-          dashboardUrl = url ?? `http://localhost:${port}`;
-          return textResult(`Dashboard started at ${dashboardUrl}`);
+          const url = await ensureDashboard(args.workspaceRoot, port);
+          return textResult(`Dashboard running at ${url}`);
         } catch (err) {
-          return textResult(
-            `Failed to start dashboard server: ${err.message}`
-          );
+          return textResult(`Failed to start dashboard server: ${err.message}`);
         }
       }
 
@@ -511,16 +494,11 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       case "plan_share": {
         const { spawn } = await import("node:child_process");
 
-        // 1. Ensure dashboard is running
-        if (!dashboardUrl) {
-          try {
-            const webServerModule = await import("./web-server.js");
-            const port = 3847;
-            const url = await webServerModule.startDashboard(args.workspaceRoot, port);
-            dashboardUrl = url ?? `http://localhost:${port}`;
-          } catch (err) {
-            return textResult(`Cannot start dashboard: ${err.message}. Start it first with plan_serve_dashboard.`);
-          }
+        // 1. Ensure dashboard is running (truth-source check, not the cache)
+        try {
+          await ensureDashboard(args.workspaceRoot, 3847);
+        } catch (err) {
+          return textResult(`Cannot start dashboard: ${err.message}. Start it first with plan_serve_dashboard.`);
         }
 
         // 2. Extract port from dashboard URL
@@ -960,6 +938,29 @@ function exitForRespawn(reason) {
   setTimeout(() => process.exit(0), 50);
 }
 
+/**
+ * Start the HTTP dashboard if it isn't running and return the live URL.
+ *
+ * The cached `dashboardUrl` is unreliable as a "running?" signal — the HTTP
+ * server can die (uncaught error, manual stop) without this module being
+ * notified. The truth source is `isDashboardRunning()` from web-server.js.
+ * When the cache disagrees with the runtime, clear it and re-start.
+ */
+async function ensureDashboard(workspaceRoot, port) {
+  const ws = await import("./web-server.js");
+  if (ws.isDashboardRunning()) {
+    const liveUrl = ws.getDashboardUrl();
+    if (liveUrl) dashboardUrl = liveUrl;
+    return dashboardUrl;
+  }
+  // Cache was stale — server died or never started.
+  if (dashboardUrl) console.error(`[plan-harness] cached dashboard URL ${dashboardUrl} is stale; restarting`);
+  dashboardUrl = null;
+  const url = await ws.startDashboard(workspaceRoot ?? process.cwd(), port);
+  dashboardUrl = url ?? `http://localhost:${port}`;
+  return dashboardUrl;
+}
+
 // ---------------------------------------------------------------------------
 // Process-wide stability guards
 //
@@ -1036,10 +1037,8 @@ console.error("[plan-harness] MCP server running on stdio.");
 if (!process.env.PLAN_HARNESS_NO_AUTO_DASHBOARD) {
   setImmediate(async () => {
     try {
-      const { startDashboard } = await import("./web-server.js");
       const port = Number(process.env.PLAN_HARNESS_DASHBOARD_PORT) || 3847;
-      const url = await startDashboard(process.cwd(), port);
-      dashboardUrl = url;
+      const url = await ensureDashboard(process.cwd(), port);
       console.error(`[plan-harness] Dashboard auto-started at ${url}`);
     } catch (err) {
       console.error(`[plan-harness] Dashboard auto-start failed (non-fatal): ${err.message}`);

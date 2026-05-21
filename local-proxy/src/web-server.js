@@ -42,8 +42,15 @@ const COOKIE_NAME = 'plan_session';
  * @returns {Promise<string>} The URL the server is listening on.
  */
 export async function startDashboard(workspaceRoot, port = 3847) {
+  // Truth check: if `server` is set but no longer listening (it died), drop
+  // the reference and start a fresh one. Otherwise repeated calls into a
+  // dead server return a URL that 404s on every request.
   if (server) {
-    return getDashboardUrl();
+    if (server.listening) return getDashboardUrl();
+    console.error('[plan-harness] previous HTTP server reference is dead; reaping');
+    try { server.close(); } catch { /* already closed */ }
+    server = null;
+    serverPort = null;
   }
 
   workspaceRootPath = resolve(workspaceRoot);
@@ -83,6 +90,17 @@ export async function startDashboard(workspaceRoot, port = 3847) {
       socket.on('error', (err) => {
         console.error('[plan-harness] socket error (absorbed):', err?.code || err?.message);
       });
+    });
+
+    // If the server emits 'close' for any reason (manual stop, fatal listener
+    // error after startup), null out the module state so the next call to
+    // startDashboard reaches the actual listen() path instead of returning a
+    // stale URL.
+    server.on('close', () => {
+      console.error('[plan-harness] HTTP server closed; clearing cached state');
+      server = null;
+      serverPort = null;
+      workspaceRootPath = null;
     });
 
     // Browser-friendly timeouts. Node defaults (keepAliveTimeout=5s) tear down
