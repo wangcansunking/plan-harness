@@ -87,4 +87,6 @@ Seed TodoWrite at the start of `/plan-gen implementation`. Tick `in_progress` 鈫
 8. Phase B 路 grill prs[].releaseLabel (patch/minor/major)
 9. Phase B 路 grill prs[].risks + demo
 10. Phase C 路 render implementation.html with mermaid PR DAG + tables
-11. Phase C 路 embed canonical meta script + lint pass + record manifest hash
+11. Phase C 路 embed canonical meta script (byte-equal to `implementation.meta.json`)
+12. Phase C 路 run html-lint on the rendered HTML; on errors retry the writer once, then write `implementation.lint.json` and abort (do NOT proceed to step 13)
+13. Phase C 路 record manifest hash + `implementationGeneratedAt` (only when lint is clean)

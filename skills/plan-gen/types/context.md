@@ -69,4 +69,6 @@ Seed TodoWrite at the start of `/plan-gen context`. Tick `in_progress` → `comp
 7. Phase B · grill entrypoints[] (one per invocation surface)
 8. Phase B · grill keyFiles[] top-10 selection
 9. Phase C · render _shared/context/overview.html
-10. Phase C · embed canonical meta script + lint pass (with `--skipRules L1-docgroup,L1-active` for shared assets) + record sharedAssets.context.hash
+10. Phase C · embed canonical meta script (byte-equal to `overview.meta.json`)
+11. Phase C · run html-lint with `--skipRules L1-docgroup,L1-active` (shared-asset profile); on errors retry the writer once, then write `overview.lint.json` and abort (do NOT proceed to step 12)
+12. Phase C · record `sharedAssets.context.hash` (only when lint is clean)

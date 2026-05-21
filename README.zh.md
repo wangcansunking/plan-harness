@@ -242,10 +242,14 @@ npm run dev                 # 构建 + 同步到 Claude Code 插件缓存
 其他脚本（都在 `local-proxy/` 下）：
 
 ```bash
-npm run build               # esbuild src → dist/index.js
+npm run build               # esbuild src → dist/index.js + bin/lint.mjs（两个 bundle）
+npm run build:server        # 只打 server bundle
+npm run build:lint          # 只打 html-lint CLI bundle
 npm run sync                # 把当前目录拷进 Claude Code 缓存
 npm run prepare-release     # install + build（pre-commit / 发布）
 ```
+
+**Build 产物会被提交到仓库。** `local-proxy/dist/index.js` 与 `local-proxy/bin/lint.mjs` 都纳入 git 版本管理，这样用户 `claude plugins install` 不用跑 `npm install`。如果你改了 `local-proxy/src/**` 或加了 npm 依赖，commit 之前请先 `npm run build`，把重新生成的 bundle 一起 stage 进同一个 commit。"bundle 必须与 src 一致"这条约束由 reviewer 把关。
 
 完整的「工作副本 ↔ 插件缓存」对照流程、以及可选的 symlink 零拷贝小技巧，见 [DEVELOPMENT.md](DEVELOPMENT.md)。
 

@@ -91,4 +91,6 @@ Seed TodoWrite at the start of `/plan-gen decisions` (or when offering an ADR mi
 6. Phase B · grill consideredOptions[] (real alternatives, not strawmen)
 7. Phase C · render _shared/decisions/NNNN-slug.html
 8. Phase C · re-render _shared/decisions/index.html (id/title/status table)
-9. Phase C · embed canonical meta script + lint pass + record sharedAssets.decisions.indexHash
+9. Phase C · embed canonical meta script (byte-equal to each `NNNN-slug.meta.json`)
+10. Phase C · run html-lint on every rendered ADR + the index (shared-asset profile: `--skipRules L1-docgroup,L1-active`); on errors retry the writer once, then write `<file>.lint.json` and abort (do NOT proceed to step 11)
+11. Phase C · record `sharedAssets.decisions.indexHash` (only when lint is clean)

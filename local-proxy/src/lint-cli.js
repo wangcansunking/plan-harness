@@ -2,10 +2,14 @@
 // lint-cli.js — batch-lint v2 HTML docs.
 //
 // Usage:
-//   node src/lint-cli.js                                 # default: all plan-harness/**/*.html in repo
-//   node src/lint-cli.js path/to/file.html ...           # explicit list
-//   node src/lint-cli.js --workspace /some/repo          # scan a different workspace
-//   node src/lint-cli.js --warn-as-error                 # exit 1 on warnings too
+//   node src/lint-cli.js                                 # from source (requires `npm install`)
+//   node bin/lint.mjs                                    # from the bundled standalone build (no install needed)
+//   node bin/lint.mjs path/to/file.html ...              # explicit list
+//   node bin/lint.mjs --workspace /some/repo             # scan a different workspace
+//   node bin/lint.mjs --warn-as-error                    # exit 1 on warnings too
+//
+// The bundled bin/lint.mjs is produced by `npm run build:lint` and ships in the
+// plugin cache so end users can lint without running `npm install` in the cache.
 //
 // Exit codes:
 //   0 — all clean

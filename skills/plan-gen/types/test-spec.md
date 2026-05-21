@@ -96,4 +96,6 @@ Seed TodoWrite at the start of `/plan-gen test-spec`. Tick `in_progress` → `co
 9. Phase B · grill scenarios[].ac for independent verifiability
 10. Phase B · grill hitlAfkMatrix (prefer AFK)
 11. Phase C · render test-spec.html with overview counts + AC matrix
-12. Phase C · embed canonical meta script + lint pass + record manifest hash
+12. Phase C · embed canonical meta script (byte-equal to `test-spec.meta.json`)
+13. Phase C · run html-lint on the rendered HTML; on errors retry the writer once, then write `test-spec.lint.json` and abort (do NOT proceed to step 14)
+14. Phase C · record manifest hash + `testSpecGeneratedAt` (only when lint is clean)

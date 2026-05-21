@@ -89,4 +89,6 @@ Seed TodoWrite at the start of `/plan-gen analysis`. Tick `in_progress` → `com
 9. Phase B · grill painPoints[] scope (kind + cite)
 10. Phase B · grill hypotheses[] ranking + falsifiability
 11. Phase C · render analysis.html (mermaid flow + tables)
-12. Phase C · embed canonical meta script + lint pass + record manifest hash
+12. Phase C · embed canonical meta script (byte-equal to `analysis.meta.json`)
+13. Phase C · run html-lint on the rendered HTML; on errors retry the writer once, then write `analysis.lint.json` and abort (do NOT proceed to step 14)
+14. Phase C · record manifest hash + `analysisGeneratedAt` (only when lint is clean)

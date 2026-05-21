@@ -94,4 +94,6 @@ Seed TodoWrite at the start of `/plan-gen test-report`. Tick `in_progress` → `
 7. Diagnose Phase 5-6 · verify cleanup checklist (debug logs, stray data, re-run, spec drift, close)
 8. Phase A · finalize runs[] + summary counts + failures[]
 9. Phase C · render test-report.html (scoreboard + per-scenario tables + failures + checklist)
-10. Phase C · embed canonical meta script + lint pass + record manifest hash + flip dashboard dot
+10. Phase C · embed canonical meta script (byte-equal to `test-report.meta.json`)
+11. Phase C · run html-lint on the rendered HTML; on errors retry the writer once, then write `test-report.lint.json` and abort (do NOT proceed to step 12)
+12. Phase C · record manifest hash + `testReportGeneratedAt` + flip dashboard dot (only when lint is clean)

@@ -87,4 +87,6 @@ Seed TodoWrite at the start of `/plan-gen glossary`. Tick `in_progress` → `com
 7. Phase B · grill flaggedAmbiguities[] resolutions
 8. Phase B · validate dialogue demonstrates term boundaries
 9. Phase C · render _shared/glossary/glossary.html
-10. Phase C · embed canonical meta script + lint pass (skip scenario-doc rules) + record sharedAssets.glossary.hash
+10. Phase C · embed canonical meta script (byte-equal to `glossary.meta.json`)
+11. Phase C · run html-lint with `--skipRules L1-docgroup,L1-active` (shared-asset profile); on errors retry the writer once, then write `glossary.lint.json` and abort (do NOT proceed to step 12)
+12. Phase C · record `sharedAssets.glossary.hash` (only when lint is clean)

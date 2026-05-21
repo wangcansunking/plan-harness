@@ -46,6 +46,7 @@ if (!existsSync(cacheDir)) {
 // - .claude-plugin, docs, README, ROADMAP → metadata & reference
 const toSync = [
   'local-proxy/dist',
+  'local-proxy/bin',          // standalone bundled lint CLI (bin/lint.cjs)
   'local-proxy/start.js',
   'local-proxy/package.json',
   'local-proxy/src',

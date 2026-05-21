@@ -686,7 +686,17 @@ async function serveHtmlFile(req, res, filePath, ctx = {}) {
       siblingSet = new Set(siblingEntries.filter(e => /\.html?$/i.test(e)));
     } catch { /* best-effort; if readdir fails, skip normalization */ }
     const withTabsFixed = normalizePlanTabs(raw, siblingSet, scenarioDir);
-    const withDocChrome = normalizeServedDocChrome(withTabsFixed, resolved);
+
+    // v2 self-contained docs (under plan-harness/<scenario>/, excluding _shared)
+    // already ship with the locked GitHub-Dark palette, full chrome, and a
+    // <nav.toc> with both .docgroup and .sections. The proxy's legacy chrome
+    // override + sidebar-panel injection were designed for v1 docs that lacked
+    // these surfaces; running them on v2 doubles the chrome and overrides the
+    // locked palette with a light theme. Skip both for v2.
+    const isV2SelfContained = isV2 && /<script[^>]+id=["']meta["']/i.test(withTabsFixed);
+    const withDocChrome = isV2SelfContained
+      ? withTabsFixed
+      : normalizeServedDocChrome(withTabsFixed, resolved);
 
     // 0b. Collapse doubled-up checklist markers (<input type="checkbox"> paired
     //     with a redundant `[x]` / `[ ]` text marker). Syncs `checked` from the
@@ -711,7 +721,9 @@ async function serveHtmlFile(req, res, filePath, ctx = {}) {
     const withMeta = injectPlanMeta(withSectionIds, meta);
 
     // 3. Sidebar auxiliary panels (TODOs + Comments). Runs on DOMContentLoaded.
-    const withPanels = injectSidebarPanels(withMeta);
+    //    v2 docs already have their own nav.toc with section links and don't
+    //    want a second sidebar grafted in.
+    const withPanels = isV2SelfContained ? withMeta : injectSidebarPanels(withMeta);
 
     // 4. Breadcrumb pill (last so it sits above the doc's head metadata).
     const withBreadcrumb = injectBreadcrumbIntoHtml(withPanels, resolved);

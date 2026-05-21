@@ -4,8 +4,11 @@
   "description": "Local MCP server for plan-harness plugin — manages plan files and serves dashboard",
   "type": "module",
   "scripts": {
+    "//": "When you change src/** or add an npm dep, run `npm run build` and COMMIT the regenerated dist/index.js + bin/lint.mjs alongside your source change. The plugin cache reads from the committed artifacts; stale bundles ship stale behaviour. See DEVELOPMENT.md §'Build artifacts are committed' for the full contract.",
     "start": "node start.js",
-    "build": "esbuild src/index.js --bundle --platform=node --format=esm --target=node18 --outfile=dist/index.js",
+    "build": "npm run build:server && npm run build:lint",
+    "build:server": "esbuild src/index.js --bundle --platform=node --format=esm --target=node18 --outfile=dist/index.js",
+    "build:lint": "esbuild src/lint-cli.js --bundle --platform=node --format=esm --target=node18 --outfile=bin/lint.mjs",
     "sync": "node scripts/sync-to-cache.mjs",
     "dev": "npm run build && npm run sync",
     "dev:watch": "node scripts/dev-watch.mjs",

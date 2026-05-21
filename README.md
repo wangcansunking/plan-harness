@@ -243,10 +243,14 @@ npm run dev                 # build + sync to Claude Code plugin cache
 Other scripts (all inside `local-proxy/`):
 
 ```bash
-npm run build               # esbuild src → dist/index.js
+npm run build               # esbuild src → dist/index.js + bin/lint.mjs (both bundles)
+npm run build:server        # server bundle only
+npm run build:lint          # html-lint CLI bundle only
 npm run sync                # copy working tree into the Claude Code cache
 npm run prepare-release     # install + build (pre-commit / release)
 ```
+
+**Build artifacts are committed.** Both `local-proxy/dist/index.js` and `local-proxy/bin/lint.mjs` are tracked in git so end users can `claude plugins install` without running `npm install`. If you touch `local-proxy/src/**` or add an npm dependency, run `npm run build` before committing and stage the rebuilt bundles in the same change. The "bundles match src" invariant is reviewer-enforced.
 
 See [DEVELOPMENT.md](DEVELOPMENT.md) for the full working-copy ↔ plugin-cache dance, including the optional symlink-to-working-copy trick for zero-copy edits.
 

@@ -117,10 +117,18 @@ For each type in topological order:
 3. Open the cited legacy `_deprecated/plan-<old-name>/SKILL.md` if any — the full v1 agent prompt block (still useful for verbose agent dispatch).
 4. **v2 — three-phase dispatch** (when `schemaVersion === 2`):
 
+   **Agent team dispatch (applies to Phase A and Phase C):**
+   Each `types/<type>.md` lists an "Agent team" row (e.g. design → `Architect (lead), PM, Writer`). For each role, call the `Agent` tool with a focused prompt:
+   - `Architect` → `subagent_type: "feature-dev:code-architect"` — drafts schema/structure fields, traces upstream code.
+   - `PM` (or `Tester`, `Engineer`) → `subagent_type: "feature-dev:code-explorer"` — drafts user-facing fields, reads repo for evidence.
+   - `Writer` → `subagent_type: "general-purpose"` — renders HTML in Phase C (Architect/PM do NOT render).
+   Dispatch independent roles **in parallel** (a single message with multiple `Agent` blocks); only sequence them when a downstream role consumes the upstream role's draft. The orchestrator (this skill) reconciles their outputs into the final `<doc>.meta.json`. If the team table marks one role as "lead", that role's draft is the spine; others merge in.
+
    **Phase A — Draft meta (silent)**
    - Read upstream `<upstream>.meta.json` for every hard + soft upstream listed in `types/<type>.md`.
    - Read repo assets when soft-listed: `_shared/context/`, `_shared/glossary/`, `_shared/decisions/`.
-   - Dispatch the agent team (per `types/<type>.md`) to populate `<doc>.meta.json` per the type's schema. Fill every field that's derivable from upstream meta or code; leave only judgment calls for Phase B.
+   - **Dispatch the agent team** (see above) to populate `<doc>.meta.json` per the type's schema. Fill every field that's derivable from upstream meta or code; leave only judgment calls for Phase B.
+   - For doc types that require visuals per item (product `userStories[].mockup`, state-machine `perStoryFlows[].diagram/uiMockup`, design `uxMockups[]`/`userFlows[]`): the lead agent drafts the visual SVG/Mermaid alongside the field; do NOT defer all visuals to the Writer in Phase C.
 
    **Phase B — Grill (interactive)**
    - Load `prompts/_grill-mixin.md`.
@@ -135,18 +143,21 @@ For each type in topological order:
 
    **Phase C — Render HTML**
    - Load `prompts/_html-base.md` and `prompts/_caveman-mixin.md`.
-   - Dispatch Writer agent to produce `<doc>.html` per the render rules in `types/<type>.md`.
+   - Dispatch the **Writer** role from the team (call `Agent` with `subagent_type: "general-purpose"`) to produce `<doc>.html` per the render rules in `types/<type>.md`. Pass it the finalized `<doc>.meta.json` and the two mixin prompts as context; instruct it to use the literal `__META_JSON_PLACEHOLDER__` token inside `<script type="application/json" id="meta">…</script>` rather than inlining the meta itself.
+   - After the Writer returns the HTML, the orchestrator reads `<doc>.meta.json` from disk and `replace()`s the placeholder with the file bytes verbatim — this is what guarantees byte-equality (see `prompts/_html-base.md` §"Phase C protocol").
    - Embed `<script type="application/json" id="meta">` containing the canonical meta.json content byte-for-byte.
    - Save both `<doc>.meta.json` and `<doc>.html` to the scenario dir.
+   - **Run `lintFile()` from `local-proxy/src/html-lint.js` against the rendered HTML.** Shared-asset docs (`_shared/context`, `_shared/glossary`, `_shared/decisions`) pass `skipRules: ['L1-docgroup', 'L1-active']`. On any error: retry the Writer once with the lint findings injected into its context; if still failing, write `<doc>.lint.json` next to the HTML, surface the failure, and STOP — do not advance to step 7. Only a clean lint pass (or `--no-lint`) lets the run proceed.
 
 5. **v1 fallback** (when `schemaVersion !== 2`): follow legacy `_deprecated/plan-<old-name>/SKILL.md` Steps verbatim; write only `<doc>.html`; skip meta.json + hash tracking. Only enter this branch when `--allow-v1` is passed.
 
 6. Before any dispatch: stamp `manifest.json` with `<type>Generating: true` so a concurrent `/plan-gen` sees the in-progress state.
 
-7. After Phase C succeeds:
+7. After Phase C succeeds (HTML rendered AND lint clean):
    - Use `recordGeneration` from `local-proxy/src/manifest-v2.js` to update `metaHashes[<type>]`, snapshot `upstreamHashes[<type>][<u>]` for each upstream u, and clear `<type>Generating`.
    - Set `<type>Html` and `<type>GeneratedAt` (preserves v1 fields for backward-compatible reads).
-   - Mark the final TodoWrite task (typically "lint + record manifest") as `completed`.
+   - Mark the final TodoWrite tasks (render → lint → record) as `completed` in order.
+   - **Never** set `<type>GeneratedAt` while a `<doc>.lint.json` exists; delete the stale lint file on a subsequent clean pass.
 
 8. Emit a short per-type confirmation line:
    ```
@@ -173,7 +184,9 @@ Duration:     {mm:ss}
   [Y] implementation-plan.html (all six agents)
 
 Open the dashboard:
-  http://localhost:{port}/scenario/{scenarioName}
+  http://localhost:{port}/scenario/{scenarioName}              # scenario index
+  http://localhost:{port}/{scenarioName}/design.html           # any individual doc
+  http://localhost:{port}/_shared/glossary/glossary.html       # shared assets
 
 Next:
   /plan-gen test-report      Run end-to-end verification

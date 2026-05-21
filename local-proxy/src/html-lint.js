@@ -59,9 +59,14 @@ function slugify(text) {
 }
 
 function collectHeadings(root) {
+  // Only h2 counts as a "top-level section" that warrants a nav entry. h3s are
+  // sub-headings (cards, per-PR details, "Evidence" blocks) — including them
+  // would force writers to either flatten to h2 or hand-author dozens of nav
+  // links per doc. Section nav is for the doc's primary outline; h3 sub-points
+  // are reached by scrolling within the parent h2 section.
   const seen = new Map();
   const scope = root.querySelector('main > section') || root.querySelector('main') || root;
-  return scope.querySelectorAll('h2, h3').map((heading) => {
+  return scope.querySelectorAll('h2').map((heading) => {
     const label = nodeText(heading);
     const explicitId = heading.getAttribute('id');
     const base = slugify(label);
@@ -164,6 +169,16 @@ export function lintHtml(html, ctx = {}) {
       if (!sep) {
         errors.push({ rule: 'L1-nav', severity: 'error',
           message: '<nav.toc> missing <div class="sep"> divider between Documents and Sections' });
+      }
+      const sectionsWrap = nav.querySelector('.sections');
+      if (!sectionsWrap) {
+        errors.push({ rule: 'L1-nav', severity: 'error',
+          message: '<nav.toc> missing <div class="sections"> wrapper for section links — L3-section-nav scans `nav.toc .sections a[href^="#"]`' });
+      }
+      const docgroupWrap = nav.querySelector('.docgroup');
+      if (!docgroupWrap && !skip.has('L1-docgroup')) {
+        errors.push({ rule: 'L1-nav', severity: 'error',
+          message: '<nav.toc> missing <div class="docgroup"> wrapper for the 7 scenario-doc links' });
       }
     }
   }
@@ -297,14 +312,52 @@ export function lintHtml(html, ctx = {}) {
     }
   }
 
-  if (!skip.has('L3-ux-visuals') && ctx.docName === 'design' && docMentionsUx(root, ctx.metaJson)) {
+  if (!skip.has('L3-story-flows') && ctx.docName === 'state-machine') {
+    // State-machine doc must have a per-story flow subsection for every
+    // product.userStories[]. Count is checked against meta.perStoryFlows[].
+    const flows = Array.isArray(ctx.metaJson?.perStoryFlows) ? ctx.metaJson.perStoryFlows : null;
+    if (flows !== null) {
+      const visuals = root.querySelectorAll('svg, pre.mermaid, .mermaid').length;
+      const expectedVisualsPerFlow = 1; // state diagram per flow; uiMockup is optional
+      if (visuals < flows.length * expectedVisualsPerFlow) {
+        errors.push({ rule: 'L3-story-flows', severity: 'error',
+          message: `State-machine doc has ${visuals} diagram(s) but ${flows.length} perStoryFlows[] — every user story needs its state-path visual` });
+      }
+    }
+  }
+
+  if (!skip.has('L3-product-mockups') && ctx.docName === 'product') {
+    // Product doc must have at least one mockup visual per user story.
+    // Mockup form is surface-appropriate (screen sketch / terminal sketch /
+    // API sketch); the visual just has to exist and be near mockup/screen text.
+    const mockupVisuals = root.querySelectorAll('svg, pre.mermaid, .mermaid').filter((node) => {
+      const text = nodeText(node.parentNode || node).toLowerCase();
+      return /\b(mockup|screen|wireframe|sketch)\b/.test(text);
+    });
+    const storyCount = Array.isArray(ctx.metaJson?.userStories) ? ctx.metaJson.userStories.length : 0;
+    if (mockupVisuals.length === 0) {
+      errors.push({ rule: 'L3-product-mockups', severity: 'error',
+        message: 'Product doc has no mockup visual — every user story needs a mockup (screen/terminal/API sketch)' });
+    } else if (storyCount > 0 && mockupVisuals.length < storyCount) {
+      errors.push({ rule: 'L3-product-mockups', severity: 'error',
+        message: `Product doc has ${mockupVisuals.length} mockup visual(s) but ${storyCount} userStories[] — every story needs its own mockup` });
+    }
+  }
+
+  if (!skip.has('L3-ux-visuals') && ctx.docName === 'design') {
+    // Design docs ALWAYS require a mockup + user-flow visual — no exceptions for
+    // CLI/library/backend designs. For non-UI tooling, the "mockup" can be a
+    // terminal-output sketch or an API-shape sketch (any inline <svg>/mermaid
+    // labelled mockup/screen counts), and the "flow" can be a command/API
+    // sequence diagram. The point is: every design has a user-facing surface,
+    // and that surface must have a first-class visual.
     if (!hasVisualNear(root, ['mockup', 'wireframe', 'screen'])) {
       errors.push({ rule: 'L3-ux-visuals', severity: 'error',
-        message: 'Design doc mentions UX/UI but has no first-class mockup/wireframe/screen visual' });
+        message: 'Design doc has no first-class mockup/wireframe/screen visual — every design needs one (terminal/API sketches count for non-UI tools)' });
     }
-    if (!hasVisualNear(root, ['flow', 'journey', 'screen flow', 'user flow'])) {
+    if (!hasVisualNear(root, ['flow', 'journey', 'screen flow', 'user flow', 'workflow'])) {
       errors.push({ rule: 'L3-ux-visuals', severity: 'error',
-        message: 'Design doc mentions UX/UI but has no first-class user-flow visual' });
+        message: 'Design doc has no first-class user-flow/workflow visual — every design needs one (command/API sequences count for non-UI tools)' });
     }
   }
 

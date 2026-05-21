@@ -16543,7 +16543,7 @@ function slugify2(text) {
 function collectHeadings(root) {
   const seen = /* @__PURE__ */ new Map();
   const scope = root.querySelector("main > section") || root.querySelector("main") || root;
-  return scope.querySelectorAll("h2, h3").map((heading) => {
+  return scope.querySelectorAll("h2").map((heading) => {
     const label = nodeText(heading);
     const explicitId = heading.getAttribute("id");
     const base = slugify2(label);
@@ -16557,13 +16557,6 @@ function collectHeadings(root) {
 }
 function hasSvgOrMermaid(root) {
   return root.querySelectorAll("svg").length > 0 || root.querySelectorAll("pre.mermaid, .mermaid").length > 0;
-}
-function docMentionsUx(root, metaJson) {
-  if (Array.isArray(metaJson?.uxMockups) && metaJson.uxMockups.length > 0) return true;
-  if (Array.isArray(metaJson?.userFlows) && metaJson.userFlows.length > 0) return true;
-  const scope = root.querySelector("main > section") || root.querySelector("main") || root;
-  const text = nodeText(scope).toLowerCase();
-  return /\b(ux|ui|user interface|screen|modal|form|mockup|wireframe|user flow|screen flow|journey)\b/.test(text);
 }
 function hasVisualNear(root, words) {
   const visualNodes = root.querySelectorAll("svg, pre.mermaid, .mermaid, .diagram-box");
@@ -16652,6 +16645,22 @@ function lintHtml(html, ctx = {}) {
           rule: "L1-nav",
           severity: "error",
           message: '<nav.toc> missing <div class="sep"> divider between Documents and Sections'
+        });
+      }
+      const sectionsWrap = nav.querySelector(".sections");
+      if (!sectionsWrap) {
+        errors.push({
+          rule: "L1-nav",
+          severity: "error",
+          message: '<nav.toc> missing <div class="sections"> wrapper for section links \u2014 L3-section-nav scans `nav.toc .sections a[href^="#"]`'
+        });
+      }
+      const docgroupWrap = nav.querySelector(".docgroup");
+      if (!docgroupWrap && !skip.has("L1-docgroup")) {
+        errors.push({
+          rule: "L1-nav",
+          severity: "error",
+          message: '<nav.toc> missing <div class="docgroup"> wrapper for the 7 scenario-doc links'
         });
       }
     }
@@ -16813,19 +16822,53 @@ function lintHtml(html, ctx = {}) {
       });
     }
   }
-  if (!skip.has("L3-ux-visuals") && ctx.docName === "design" && docMentionsUx(root, ctx.metaJson)) {
+  if (!skip.has("L3-story-flows") && ctx.docName === "state-machine") {
+    const flows = Array.isArray(ctx.metaJson?.perStoryFlows) ? ctx.metaJson.perStoryFlows : null;
+    if (flows !== null) {
+      const visuals = root.querySelectorAll("svg, pre.mermaid, .mermaid").length;
+      const expectedVisualsPerFlow = 1;
+      if (visuals < flows.length * expectedVisualsPerFlow) {
+        errors.push({
+          rule: "L3-story-flows",
+          severity: "error",
+          message: `State-machine doc has ${visuals} diagram(s) but ${flows.length} perStoryFlows[] \u2014 every user story needs its state-path visual`
+        });
+      }
+    }
+  }
+  if (!skip.has("L3-product-mockups") && ctx.docName === "product") {
+    const mockupVisuals = root.querySelectorAll("svg, pre.mermaid, .mermaid").filter((node) => {
+      const text = nodeText(node.parentNode || node).toLowerCase();
+      return /\b(mockup|screen|wireframe|sketch)\b/.test(text);
+    });
+    const storyCount = Array.isArray(ctx.metaJson?.userStories) ? ctx.metaJson.userStories.length : 0;
+    if (mockupVisuals.length === 0) {
+      errors.push({
+        rule: "L3-product-mockups",
+        severity: "error",
+        message: "Product doc has no mockup visual \u2014 every user story needs a mockup (screen/terminal/API sketch)"
+      });
+    } else if (storyCount > 0 && mockupVisuals.length < storyCount) {
+      errors.push({
+        rule: "L3-product-mockups",
+        severity: "error",
+        message: `Product doc has ${mockupVisuals.length} mockup visual(s) but ${storyCount} userStories[] \u2014 every story needs its own mockup`
+      });
+    }
+  }
+  if (!skip.has("L3-ux-visuals") && ctx.docName === "design") {
     if (!hasVisualNear(root, ["mockup", "wireframe", "screen"])) {
       errors.push({
         rule: "L3-ux-visuals",
         severity: "error",
-        message: "Design doc mentions UX/UI but has no first-class mockup/wireframe/screen visual"
+        message: "Design doc has no first-class mockup/wireframe/screen visual \u2014 every design needs one (terminal/API sketches count for non-UI tools)"
       });
     }
-    if (!hasVisualNear(root, ["flow", "journey", "screen flow", "user flow"])) {
+    if (!hasVisualNear(root, ["flow", "journey", "screen flow", "user flow", "workflow"])) {
       errors.push({
         rule: "L3-ux-visuals",
         severity: "error",
-        message: "Design doc mentions UX/UI but has no first-class user-flow visual"
+        message: "Design doc has no first-class user-flow/workflow visual \u2014 every design needs one (command/API sequences count for non-UI tools)"
       });
     }
   }
@@ -17476,7 +17519,8 @@ async function serveHtmlFile(req, res, filePath, ctx = {}) {
     } catch {
     }
     const withTabsFixed = normalizePlanTabs(raw, siblingSet, scenarioDir);
-    const withDocChrome = normalizeServedDocChrome(withTabsFixed, resolved);
+    const isV2SelfContained = isV2 && /<script[^>]+id=["']meta["']/i.test(withTabsFixed);
+    const withDocChrome = isV2SelfContained ? withTabsFixed : normalizeServedDocChrome(withTabsFixed, resolved);
     const withChecklistFixed = normalizeChecklistItems(withDocChrome);
     const withSectionIds = injectSectionIds(withChecklistFixed);
     const { scenarioName, docLabel } = parseScenarioFromPath(resolved);
@@ -17489,7 +17533,7 @@ async function serveHtmlFile(req, res, filePath, ctx = {}) {
       user: req.user?.name || (fromLoopback ? "Host (local)" : "Anonymous")
     };
     const withMeta = injectPlanMeta(withSectionIds, meta3);
-    const withPanels = injectSidebarPanels(withMeta);
+    const withPanels = isV2SelfContained ? withMeta : injectSidebarPanels(withMeta);
     const withBreadcrumb = injectBreadcrumbIntoHtml(withPanels, resolved);
     const withAssets = normalizeAssetLinks(withBreadcrumb, scenarioDir);
     const withLightbox = injectLightbox(withAssets);
@@ -17614,7 +17658,9 @@ pre.mermaid { background: var(--panel); border: 1px solid var(--border); border-
 @media (max-width: 899px) { .theme-toggle { top: 3rem; right: 0.75rem; } }
 @media print { .theme-toggle { display: none !important; } }
 </style>`;
-  if (!out.includes('id="ph-served-doc-chrome"')) {
+  if (/<style\s+id=["']ph-served-doc-chrome["'][^>]*>[\s\S]*?<\/style>/i.test(out)) {
+    out = out.replace(/<style\s+id=["']ph-served-doc-chrome["'][^>]*>[\s\S]*?<\/style>/i, chromeStyle);
+  } else {
     out = out.replace(/<\/head>/i, `${getThemeInitScript()}
 ${chromeStyle}
 </head>`);
@@ -17623,9 +17669,37 @@ ${chromeStyle}
     out = out.replace(/<body\b[^>]*>/i, (m) => `${m}
 ${getThemeToggleHTML()}`);
   }
-  if (!out.includes("ph-served-doc-runtime")) {
-    const runtime = `<script id="ph-served-doc-runtime">
+  const runtime = `<script id="ph-served-doc-runtime">
 (function(){
+  function forceDocChrome() {
+    var root = document.documentElement;
+    var sepNodes = document.querySelectorAll('.ph-injected-breadcrumb .sep');
+    for (var i = 0; i < sepNodes.length; i++) {
+      var n = sepNodes[i];
+      n.style.setProperty('display', 'inline-flex', 'important');
+      n.style.setProperty('align-self', 'center', 'important');
+      n.style.setProperty('align-items', 'center', 'important');
+      n.style.setProperty('justify-content', 'center', 'important');
+      n.style.setProperty('line-height', '1', 'important');
+      n.style.setProperty('transform', 'translateY(-0.5px)', 'important');
+      n.style.setProperty('vertical-align', 'middle', 'important');
+    }
+
+    var hdr = document.querySelector('header.top');
+    if (hdr) {
+      var panel = getComputedStyle(root).getPropertyValue('--panel').trim() || '#f3f4f5';
+      var fg = getComputedStyle(root).getPropertyValue('--fg').trim() || '#08090a';
+      var border = getComputedStyle(root).getPropertyValue('--border').trim() || '#d0d6e0';
+      hdr.style.setProperty('background', panel, 'important');
+      hdr.style.setProperty('color', fg, 'important');
+      hdr.style.setProperty('border-bottom', '1px solid ' + border, 'important');
+      var links = hdr.querySelectorAll('a');
+      for (var j = 0; j < links.length; j++) {
+        links[j].style.setProperty('color', fg, 'important');
+      }
+    }
+  }
+
   var blocks = Array.prototype.slice.call(document.querySelectorAll('pre.mermaid'));
   if (blocks.length && !window.mermaid) {
     var script = document.createElement('script');
@@ -17633,8 +17707,16 @@ ${getThemeToggleHTML()}`);
     script.onload = function(){ if (window.mermaid) { window.mermaid.initialize({ startOnLoad: true, theme: document.documentElement.getAttribute('data-theme') === 'light' ? 'default' : 'dark' }); } };
     document.head.appendChild(script);
   }
+
+  forceDocChrome();
+  var themeObserver = new MutationObserver(function(){ forceDocChrome(); });
+  themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+  document.addEventListener('click', function(ev){ if (ev.target && ev.target.closest && ev.target.closest('#themeToggle')) setTimeout(forceDocChrome, 0); }, true);
 })();
 </script>`;
+  if (/<script\s+id=["']ph-served-doc-runtime["'][^>]*>[\s\S]*?<\/script>/i.test(out)) {
+    out = out.replace(/<script\s+id=["']ph-served-doc-runtime["'][^>]*>[\s\S]*?<\/script>/i, runtime);
+  } else {
     out = out.replace(/<\/body>/i, `${getBaseScript()}
 ${runtime}
 </body>`);
