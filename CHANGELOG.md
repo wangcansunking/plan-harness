@@ -20,6 +20,14 @@ Version fields in `.claude-plugin/plugin.json`, `.claude-plugin/marketplace.json
 
 
 
+
+## [1.6.0] — 2026-05-21
+
+### Added
+- fix: close #13 + delete v1 schema + add validate gate + Validator agent
+
+([#15](https://github.com/wangcansunking/plan-harness/pull/15))
+
 ## [1.5.1] — 2026-05-21
 
 ### Changed
