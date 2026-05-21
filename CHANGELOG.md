@@ -21,6 +21,14 @@ Version fields in `.claude-plugin/plugin.json`, `.claude-plugin/marketplace.json
 
 
 
+
+## [1.7.0] — 2026-05-21
+
+### Added
+- fix: dashboard root-absolute links + dev-mode no auto-respawn + mandatory lint retry + design.perStoryDetails[]
+
+([#16](https://github.com/wangcansunking/plan-harness/pull/16))
+
 ## [1.6.0] — 2026-05-21
 
 ### Added
