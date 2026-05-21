@@ -170,7 +170,7 @@ async function findPlansDirs(dir, maxDepth = 5, currentDepth = 0) {
 
     const fullPath = join(dir, name);
 
-    if (name === "plan-harness" || name === "plans") {
+    if (name === "plan-harness") {
       results.push(norm(fullPath));
     } else {
       const nested = await findPlansDirs(fullPath, maxDepth, currentDepth + 1);
@@ -186,11 +186,11 @@ async function findPlansDirs(dir, maxDepth = 5, currentDepth = 0) {
 // ---------------------------------------------------------------------------
 
 /**
- * Scan the workspace for all `plans/` directories across repos and list
+ * Scan the workspace for all `plan-harness/` directories across repos and list
  * scenarios within each one.
  *
  * @param {string} workspaceRoot - Absolute path to the workspace root
- * @returns {Promise<Array<{repoRoot: string, scenario: string, files: Array, hasDesign: boolean, hasTestPlan: boolean, hasStateMachine: boolean, hasTestCases: boolean, hasImplementationPlan: boolean, hasDashboard: boolean}>>}
+ * @returns {Promise<Array<{repoRoot: string, scenario: string, scenarioPath: string, files: Array, docs: Record<string, boolean>}>>}
  */
 export async function listScenarios(workspaceRoot) {
   const scenarios = [];
@@ -228,30 +228,19 @@ export async function listScenarios(workspaceRoot) {
           docs[docType] = candidates.some((c) => fileNames.includes(`${c}.html`));
         }
 
-        // Detect manifest schemaVersion for v1/v2 reporting.
-        const manifest = await readJson(join(scenarioPath, "manifest.json"));
-        const schemaVersion = manifest?.schemaVersion ?? 1;
-
         scenarios.push({
           repoRoot,
           scenario: entry.name,
           scenarioPath,
           files,
-          schemaVersion,
           docs,
-          // v1 back-compat flags (some consumers still read these directly)
-          hasAnalysis: !!docs.analysis,
-          hasDesign: !!docs.design,
-          hasTestPlan: !!docs["test-plan"],
-          hasStateMachine: !!docs["state-machine"],
-          hasTestCases: !!docs["test-cases"],
-          hasImplementationPlan: !!docs.implementation || !!docs["implementation-plan"],
-          hasDashboard: fileNames.includes("dashboard.html"),
-          hasReviewReport: fileNames.includes("review-report.html"),
-          hasTestReport: !!docs["test-report"],
-          // v2 new
-          hasProduct: !!docs.product,
-          hasTestSpec: !!docs["test-spec"],
+          hasProduct:        !!docs.product,
+          hasAnalysis:       !!docs.analysis,
+          hasDesign:         !!docs.design,
+          hasStateMachine:   !!docs["state-machine"],
+          hasTestSpec:       !!docs["test-spec"],
+          hasImplementation: !!docs.implementation,
+          hasTestReport:     !!docs["test-report"],
         });
       }
     }
@@ -283,21 +272,16 @@ export async function createScenario(repoRoot, scenarioName, metadata = {}) {
     throw new Error(`Invalid scenario name: "${scenarioName}"`);
   }
 
-  // v2 default: write under plan-harness/. Legacy callers can pass
-  // `{ rootDir: "plans" }` to force the v1 path.
-  const rootDir = metadata.rootDir === "plans" ? "plans" : "plan-harness";
-  const plansRoot = join(repoRoot, rootDir);
+  const plansRoot = join(repoRoot, "plan-harness");
   const scenarioPath = join(plansRoot, safeName);
 
-  // Defence in depth: assert final path stays under the chosen root.
   const rel = relative(plansRoot, scenarioPath);
   if (rel.startsWith("..") || rel.includes(sep + "..") || rel === "") {
-    throw new Error(`Scenario path escapes ${rootDir}/: "${scenarioName}" -> "${safeName}"`);
+    throw new Error(`Scenario path escapes plan-harness/: "${scenarioName}" -> "${safeName}"`);
   }
 
   await mkdir(scenarioPath, { recursive: true });
 
-  const isV2 = rootDir === "plan-harness";
   const manifest = {
     scenario: safeName,
     displayName: scenarioName,
@@ -306,12 +290,9 @@ export async function createScenario(repoRoot, scenarioName, metadata = {}) {
     createdAt: new Date().toISOString(),
     tags: metadata.tags ?? [],
     status: metadata.status ?? "draft",
-    ...(isV2 && {
-      schemaVersion: 2,
-      metaHashes: {},
-      upstreamHashes: {},
-      sharedAssets: {},
-    }),
+    metaHashes: {},
+    upstreamHashes: {},
+    sharedAssets: {},
   };
 
   const manifestPath = join(scenarioPath, "manifest.json");

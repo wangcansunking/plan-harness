@@ -197,9 +197,9 @@ plan-harness/
     start.js                         Bootstrap (auto-installs deps)
     src/
       index.js                       MCP server (stdio)
-      plan-manager.js                Plan file operations (v1 + v2)
-      manifest-v2.js                 v2 manifest: schemaVersion, metaHashes, hash util
-      web-server.js                  HTTP dashboard (node:http) — serves both plan-harness/ and plans/
+      plan-manager.js                Plan file operations
+      manifest.js                    Manifest helpers: metaHashes, upstreamHashes, hash util
+      web-server.js                  HTTP dashboard (node:http) — serves plan-harness/
       templates/base.js              Self-contained HTML template system
   docs/
     overview.html                    Static plugin overview
@@ -211,14 +211,14 @@ Scenarios you generate land in your target repo:
 
 ```
 <target-repo>/
-  plan-harness/                      v2 root (preferred; new scenarios go here)
+  plan-harness/                      All scenarios live here
     _shared/                         Cross-scenario assets (header link)
       context/                       Code architecture
       glossary/                      Domain language
       decisions/                     ADRs
       dashboard.html                 Workspace dashboard
     <scenario-slug>/
-      manifest.json                  schemaVersion: 2, metaHashes, upstreamHashes
+      manifest.json                  metaHashes, upstreamHashes
       product.{meta.json, html}
       analysis.{meta.json, html}
       design.{meta.json, html}
@@ -226,7 +226,6 @@ Scenarios you generate land in your target repo:
       test-spec.{meta.json, html}
       implementation.{meta.json, html}
       test-report.{meta.json, html}
-  plans/                             v1 root (legacy; read-only, still served)
 ```
 
 ## Development
@@ -243,10 +242,14 @@ npm run dev                 # build + sync to Claude Code plugin cache
 Other scripts (all inside `local-proxy/`):
 
 ```bash
-npm run build               # esbuild src → dist/index.js
+npm run build               # esbuild src → dist/index.js + bin/lint.mjs (both bundles)
+npm run build:server        # server bundle only
+npm run build:lint          # html-lint CLI bundle only
 npm run sync                # copy working tree into the Claude Code cache
 npm run prepare-release     # install + build (pre-commit / release)
 ```
+
+**Build artifacts are committed.** Both `local-proxy/dist/index.js` and `local-proxy/bin/lint.mjs` are tracked in git so end users can `claude plugins install` without running `npm install`. If you touch `local-proxy/src/**` or add an npm dependency, run `npm run build` before committing and stage the rebuilt bundles in the same change. The "bundles match src" invariant is reviewer-enforced.
 
 See [DEVELOPMENT.md](DEVELOPMENT.md) for the full working-copy ↔ plugin-cache dance, including the optional symlink-to-working-copy trick for zero-copy edits.
 

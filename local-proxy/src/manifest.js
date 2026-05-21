@@ -1,18 +1,18 @@
 /**
- * Manifest v2 schema utilities.
+ * Manifest schema utilities.
  *
- * v2 introduces metadata-as-SoT for plan-harness scenarios:
- *   - schemaVersion: 2
+ * Every plan-harness scenario manifest holds:
  *   - metaHashes:     SHA256(canonical_json(<doc>.meta.json)) per doc
  *   - upstreamHashes: snapshot of upstream hashes at last generation
- *   - sharedAssets:   tracked hashes for _shared/context, _shared/glossary, _shared/decisions
+ *   - sharedAssets:   tracked hashes for _shared/{context, glossary, decisions}
  *
- * v1 manifests (no schemaVersion field) remain read-only; isV2() returns false.
+ * Comparing the recorded upstreamHashes against the current metaHashes is how
+ * /plan-sync finds stale downstream docs without depending on mtime.
  */
 
 import crypto from "node:crypto";
 
-export const V2_DOC_TYPES = [
+export const DOC_TYPES = [
   "product",
   "analysis",
   "design",
@@ -22,7 +22,7 @@ export const V2_DOC_TYPES = [
   "test-report",
 ];
 
-export const V2_UPSTREAMS = {
+export const DOC_UPSTREAMS = {
   product: [],
   analysis: ["product"],
   design: ["analysis"],
@@ -57,27 +57,6 @@ export function computeMetaHash(metaObj) {
   return crypto.createHash("sha256").update(canonical, "utf8").digest("hex");
 }
 
-/** True iff the manifest declares schemaVersion === 2. */
-export function isV2(manifest) {
-  return manifest && manifest.schemaVersion === 2;
-}
-
-/**
- * Upgrade a v1 manifest to v2 in-memory (does NOT write to disk).
- * Preserves all v1 fields; adds v2 fields with empty defaults.
- * Caller decides whether to persist.
- */
-export function upgradeManifest(manifest) {
-  if (isV2(manifest)) return manifest;
-  return {
-    ...manifest,
-    schemaVersion: 2,
-    metaHashes: {},
-    upstreamHashes: {},
-    sharedAssets: {},
-  };
-}
-
 /**
  * Given the current manifest, return doc IDs whose recorded upstreamHashes
  * disagree with the current metaHashes of their upstreams. These docs are stale.
@@ -89,13 +68,13 @@ export function upgradeManifest(manifest) {
  * Docs that have never been generated are not "stale" -- they're absent.
  */
 export function findStaleDocs(manifest) {
-  if (!isV2(manifest)) return [];
+  if (!manifest) return [];
   const stale = [];
   const meta = manifest.metaHashes || {};
   const ups = manifest.upstreamHashes || {};
-  for (const doc of V2_DOC_TYPES) {
+  for (const doc of DOC_TYPES) {
     if (!meta[doc]) continue;
-    const upstreams = V2_UPSTREAMS[doc] || [];
+    const upstreams = DOC_UPSTREAMS[doc] || [];
     const recorded = ups[doc] || {};
     for (const u of upstreams) {
       if (!meta[u]) continue;
@@ -109,19 +88,25 @@ export function findStaleDocs(manifest) {
 }
 
 /**
- * After a successful Phase C render, call this to refresh manifest state for one doc.
- * Updates metaHashes[doc], upstreamHashes[doc][u] for every hard+soft upstream u with
- * a current metaHash, and clears any <doc>Generating flag.
+ * After a successful Phase C render (lint AND validate both clean), call this
+ * to refresh manifest state for one doc. Updates metaHashes[doc],
+ * upstreamHashes[doc][u] for every hard+soft upstream u with a current
+ * metaHash, and clears any <doc>Generating flag.
  */
 export function recordGeneration(manifest, doc, metaObj) {
-  const m = upgradeManifest(manifest);
-  m.metaHashes = { ...(m.metaHashes || {}), [doc]: computeMetaHash(metaObj) };
-  const upstreams = V2_UPSTREAMS[doc] || [];
+  const m = {
+    metaHashes: {},
+    upstreamHashes: {},
+    sharedAssets: {},
+    ...manifest,
+  };
+  m.metaHashes = { ...m.metaHashes, [doc]: computeMetaHash(metaObj) };
+  const upstreams = DOC_UPSTREAMS[doc] || [];
   const recorded = { ...(m.upstreamHashes?.[doc] || {}) };
   for (const u of upstreams) {
     if (m.metaHashes[u]) recorded[u] = m.metaHashes[u];
   }
-  m.upstreamHashes = { ...(m.upstreamHashes || {}), [doc]: recorded };
+  m.upstreamHashes = { ...m.upstreamHashes, [doc]: recorded };
   const camelKey = doc.replace(/-([a-z])/g, (_, c) => c.toUpperCase());
   delete m[`${camelKey}Generating`];
   return m;

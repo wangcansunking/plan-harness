@@ -306,30 +306,22 @@ async function handleRequest(req, res) {
     return serveHtmlFile(req, res, candidate, { fromLoopback });
   }
 
-  // GET /<scenario>/<doc>.html — try plan-harness/<scenario>/<doc>.html first,
-  // fall back to plans/<scenario>/<doc>.html (v1).
-  const v2DocMatch = pathname.match(/^\/([^_/][^/]*)\/([^/]+\.html)$/);
-  if (v2DocMatch && req.method === 'GET') {
-    const scenarioName = decodeURIComponent(v2DocMatch[1]);
-    const docFile = decodeURIComponent(v2DocMatch[2]);
+  // GET /<scenario>/<doc>.html — serve from plan-harness/<scenario>/<doc>.html.
+  const docMatch = pathname.match(/^\/([^_/][^/]*)\/([^/]+\.html)$/);
+  if (docMatch && req.method === 'GET') {
+    const scenarioName = decodeURIComponent(docMatch[1]);
+    const docFile = decodeURIComponent(docMatch[2]);
     if (scenarioName.includes('..') || docFile.includes('..')) {
       res.writeHead(403, { 'Content-Type': 'text/plain' });
       res.end('Path traversal not allowed');
       return;
     }
-    const v2Path = resolve(workspaceRootPath, 'plan-harness', scenarioName, docFile);
-    const v1Path = resolve(workspaceRootPath, 'plans', scenarioName, docFile);
-    // Try v2 first; if missing, fall back to v1.
+    const docPath = resolve(workspaceRootPath, 'plan-harness', scenarioName, docFile);
     try {
-      await stat(v2Path);
-      return serveHtmlFile(req, res, v2Path, { fromLoopback });
+      await stat(docPath);
+      return serveHtmlFile(req, res, docPath, { fromLoopback });
     } catch {
-      try {
-        await stat(v1Path);
-        return serveHtmlFile(req, res, v1Path, { fromLoopback });
-      } catch {
-        // Both missing — let it fall through to the global 404 below.
-      }
+      // Missing — fall through to the global 404 below.
     }
   }
 
@@ -666,10 +658,10 @@ async function serveHtmlFile(req, res, filePath, ctx = {}) {
   try {
     const raw = await readFile(resolved, 'utf-8');
 
-    const isV2 = resolved.includes(`${sep}plan-harness${sep}`) &&
-                 !resolved.includes(`${sep}_shared${sep}`);
+    const isScenarioDoc = resolved.includes(`${sep}plan-harness${sep}`) &&
+                          !resolved.includes(`${sep}_shared${sep}`);
     let metaJson;
-    if (isV2) {
+    if (isScenarioDoc) {
       try {
         const metaRaw = await readFile(resolved.replace(/\.html?$/i, '.meta.json'), 'utf-8');
         metaJson = JSON.parse(metaRaw);
@@ -686,7 +678,17 @@ async function serveHtmlFile(req, res, filePath, ctx = {}) {
       siblingSet = new Set(siblingEntries.filter(e => /\.html?$/i.test(e)));
     } catch { /* best-effort; if readdir fails, skip normalization */ }
     const withTabsFixed = normalizePlanTabs(raw, siblingSet, scenarioDir);
-    const withDocChrome = normalizeServedDocChrome(withTabsFixed, resolved);
+
+    // Scenario docs under plan-harness/<scenario>/ (excluding _shared) already
+    // ship with the locked GitHub-Dark palette, full chrome, and a <nav.toc>
+    // with both .docgroup and .sections. The proxy's legacy chrome override +
+    // sidebar-panel injection would double the chrome and override the locked
+    // palette with a light theme. Detect via the <script#meta> tag (only
+    // self-contained docs embed it) and skip both injectors.
+    const isSelfContained = isScenarioDoc && /<script[^>]+id=["']meta["']/i.test(withTabsFixed);
+    const withDocChrome = isSelfContained
+      ? withTabsFixed
+      : normalizeServedDocChrome(withTabsFixed, resolved);
 
     // 0b. Collapse doubled-up checklist markers (<input type="checkbox"> paired
     //     with a redundant `[x]` / `[ ]` text marker). Syncs `checked` from the
@@ -711,7 +713,11 @@ async function serveHtmlFile(req, res, filePath, ctx = {}) {
     const withMeta = injectPlanMeta(withSectionIds, meta);
 
     // 3. Sidebar auxiliary panels (TODOs + Comments). Runs on DOMContentLoaded.
-    const withPanels = injectSidebarPanels(withMeta);
+    //    v2 docs already have their own nav.toc with section links and don't
+    //    want a second sidebar grafted in.
+    const withPanels = isSelfContained ? withMeta : injectSidebarPanels(withMeta);
+
+
 
     // 4. Breadcrumb pill (last so it sits above the doc's head metadata).
     const withBreadcrumb = injectBreadcrumbIntoHtml(withPanels, resolved);
@@ -725,7 +731,7 @@ async function serveHtmlFile(req, res, filePath, ctx = {}) {
 
     let lintBanner = '';
     let lintHeader = '';
-    if (isV2) {
+    if (isScenarioDoc) {
       const docBase = basename(resolved).replace(/\.html?$/i, '');
       const result = lintHtml(withLightbox, { docName: docBase, metaJson });
       const errCount = result.errors.length;

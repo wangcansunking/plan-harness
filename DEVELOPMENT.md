@@ -33,8 +33,10 @@ The cache path resolves identically on Windows (`%USERPROFILE%\.claude\...`), ma
 ```
 
 `npm run dev` is `build` + `sync`:
-- **build** — esbuild produces `dist/index.js` from `src/`
-- **sync** — copies `dist/`, `start.js`, `src/`, `skills/`, `prompts/`, `contexts/`, `docs/`, `.claude-plugin/`, `README.md`, `ROADMAP.md`, `DEVELOPMENT.md` into the cache
+- **build** — esbuild produces TWO bundles from `src/`:
+  - `dist/index.js` (ESM, the MCP server `start.js` loads)
+  - `bin/lint.mjs` (ESM, standalone html-lint CLI — no `npm install` needed in the cache)
+- **sync** — copies `dist/`, `bin/`, `start.js`, `src/`, `skills/`, `prompts/`, `contexts/`, `docs/`, `.claude-plugin/`, `README.md`, `ROADMAP.md`, `DEVELOPMENT.md` into the cache
 
 Run from `plan-harness/local-proxy/`.
 
@@ -42,10 +44,18 @@ Run from `plan-harness/local-proxy/`.
 
 | Command | What it does |
 |---|---|
-| `npm run build` | esbuild src → `dist/index.js`. **No sync.** |
+| `npm run build` | Builds both bundles: `dist/index.js` (server) + `bin/lint.mjs` (lint CLI). **No sync.** |
+| `npm run build:server` | Server bundle only. |
+| `npm run build:lint`   | Lint CLI bundle only. |
 | `npm run sync`  | Copy working-copy outputs into the Claude Code plugin cache. **No build.** |
 | `npm run dev`   | `build` then `sync`. Most common. |
 | `npm run prepare-release` | `npm install` + `build`. For pre-commit/release tidy. |
+
+## Build artifacts are committed
+
+Both `dist/index.js` and `bin/lint.mjs` are tracked in git. The plugin cache reads from these committed artifacts — it does NOT run `npm install` or `npm run build` itself. Consequence:
+
+**Any PR that changes `local-proxy/src/**` or adds an npm dependency MUST also commit the rebuilt artifacts in the same change.** Run `npm run build` before `git add`, and stage `dist/index.js` + `bin/lint.mjs` alongside your source edits. Reviewers enforce the "artifacts match src" invariant.
 
 ## Skill/prompt edits
 
@@ -88,7 +98,7 @@ After a symlink, `npm run build` from `local-proxy/` regenerates `dist/` in-plac
    ```bash
    node cc-history/2026-04-17-plan-harness-auth-overhaul/smoke-auth.mjs
    ```
-5. Commit source changes **together with** the updated `dist/index.js`. CI doesn't exist yet; the invariant "dist matches src" is enforced by reviewers.
+5. Commit source changes **together with** the updated `dist/index.js` AND `bin/lint.mjs`. CI doesn't exist yet; the invariant "bundles match src" is enforced by reviewers.
 
 ## Using plan-harness to plan plan-harness
 
@@ -103,8 +113,8 @@ Yes — this plugin can plan its own features. Two things to remember:
 
 1. Bump `.claude-plugin/plugin.json` `version`
 2. Bump `local-proxy/package.json` `version`
-3. `npm run build` (dist must match source in the commit)
-4. Commit both source and `dist/index.js`
+3. `npm run build` (both bundles must match source in the commit)
+4. Commit source AND `dist/index.js` AND `bin/lint.mjs` in the same commit
 5. Users upgrade via `claude plugins update plan-harness`
 
 ## Common pitfalls

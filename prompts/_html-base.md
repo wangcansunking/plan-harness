@@ -39,7 +39,9 @@ Used by Phase C renderer (`prompts/writer-prompt.md`). Every `<doc>.html` produc
   </div>
   <div class="sep"></div>
   <h3>Sections</h3>
-  {one <a href="#id"> per <h2> in section}
+  <div class="sections">
+    {one <a href="#id"> per <h2> in section}
+  </div>
 </nav>
 <section>
   {body — h2/h3, tables, diagrams, callouts}
@@ -128,6 +130,21 @@ section h3 { font-size: 15px; margin: 18px 0 8px; color: var(--accent); }
 - Content MUST equal `<doc>.meta.json` byte-for-byte (after canonicalisation).
 - Re-embedded on every Phase C render. Never hand-edit the HTML and skip the meta.json — render step is the only writer.
 
+### Phase C protocol — how to guarantee byte-equality
+
+The writer is an LLM and will summarise/elide if asked to "embed the meta". Don't ask it to. The protocol is:
+
+1. Phase C writes `<doc>.meta.json` to disk FIRST (the canonical bytes).
+2. The writer's HTML template emits the literal placeholder string:
+   ```
+   <script type="application/json" id="meta">__META_JSON_PLACEHOLDER__</script>
+   ```
+   The writer must NOT inline the meta itself — only the placeholder.
+3. Phase C reads `<doc>.meta.json` from disk and `replace()`s the placeholder with the file bytes verbatim (no JSON.parse / JSON.stringify round-trip — preserves whitespace and key order).
+4. `html-lint`'s `L3-meta-embed` rule re-hashes both sides and fails closed on any drift.
+
+Writers that ignore the placeholder convention and inline the meta will be caught by lint, but with a poorer error: "hash mismatch" instead of "placeholder not replaced". The placeholder is cheaper.
+
 ## Diagram / mermaid
 
 - Inline SVG preferred for ≤300px width single-row flows.
@@ -146,12 +163,14 @@ Two visually separated groups:
   …
 [divider]             <- .sep
 Sections              <- h3
-  #overview           <- regular a
-  #goals
-  …
+  <div class="sections">  <- REQUIRED wrapper (lint scans `nav.toc .sections a[href^="#"]`)
+    #overview         <- regular a
+    #goals
+    …
+  </div>
 ```
 
-Render rule: ALWAYS emit both groups, even on docs with only one section. Empty Sections is fine.
+Render rule: ALWAYS emit both groups (`.docgroup` + `.sections`), even on docs with only one section. Empty `.sections` is fine, but the wrapper `<div class="sections">` must be present.
 
 ## What renderer MUST NOT do
 

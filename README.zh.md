@@ -196,9 +196,9 @@ plan-harness/
     start.js                         启动器（自动装依赖）
     src/
       index.js                       MCP server（stdio）
-      plan-manager.js                Plan 文件操作（v1 + v2）
-      manifest-v2.js                 v2 manifest: schemaVersion, metaHashes, hash 工具
-      web-server.js                  HTTP dashboard（node:http）— 同时服务 plan-harness/ 与 plans/
+      plan-manager.js                Plan 文件操作
+      manifest.js                    Manifest 工具：metaHashes、upstreamHashes、hash util
+      web-server.js                  HTTP dashboard（node:http）— 服务 plan-harness/
       templates/base.js              自包含 HTML 模板系统
   docs/
     overview.html                    静态插件总览
@@ -210,14 +210,14 @@ plan-harness/
 
 ```
 <target-repo>/
-  plan-harness/                      v2 根目录（推荐；新 scenario 落这里）
+  plan-harness/                      所有 scenario 都在这里
     _shared/                         跨 scenario 资产（header link）
       context/                       代码架构
       glossary/                      域语言
       decisions/                     ADR
       dashboard.html                 Workspace dashboard
     <scenario-slug>/
-      manifest.json                  schemaVersion: 2, metaHashes, upstreamHashes
+      manifest.json                  metaHashes, upstreamHashes
       product.{meta.json, html}
       analysis.{meta.json, html}
       design.{meta.json, html}
@@ -225,7 +225,6 @@ plan-harness/
       test-spec.{meta.json, html}
       implementation.{meta.json, html}
       test-report.{meta.json, html}
-  plans/                             v1 根目录（兼容只读，仍可访问）
 ```
 
 ## 开发
@@ -242,10 +241,14 @@ npm run dev                 # 构建 + 同步到 Claude Code 插件缓存
 其他脚本（都在 `local-proxy/` 下）：
 
 ```bash
-npm run build               # esbuild src → dist/index.js
+npm run build               # esbuild src → dist/index.js + bin/lint.mjs（两个 bundle）
+npm run build:server        # 只打 server bundle
+npm run build:lint          # 只打 html-lint CLI bundle
 npm run sync                # 把当前目录拷进 Claude Code 缓存
 npm run prepare-release     # install + build（pre-commit / 发布）
 ```
+
+**Build 产物会被提交到仓库。** `local-proxy/dist/index.js` 与 `local-proxy/bin/lint.mjs` 都纳入 git 版本管理，这样用户 `claude plugins install` 不用跑 `npm install`。如果你改了 `local-proxy/src/**` 或加了 npm 依赖，commit 之前请先 `npm run build`，把重新生成的 bundle 一起 stage 进同一个 commit。"bundle 必须与 src 一致"这条约束由 reviewer 把关。
 
 完整的「工作副本 ↔ 插件缓存」对照流程、以及可选的 symlink 零拷贝小技巧，见 [DEVELOPMENT.md](DEVELOPMENT.md)。
 

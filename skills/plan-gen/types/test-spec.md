@@ -9,8 +9,7 @@
 | Hard upstream               | `design`                                                       |
 | Soft upstream               | `state-machine`                                                |
 | Downstream                  | `implementation`, `test-report`                                |
-| Agent team                  | Tester (lead), Architect (corner-case sanity), Writer          |
-| Replaces                    | v1 `test-plan` + v1 `test-cases` (merged)                      |
+| Agent team                  | Tester (lead), Architect (corner-case sanity), Writer, Validator |
 | Mixins                      | `_grill-mixin`, `_caveman-mixin`, `_html-base`                 |
 
 ## Scope
@@ -42,7 +41,7 @@ Acceptance matrix + vertical-slice mapping in one doc. Covers what the system mu
     }
   ],
   "defectRepro": [
-    { "id": "K1", "v1Behavior": "...", "v2Expected": "..." }
+    { "id": "K1", "currentBehavior": "...", "expectedBehavior": "..." }
   ],
   "nonFunctional": [{ "id": "NF1", "kind": "perf|a11y|security", "requirement": "..." }],
   "fixtures": ["..."],
@@ -96,4 +95,8 @@ Seed TodoWrite at the start of `/plan-gen test-spec`. Tick `in_progress` → `co
 9. Phase B · grill scenarios[].ac for independent verifiability
 10. Phase B · grill hitlAfkMatrix (prefer AFK)
 11. Phase C · render test-spec.html with overview counts + AC matrix
-12. Phase C · embed canonical meta script + lint pass + record manifest hash
+12. Phase C · embed canonical meta script (byte-equal to `test-spec.meta.json`)
+13. Phase C · run html-lint on the rendered HTML; on errors retry the writer once, then write `test-spec.lint.json` and abort (do NOT proceed to validate)
+14. Phase C · run meta-validate (schema + cross-doc refs + HTML semantic coverage); on errors retry the writer once, then write `test-spec.validate.json` and abort (do NOT proceed to Validator)
+15. Phase C · dispatch Validator agent (`subagent_type: "feature-dev:code-reviewer"`, prompt: `prompts/validator-prompt.md`). On `fail` retry Writer once, then write `test-spec.validator.json` and abort
+16. Phase C · record manifest hash + `testSpecGeneratedAt` (only when lint, validate, AND Validator are all clean)

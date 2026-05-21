@@ -8,7 +8,7 @@
 | Manifest fields             | `sharedAssets.glossary.path`, `sharedAssets.glossary.hash`     |
 | Hard upstream               | —                                                              |
 | Downstream                  | every scenario doc (term-conflict checks during grill)         |
-| Agent team                  | Architect (curator), Writer                                    |
+| Agent team                  | Architect (curator), Writer, Validator                         |
 | Mixins                      | `_grill-mixin`, `_caveman-mixin`, `_html-base`                 |
 
 ## Scope
@@ -87,4 +87,8 @@ Seed TodoWrite at the start of `/plan-gen glossary`. Tick `in_progress` → `com
 7. Phase B · grill flaggedAmbiguities[] resolutions
 8. Phase B · validate dialogue demonstrates term boundaries
 9. Phase C · render _shared/glossary/glossary.html
-10. Phase C · embed canonical meta script + lint pass (skip scenario-doc rules) + record sharedAssets.glossary.hash
+10. Phase C · embed canonical meta script (byte-equal to `glossary.meta.json`)
+11. Phase C · run html-lint with `--skipRules L1-docgroup,L1-active` (shared-asset profile); on errors retry the writer once, then write `glossary.lint.json` and abort (do NOT proceed to validate)
+12. Phase C · run meta-validate (shared-asset profile — schema + HTML semantic coverage); on errors retry the writer once, then write `glossary.validate.json` and abort (do NOT proceed to Validator)
+13. Phase C · dispatch Validator agent (`subagent_type: "feature-dev:code-reviewer"`, prompt: `prompts/validator-prompt.md`). On `fail` retry Writer once, then write `glossary.validator.json` and abort
+14. Phase C · record `sharedAssets.glossary.hash` (only when lint, validate, AND Validator are all clean)

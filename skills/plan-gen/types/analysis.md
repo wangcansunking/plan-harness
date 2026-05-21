@@ -2,20 +2,19 @@
 
 | Field                       | Value                                                        |
 |-----------------------------|--------------------------------------------------------------|
-| Output filename             | `analysis.html` + `analysis.meta.json` (v2)                  |
+| Output filename             | `analysis.html` + `analysis.meta.json`                       |
 | Manifest fields             | `analysisHtml`, `analysisGeneratedAt`, `metaHashes.analysis` |
-| Hard upstream               | `product` (v2) — soft-block, allow `--skip-product`          |
+| Hard upstream               | `product` — soft-block, allow `--skip-product`               |
 | Soft upstream               | `_shared/context`, `_shared/glossary`, `_shared/decisions`   |
 | Downstream                  | `design`                                                     |
-| Agent team                  | PM, Architect, Writer                                        |
-| Full workflow (legacy)      | `skills/_deprecated/plan-analyze/SKILL.md`                   |
+| Agent team                  | PM, Architect, Writer, Validator                             |
 | Mixins                      | `_grill-mixin`, `_caveman-mixin`, `_html-base`               |
 
 ## Scope
 
 Problem statement + code-logic reading. WHY we're designing and WHAT the code does today. Both layers (PM outside-in, Architect inside-out) — neither alone is complete.
 
-## meta.json schema (v2)
+## meta.json schema
 
 ```jsonc
 {
@@ -70,9 +69,8 @@ No solutions in analysis — those belong in `design`.
 
 ## Notes for /plan-gen
 
-- Can still run without a scenario (just a repo path) → writes to `plans/.analysis/<repoName>-analysis.html` (v1 fallback).
 - When `--cascade` (from `/plan-sync`), pass field allowlist to grill.
-- When `product.meta.json` is missing in v2 mode, prompt: "no product doc — generate first? [Y/skip]".
+- When `product.meta.json` is missing, prompt: "no product doc — generate first? [Y/skip]".
 
 ## Task list
 
@@ -89,4 +87,8 @@ Seed TodoWrite at the start of `/plan-gen analysis`. Tick `in_progress` → `com
 9. Phase B · grill painPoints[] scope (kind + cite)
 10. Phase B · grill hypotheses[] ranking + falsifiability
 11. Phase C · render analysis.html (mermaid flow + tables)
-12. Phase C · embed canonical meta script + lint pass + record manifest hash
+12. Phase C · embed canonical meta script (byte-equal to `analysis.meta.json`)
+13. Phase C · run html-lint on the rendered HTML; on errors retry the writer once, then write `analysis.lint.json` and abort (do NOT proceed to validate)
+14. Phase C · run meta-validate (schema + cross-doc refs + HTML semantic coverage); on errors retry the writer once, then write `analysis.validate.json` and abort (do NOT proceed to Validator)
+15. Phase C · dispatch Validator agent (`subagent_type: "feature-dev:code-reviewer"`, prompt: `prompts/validator-prompt.md`). On `fail` retry Writer once, then write `analysis.validator.json` and abort
+16. Phase C · record manifest hash + `analysisGeneratedAt` (only when lint, validate, AND Validator are all clean)

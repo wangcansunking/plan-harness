@@ -70,10 +70,14 @@ section { padding: 32px clamp(24px, calc((100% - 960px) / 2), 96px); max-width: 
   </div>
   <div class="sep"></div>
   <h3>Sections</h3>
-  <a href="#overview">Overview</a>
+  <div class="sections">
+    <a href="#overview">Overview</a>
+  </div>
 </nav>
 <section>
 <h2 id="overview">Overview</h2>
+<div class="diagram"><svg aria-label="UI mockup screen">mockup</svg></div>
+<div class="diagram"><svg aria-label="user-flow workflow">user flow</svg></div>
 </section>
 </main>
 </body>
@@ -82,6 +86,49 @@ section { padding: 32px clamp(24px, calc((100% - 960px) / 2), 96px); max-width: 
 it('VALID fixture passes all rules', () => {
   const r = lintHtml(VALID, { docName: 'design' });
   assert.equal(r.errors.length, 0, `Unexpected errors:\n${r.errors.map(e => `  - ${e.rule}: ${e.message}`).join('\n')}`);
+});
+
+it('L1-nav flags missing .sections wrapper', () => {
+  const bad = VALID.replace(/<div class="sections">[\s\S]*?<\/div>/, '<a href="#overview">Overview</a>');
+  const r = lintHtml(bad, { docName: 'design' });
+  assert.ok(r.errors.some(e => e.rule === 'L1-nav' && e.message.includes('.sections')),
+    'expected L1-nav error when .sections wrapper missing');
+});
+
+it('L3-ux-visuals flags design with no mockup visual', () => {
+  const bad = VALID.replace(/<svg aria-label="UI mockup screen">mockup<\/svg>/, '');
+  const r = lintHtml(bad, { docName: 'design' });
+  assert.ok(r.errors.some(e => e.rule === 'L3-ux-visuals' && e.message.includes('mockup')),
+    'expected L3-ux-visuals error when no mockup visual');
+});
+
+it('L3-ux-visuals flags design with no user-flow visual', () => {
+  const bad = VALID.replace(/<svg aria-label="user-flow workflow">user flow<\/svg>/, '');
+  const r = lintHtml(bad, { docName: 'design' });
+  assert.ok(r.errors.some(e => e.rule === 'L3-ux-visuals' && e.message.includes('flow')),
+    'expected L3-ux-visuals error when no user-flow visual');
+});
+
+it('L3-product-mockups flags product doc with no mockup', () => {
+  const bare = VALID
+    .replace(/<svg aria-label="UI mockup screen">mockup<\/svg>/, '')
+    .replace(/<svg aria-label="user-flow workflow">user flow<\/svg>/, '');
+  const r = lintHtml(bare, { docName: 'product', metaJson: { doc: 'product', schemaVersion: 2, userStories: [{ id: 'US1' }] } });
+  assert.ok(r.errors.some(e => e.rule === 'L3-product-mockups'),
+    'expected L3-product-mockups error when product doc has no mockup');
+});
+
+it('L3-product-mockups flags story-mockup count mismatch', () => {
+  const r = lintHtml(VALID, { docName: 'product', metaJson: { doc: 'product', schemaVersion: 2, userStories: [{ id: 'US1' }, { id: 'US2' }, { id: 'US3' }] } });
+  assert.ok(r.errors.some(e => e.rule === 'L3-product-mockups' && e.message.includes('every story')),
+    'expected L3-product-mockups count-mismatch error');
+});
+
+it('L3-section-nav does NOT flag h3 sub-headings', () => {
+  const withH3 = VALID.replace('<h2 id="overview">Overview</h2>', '<h2 id="overview">Overview</h2>\n<h3>Sub-point one</h3>\n<h3>Sub-point two</h3>');
+  const r = lintHtml(withH3, { docName: 'design' });
+  assert.ok(!r.errors.some(e => e.rule === 'L3-section-nav'),
+    'L3-section-nav should ignore h3 sub-headings (only h2 needs nav entries)');
 });
 
 it('L2-no-maxwidth-section flags max-width:1100px on section', () => {

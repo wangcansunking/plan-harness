@@ -4,20 +4,19 @@
 
 | Field                       | Value                                                                  |
 |-----------------------------|------------------------------------------------------------------------|
-| Output filename             | `test-report.html` + `test-report.meta.json` (v2)                      |
+| Output filename             | `test-report.html` + `test-report.meta.json`                           |
 | Manifest fields             | `testReportHtml`, `testReportGeneratedAt`, `metaHashes.test-report`, `testReportSummary` |
 | Hard upstream               | `test-spec`                                                            |
 | Soft upstream               | `implementation` (ties failures back to PRs)                           |
-| Evidence directory          | `plan-harness/<scenario>/.test-evidence/` (or v1 `plans/<scenario>/.test-evidence/`) |
-| Agent team                  | Tester (live browser via Playwright MCP), Writer                       |
-| Full workflow (legacy)      | `skills/_deprecated/plan-test-report/SKILL.md`                         |
+| Evidence directory          | `plan-harness/<scenario>/.test-evidence/`                              |
+| Agent team                  | Tester (live browser via Playwright MCP), Writer, Validator            |
 | Mixins                      | `_grill-mixin`, `_caveman-mixin`, `_html-base`                         |
 
 ## Scope
 
 Live E2E test execution + classified failure list + cleanup checklist. NOT pure doc generation — runs real Playwright sessions.
 
-## meta.json schema (v2)
+## meta.json schema
 
 ```jsonc
 {
@@ -94,4 +93,8 @@ Seed TodoWrite at the start of `/plan-gen test-report`. Tick `in_progress` → `
 7. Diagnose Phase 5-6 · verify cleanup checklist (debug logs, stray data, re-run, spec drift, close)
 8. Phase A · finalize runs[] + summary counts + failures[]
 9. Phase C · render test-report.html (scoreboard + per-scenario tables + failures + checklist)
-10. Phase C · embed canonical meta script + lint pass + record manifest hash + flip dashboard dot
+10. Phase C · embed canonical meta script (byte-equal to `test-report.meta.json`)
+11. Phase C · run html-lint on the rendered HTML; on errors retry the writer once, then write `test-report.lint.json` and abort (do NOT proceed to validate)
+12. Phase C · run meta-validate (schema + cross-doc refs + HTML semantic coverage); on errors retry the writer once, then write `test-report.validate.json` and abort (do NOT proceed to Validator)
+13. Phase C · dispatch Validator agent (`subagent_type: "feature-dev:code-reviewer"`, prompt: `prompts/validator-prompt.md`). On `fail` retry Writer once, then write `test-report.validator.json` and abort
+14. Phase C · record manifest hash + `testReportGeneratedAt` + flip dashboard dot (only when lint, validate, AND Validator are all clean)

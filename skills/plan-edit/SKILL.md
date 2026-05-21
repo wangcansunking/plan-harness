@@ -36,11 +36,10 @@ It deliberately does **not** cascade. Downstream docs that depended on the edite
 
 ### Step 1 — Resolve scenario + doc
 
-1. Find `manifest.json` in `plan-harness/<scenario>/` (preferred) or `plans/<scenario>/` (legacy).
+1. Find `manifest.json` in `plan-harness/<scenario>/`.
 2. Stop with "Run /plan-init first." if not found.
-3. Verify `<doc>` is a v2 type (`product`, `analysis`, `design`, `state-machine`, `test-spec`, `implementation`, `test-report`). Reject v1-only types (`test-plan`, `test-cases`) — point at `test-spec` instead.
+3. Verify `<doc>` is one of the seven scenario types (`product`, `analysis`, `design`, `state-machine`, `test-spec`, `implementation`, `test-report`) or a shared asset (`context`, `glossary`, `decisions`).
 4. Verify `<doc>.meta.json` and `<doc>.html` both exist. If not, tell the user to run `/plan-gen <doc>` first — `/plan-edit` is for refining, not creating.
-5. Refuse if manifest `schemaVersion !== 2`. Hash tracking requires v2; edits to v1 docs should go through `/plan-gen <doc> --allow-v1`.
 
 ### Step 2 — Locate target fields from the hint
 
@@ -76,7 +75,7 @@ It deliberately does **not** cascade. Downstream docs that depended on the edite
 
 ### Step 5 — Update manifest
 
-Use `recordGeneration(manifest, doc, metaObj)` from `local-proxy/src/manifest-v2.js`:
+Use `recordGeneration(manifest, doc, metaObj)` from `local-proxy/src/manifest.js`:
 - Updates `metaHashes[<doc>]` to the new hash.
 - **Re-snapshots `upstreamHashes[<doc>][<u>]` to whatever the upstream hashes currently are.** This is the key difference from `/plan-sync`: `/plan-edit` declares "I considered the current upstream state when I made this edit," so the doc is NOT marked stale-against-upstream after the edit.
 - Sets `<doc>GeneratedAt: <ISO timestamp>`.
@@ -104,7 +103,7 @@ Downstream docs that may be affected:
 These are NOT auto-regenerated. Run /plan-sync if you want to cascade.
 ```
 
-The downstream list comes from `V2_UPSTREAMS` in `manifest-v2.js` — reverse lookup: which docs name `<doc>` as a hard or soft upstream.
+The downstream list comes from `DOC_UPSTREAMS` in `manifest.js` — reverse lookup: which docs name `<doc>` as a hard or soft upstream.
 
 ## Sub-commands
 
@@ -130,7 +129,6 @@ The downstream list comes from `V2_UPSTREAMS` in `manifest-v2.js` — reverse lo
 |-------|------------|
 | `manifest.json` missing | Stop: "Run /plan-init first." |
 | Doc not yet generated | Stop: "Run /plan-gen <doc> first — /plan-edit refines existing docs." |
-| v1 manifest | Stop: "/plan-edit requires schemaVersion: 2. Use /plan-gen <doc> --allow-v1 for legacy docs." |
 | Hint matches nothing | Ask for a more specific hint. Show top-level field list. |
 | Hint too broad (> 30%) | Warn + offer full regeneration via `/plan-gen <doc>`. Proceed only on explicit confirm. |
 | Writer produces malformed HTML | Restore previous `<doc>.html` from git. Surface the error. |
@@ -145,5 +143,5 @@ The downstream list comes from `V2_UPSTREAMS` in `manifest-v2.js` — reverse lo
 | `/plan-sync` | Cascade after `/plan-edit` if downstream docs need updating |
 | `prompts/_grill-mixin.md` | Phase B rules shared with `/plan-gen` |
 | `prompts/_html-base.md` | Phase C rendering contract |
-| `local-proxy/src/manifest-v2.js` | `recordGeneration`, `V2_UPSTREAMS`, `computeMetaHash` |
+| `local-proxy/src/manifest.js` | `recordGeneration`, `DOC_UPSTREAMS`, `computeMetaHash` |
 | `skills/plan-gen/types/<doc>.md` | Schema + must-ask field list for the targeted doc |

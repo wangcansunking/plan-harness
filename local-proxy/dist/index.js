@@ -16515,7 +16515,7 @@ var require_dist2 = __commonJS({
   }
 });
 
-// src/manifest-v2.js
+// src/manifest.js
 function canonicalJson(value) {
   if (value === null || typeof value !== "object") {
     return JSON.stringify(value);
@@ -16527,8 +16527,8 @@ function canonicalJson(value) {
   const parts = keys.map((k) => JSON.stringify(k) + ":" + canonicalJson(value[k]));
   return "{" + parts.join(",") + "}";
 }
-var init_manifest_v2 = __esm({
-  "src/manifest-v2.js"() {
+var init_manifest = __esm({
+  "src/manifest.js"() {
   }
 });
 
@@ -16543,7 +16543,7 @@ function slugify2(text) {
 function collectHeadings(root) {
   const seen = /* @__PURE__ */ new Map();
   const scope = root.querySelector("main > section") || root.querySelector("main") || root;
-  return scope.querySelectorAll("h2, h3").map((heading) => {
+  return scope.querySelectorAll("h2").map((heading) => {
     const label = nodeText(heading);
     const explicitId = heading.getAttribute("id");
     const base = slugify2(label);
@@ -16557,13 +16557,6 @@ function collectHeadings(root) {
 }
 function hasSvgOrMermaid(root) {
   return root.querySelectorAll("svg").length > 0 || root.querySelectorAll("pre.mermaid, .mermaid").length > 0;
-}
-function docMentionsUx(root, metaJson) {
-  if (Array.isArray(metaJson?.uxMockups) && metaJson.uxMockups.length > 0) return true;
-  if (Array.isArray(metaJson?.userFlows) && metaJson.userFlows.length > 0) return true;
-  const scope = root.querySelector("main > section") || root.querySelector("main") || root;
-  const text = nodeText(scope).toLowerCase();
-  return /\b(ux|ui|user interface|screen|modal|form|mockup|wireframe|user flow|screen flow|journey)\b/.test(text);
 }
 function hasVisualNear(root, words) {
   const visualNodes = root.querySelectorAll("svg, pre.mermaid, .mermaid, .diagram-box");
@@ -16652,6 +16645,22 @@ function lintHtml(html, ctx = {}) {
           rule: "L1-nav",
           severity: "error",
           message: '<nav.toc> missing <div class="sep"> divider between Documents and Sections'
+        });
+      }
+      const sectionsWrap = nav.querySelector(".sections");
+      if (!sectionsWrap) {
+        errors.push({
+          rule: "L1-nav",
+          severity: "error",
+          message: '<nav.toc> missing <div class="sections"> wrapper for section links \u2014 L3-section-nav scans `nav.toc .sections a[href^="#"]`'
+        });
+      }
+      const docgroupWrap = nav.querySelector(".docgroup");
+      if (!docgroupWrap && !skip.has("L1-docgroup")) {
+        errors.push({
+          rule: "L1-nav",
+          severity: "error",
+          message: '<nav.toc> missing <div class="docgroup"> wrapper for the 7 scenario-doc links'
         });
       }
     }
@@ -16813,19 +16822,53 @@ function lintHtml(html, ctx = {}) {
       });
     }
   }
-  if (!skip.has("L3-ux-visuals") && ctx.docName === "design" && docMentionsUx(root, ctx.metaJson)) {
+  if (!skip.has("L3-story-flows") && ctx.docName === "state-machine") {
+    const flows = Array.isArray(ctx.metaJson?.perStoryFlows) ? ctx.metaJson.perStoryFlows : null;
+    if (flows !== null) {
+      const visuals = root.querySelectorAll("svg, pre.mermaid, .mermaid").length;
+      const expectedVisualsPerFlow = 1;
+      if (visuals < flows.length * expectedVisualsPerFlow) {
+        errors.push({
+          rule: "L3-story-flows",
+          severity: "error",
+          message: `State-machine doc has ${visuals} diagram(s) but ${flows.length} perStoryFlows[] \u2014 every user story needs its state-path visual`
+        });
+      }
+    }
+  }
+  if (!skip.has("L3-product-mockups") && ctx.docName === "product") {
+    const mockupVisuals = root.querySelectorAll("svg, pre.mermaid, .mermaid").filter((node) => {
+      const text = nodeText(node.parentNode || node).toLowerCase();
+      return /\b(mockup|screen|wireframe|sketch)\b/.test(text);
+    });
+    const storyCount = Array.isArray(ctx.metaJson?.userStories) ? ctx.metaJson.userStories.length : 0;
+    if (mockupVisuals.length === 0) {
+      errors.push({
+        rule: "L3-product-mockups",
+        severity: "error",
+        message: "Product doc has no mockup visual \u2014 every user story needs a mockup (screen/terminal/API sketch)"
+      });
+    } else if (storyCount > 0 && mockupVisuals.length < storyCount) {
+      errors.push({
+        rule: "L3-product-mockups",
+        severity: "error",
+        message: `Product doc has ${mockupVisuals.length} mockup visual(s) but ${storyCount} userStories[] \u2014 every story needs its own mockup`
+      });
+    }
+  }
+  if (!skip.has("L3-ux-visuals") && ctx.docName === "design") {
     if (!hasVisualNear(root, ["mockup", "wireframe", "screen"])) {
       errors.push({
         rule: "L3-ux-visuals",
         severity: "error",
-        message: "Design doc mentions UX/UI but has no first-class mockup/wireframe/screen visual"
+        message: "Design doc has no first-class mockup/wireframe/screen visual \u2014 every design needs one (terminal/API sketches count for non-UI tools)"
       });
     }
-    if (!hasVisualNear(root, ["flow", "journey", "screen flow", "user flow"])) {
+    if (!hasVisualNear(root, ["flow", "journey", "screen flow", "user flow", "workflow"])) {
       errors.push({
         rule: "L3-ux-visuals",
         severity: "error",
-        message: "Design doc mentions UX/UI but has no first-class user-flow visual"
+        message: "Design doc has no first-class user-flow/workflow visual \u2014 every design needs one (command/API sequences count for non-UI tools)"
       });
     }
   }
@@ -16928,7 +16971,7 @@ var import_node_html_parser, SCENARIO_DOCS, LOCKED_PALETTE_VARS, PALETTE_LOCKED_
 var init_html_lint = __esm({
   "src/html-lint.js"() {
     import_node_html_parser = __toESM(require_dist2(), 1);
-    init_manifest_v2();
+    init_manifest();
     SCENARIO_DOCS = [
       "product",
       "analysis",
@@ -17149,26 +17192,20 @@ async function handleRequest(req, res) {
     const candidate = resolve3(workspaceRootPath, "plan-harness", "_shared", rest);
     return serveHtmlFile(req, res, candidate, { fromLoopback });
   }
-  const v2DocMatch = pathname.match(/^\/([^_/][^/]*)\/([^/]+\.html)$/);
-  if (v2DocMatch && req.method === "GET") {
-    const scenarioName = decodeURIComponent(v2DocMatch[1]);
-    const docFile = decodeURIComponent(v2DocMatch[2]);
+  const docMatch = pathname.match(/^\/([^_/][^/]*)\/([^/]+\.html)$/);
+  if (docMatch && req.method === "GET") {
+    const scenarioName = decodeURIComponent(docMatch[1]);
+    const docFile = decodeURIComponent(docMatch[2]);
     if (scenarioName.includes("..") || docFile.includes("..")) {
       res.writeHead(403, { "Content-Type": "text/plain" });
       res.end("Path traversal not allowed");
       return;
     }
-    const v2Path = resolve3(workspaceRootPath, "plan-harness", scenarioName, docFile);
-    const v1Path = resolve3(workspaceRootPath, "plans", scenarioName, docFile);
+    const docPath = resolve3(workspaceRootPath, "plan-harness", scenarioName, docFile);
     try {
-      await stat2(v2Path);
-      return serveHtmlFile(req, res, v2Path, { fromLoopback });
+      await stat2(docPath);
+      return serveHtmlFile(req, res, docPath, { fromLoopback });
     } catch {
-      try {
-        await stat2(v1Path);
-        return serveHtmlFile(req, res, v1Path, { fromLoopback });
-      } catch {
-      }
     }
   }
   res.writeHead(404, { "Content-Type": "text/plain" });
@@ -17459,9 +17496,9 @@ async function serveHtmlFile(req, res, filePath, ctx = {}) {
   }
   try {
     const raw = await readFile4(resolved, "utf-8");
-    const isV2 = resolved.includes(`${sep4}plan-harness${sep4}`) && !resolved.includes(`${sep4}_shared${sep4}`);
+    const isScenarioDoc = resolved.includes(`${sep4}plan-harness${sep4}`) && !resolved.includes(`${sep4}_shared${sep4}`);
     let metaJson;
-    if (isV2) {
+    if (isScenarioDoc) {
       try {
         const metaRaw = await readFile4(resolved.replace(/\.html?$/i, ".meta.json"), "utf-8");
         metaJson = JSON.parse(metaRaw);
@@ -17476,7 +17513,8 @@ async function serveHtmlFile(req, res, filePath, ctx = {}) {
     } catch {
     }
     const withTabsFixed = normalizePlanTabs(raw, siblingSet, scenarioDir);
-    const withDocChrome = normalizeServedDocChrome(withTabsFixed, resolved);
+    const isSelfContained = isScenarioDoc && /<script[^>]+id=["']meta["']/i.test(withTabsFixed);
+    const withDocChrome = isSelfContained ? withTabsFixed : normalizeServedDocChrome(withTabsFixed, resolved);
     const withChecklistFixed = normalizeChecklistItems(withDocChrome);
     const withSectionIds = injectSectionIds(withChecklistFixed);
     const { scenarioName, docLabel } = parseScenarioFromPath(resolved);
@@ -17489,13 +17527,13 @@ async function serveHtmlFile(req, res, filePath, ctx = {}) {
       user: req.user?.name || (fromLoopback ? "Host (local)" : "Anonymous")
     };
     const withMeta = injectPlanMeta(withSectionIds, meta3);
-    const withPanels = injectSidebarPanels(withMeta);
+    const withPanels = isSelfContained ? withMeta : injectSidebarPanels(withMeta);
     const withBreadcrumb = injectBreadcrumbIntoHtml(withPanels, resolved);
     const withAssets = normalizeAssetLinks(withBreadcrumb, scenarioDir);
     const withLightbox = injectLightbox(withAssets);
     let lintBanner = "";
     let lintHeader = "";
-    if (isV2) {
+    if (isScenarioDoc) {
       const docBase = basename2(resolved).replace(/\.html?$/i, "");
       const result = lintHtml(withLightbox, { docName: docBase, metaJson });
       const errCount = result.errors.length;
@@ -17614,7 +17652,9 @@ pre.mermaid { background: var(--panel); border: 1px solid var(--border); border-
 @media (max-width: 899px) { .theme-toggle { top: 3rem; right: 0.75rem; } }
 @media print { .theme-toggle { display: none !important; } }
 </style>`;
-  if (!out.includes('id="ph-served-doc-chrome"')) {
+  if (/<style\s+id=["']ph-served-doc-chrome["'][^>]*>[\s\S]*?<\/style>/i.test(out)) {
+    out = out.replace(/<style\s+id=["']ph-served-doc-chrome["'][^>]*>[\s\S]*?<\/style>/i, chromeStyle);
+  } else {
     out = out.replace(/<\/head>/i, `${getThemeInitScript()}
 ${chromeStyle}
 </head>`);
@@ -17623,9 +17663,37 @@ ${chromeStyle}
     out = out.replace(/<body\b[^>]*>/i, (m) => `${m}
 ${getThemeToggleHTML()}`);
   }
-  if (!out.includes("ph-served-doc-runtime")) {
-    const runtime = `<script id="ph-served-doc-runtime">
+  const runtime = `<script id="ph-served-doc-runtime">
 (function(){
+  function forceDocChrome() {
+    var root = document.documentElement;
+    var sepNodes = document.querySelectorAll('.ph-injected-breadcrumb .sep');
+    for (var i = 0; i < sepNodes.length; i++) {
+      var n = sepNodes[i];
+      n.style.setProperty('display', 'inline-flex', 'important');
+      n.style.setProperty('align-self', 'center', 'important');
+      n.style.setProperty('align-items', 'center', 'important');
+      n.style.setProperty('justify-content', 'center', 'important');
+      n.style.setProperty('line-height', '1', 'important');
+      n.style.setProperty('transform', 'translateY(-0.5px)', 'important');
+      n.style.setProperty('vertical-align', 'middle', 'important');
+    }
+
+    var hdr = document.querySelector('header.top');
+    if (hdr) {
+      var panel = getComputedStyle(root).getPropertyValue('--panel').trim() || '#f3f4f5';
+      var fg = getComputedStyle(root).getPropertyValue('--fg').trim() || '#08090a';
+      var border = getComputedStyle(root).getPropertyValue('--border').trim() || '#d0d6e0';
+      hdr.style.setProperty('background', panel, 'important');
+      hdr.style.setProperty('color', fg, 'important');
+      hdr.style.setProperty('border-bottom', '1px solid ' + border, 'important');
+      var links = hdr.querySelectorAll('a');
+      for (var j = 0; j < links.length; j++) {
+        links[j].style.setProperty('color', fg, 'important');
+      }
+    }
+  }
+
   var blocks = Array.prototype.slice.call(document.querySelectorAll('pre.mermaid'));
   if (blocks.length && !window.mermaid) {
     var script = document.createElement('script');
@@ -17633,8 +17701,16 @@ ${getThemeToggleHTML()}`);
     script.onload = function(){ if (window.mermaid) { window.mermaid.initialize({ startOnLoad: true, theme: document.documentElement.getAttribute('data-theme') === 'light' ? 'default' : 'dark' }); } };
     document.head.appendChild(script);
   }
+
+  forceDocChrome();
+  var themeObserver = new MutationObserver(function(){ forceDocChrome(); });
+  themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+  document.addEventListener('click', function(ev){ if (ev.target && ev.target.closest && ev.target.closest('#themeToggle')) setTimeout(forceDocChrome, 0); }, true);
 })();
 </script>`;
+  if (/<script\s+id=["']ph-served-doc-runtime["'][^>]*>[\s\S]*?<\/script>/i.test(out)) {
+    out = out.replace(/<script\s+id=["']ph-served-doc-runtime["'][^>]*>[\s\S]*?<\/script>/i, runtime);
+  } else {
     out = out.replace(/<\/body>/i, `${getBaseScript()}
 ${runtime}
 </body>`);
@@ -32265,7 +32341,7 @@ async function findPlansDirs(dir, maxDepth = 5, currentDepth = 0) {
       continue;
     }
     const fullPath = join(dir, name);
-    if (name === "plan-harness" || name === "plans") {
+    if (name === "plan-harness") {
       results.push(norm(fullPath));
     } else {
       const nested = await findPlansDirs(fullPath, maxDepth, currentDepth + 1);
@@ -32299,28 +32375,19 @@ async function listScenarios(workspaceRoot) {
           const candidates = registry2[docType] || [docType];
           docs[docType] = candidates.some((c) => fileNames.includes(`${c}.html`));
         }
-        const manifest = await readJson(join(scenarioPath, "manifest.json"));
-        const schemaVersion = manifest?.schemaVersion ?? 1;
         scenarios.push({
           repoRoot,
           scenario: entry.name,
           scenarioPath,
           files,
-          schemaVersion,
           docs,
-          // v1 back-compat flags (some consumers still read these directly)
+          hasProduct: !!docs.product,
           hasAnalysis: !!docs.analysis,
           hasDesign: !!docs.design,
-          hasTestPlan: !!docs["test-plan"],
           hasStateMachine: !!docs["state-machine"],
-          hasTestCases: !!docs["test-cases"],
-          hasImplementationPlan: !!docs.implementation || !!docs["implementation-plan"],
-          hasDashboard: fileNames.includes("dashboard.html"),
-          hasReviewReport: fileNames.includes("review-report.html"),
-          hasTestReport: !!docs["test-report"],
-          // v2 new
-          hasProduct: !!docs.product,
-          hasTestSpec: !!docs["test-spec"]
+          hasTestSpec: !!docs["test-spec"],
+          hasImplementation: !!docs.implementation,
+          hasTestReport: !!docs["test-report"]
         });
       }
     }
@@ -32334,15 +32401,13 @@ async function createScenario(repoRoot, scenarioName, metadata = {}) {
   if (!safeName) {
     throw new Error(`Invalid scenario name: "${scenarioName}"`);
   }
-  const rootDir = metadata.rootDir === "plans" ? "plans" : "plan-harness";
-  const plansRoot = join(repoRoot, rootDir);
+  const plansRoot = join(repoRoot, "plan-harness");
   const scenarioPath = join(plansRoot, safeName);
   const rel = relative(plansRoot, scenarioPath);
   if (rel.startsWith("..") || rel.includes(sep + "..") || rel === "") {
-    throw new Error(`Scenario path escapes ${rootDir}/: "${scenarioName}" -> "${safeName}"`);
+    throw new Error(`Scenario path escapes plan-harness/: "${scenarioName}" -> "${safeName}"`);
   }
   await mkdir(scenarioPath, { recursive: true });
-  const isV2 = rootDir === "plan-harness";
   const manifest = {
     scenario: safeName,
     displayName: scenarioName,
@@ -32351,12 +32416,9 @@ async function createScenario(repoRoot, scenarioName, metadata = {}) {
     createdAt: (/* @__PURE__ */ new Date()).toISOString(),
     tags: metadata.tags ?? [],
     status: metadata.status ?? "draft",
-    ...isV2 && {
-      schemaVersion: 2,
-      metaHashes: {},
-      upstreamHashes: {},
-      sharedAssets: {}
-    }
+    metaHashes: {},
+    upstreamHashes: {},
+    sharedAssets: {}
   };
   const manifestPath = join(scenarioPath, "manifest.json");
   await writeFile(manifestPath, JSON.stringify(manifest, null, 2), "utf-8");
@@ -32878,12 +32940,13 @@ server2.setRequestHandler(CallToolRequestSchema, async (request) => {
         }
         const lines = scenarios.map((s) => {
           const flags = [
+            s.hasProduct ? "product" : null,
+            s.hasAnalysis ? "analysis" : null,
             s.hasDesign ? "design" : null,
-            s.hasTestPlan ? "test-plan" : null,
             s.hasStateMachine ? "state-machine" : null,
-            s.hasTestCases ? "test-cases" : null,
-            s.hasImplementationPlan ? "impl-plan" : null,
-            s.hasDashboard ? "dashboard" : null
+            s.hasTestSpec ? "test-spec" : null,
+            s.hasImplementation ? "implementation" : null,
+            s.hasTestReport ? "test-report" : null
           ].filter(Boolean).join(", ");
           return [
             `  Scenario: ${s.scenario}`,

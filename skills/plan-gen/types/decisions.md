@@ -8,7 +8,7 @@
 | Manifest fields             | `sharedAssets.decisions.path`, `sharedAssets.decisions.indexHash` |
 | Hard upstream               | —                                                                |
 | Downstream                  | every scenario doc (header link)                                 |
-| Agent team                  | Architect (lead), Writer                                         |
+| Agent team                  | Architect (lead), Writer, Validator                              |
 | Mixins                      | `_grill-mixin`, `_caveman-mixin`, `_html-base`                   |
 
 ## Scope
@@ -91,4 +91,8 @@ Seed TodoWrite at the start of `/plan-gen decisions` (or when offering an ADR mi
 6. Phase B · grill consideredOptions[] (real alternatives, not strawmen)
 7. Phase C · render _shared/decisions/NNNN-slug.html
 8. Phase C · re-render _shared/decisions/index.html (id/title/status table)
-9. Phase C · embed canonical meta script + lint pass + record sharedAssets.decisions.indexHash
+9. Phase C · embed canonical meta script (byte-equal to each `NNNN-slug.meta.json`)
+10. Phase C · run html-lint on every rendered ADR + the index (shared-asset profile: `--skipRules L1-docgroup,L1-active`); on errors retry the writer once, then write `<file>.lint.json` and abort (do NOT proceed to validate)
+11. Phase C · run meta-validate on every rendered ADR + the index (shared-asset profile — schema + HTML semantic coverage); on errors retry the writer once, then write `<file>.validate.json` and abort (do NOT proceed to Validator)
+12. Phase C · dispatch Validator agent (`subagent_type: "feature-dev:code-reviewer"`, prompt: `prompts/validator-prompt.md`) for every ADR + the index. On `fail` retry Writer once, then write `<file>.validator.json` and abort
+13. Phase C · record `sharedAssets.decisions.indexHash` (only when lint, validate, AND Validator are all clean)

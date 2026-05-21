@@ -1,6 +1,6 @@
 # plan-revise
 
-Batch-dispatch pending revise-intent comments on a scenario's plan docs. Reads every `plans/<scenario>/.comments/*.jsonl`, collects comments with `intent: "revise"` and `reviseStatus: "pending"`, then for each one:
+Batch-dispatch pending revise-intent comments on a scenario's plan docs. Reads every `plan-harness/<scenario>/.comments/*.jsonl`, collects comments with `intent: "revise"` and `reviseStatus: "pending"`, then for each one:
 
 1. POSTs to `/api/comments/:scenario/:doc/:id/revise-dispatch` to flip the status to `dispatched`.
 2. Dispatches a writer subagent with the anchor context (section, exact text, prefix / suffix) and the comment body as the change request.
@@ -27,7 +27,7 @@ Active-mode scenarios auto-dispatch on every revise-intent post, so `/plan-revis
 
 - plan-harness MCP running (dashboard on `localhost:3847` by default).
 - At least one `pending` revise-intent comment in the target scenario.
-- A writable `plans/<scenario>/.comments/<doc>.proposals/` directory (the dispatcher creates it on first use).
+- A writable `plan-harness/<scenario>/.comments/<doc>.proposals/` directory (the dispatcher creates it on first use).
 
 ## Workflow
 
@@ -69,7 +69,7 @@ If the user types `n`, exit without changes.
 For each pending revise:
 
 1. POST `http://localhost:<port>/api/comments/<scenario>/<doc>/<id>/revise-dispatch`. This flips the on-disk status to `dispatched`. (The server enforces host-only — this works on loopback.)
-2. Read the current doc HTML (`plans/<scenario>/<doc>.html`).
+2. Read the current doc HTML (`plan-harness/<scenario>/<doc>.html`).
 3. Extract the anchored span (`anchor.exact` within the section identified by `anchor.sectionId`).
 4. Dispatch a writer subagent with this prompt:
    ```
@@ -83,7 +83,7 @@ For each pending revise:
 
    Return the new text (no preamble, no code fences).
    ```
-5. Write the response to `plans/<scenario>/.comments/<doc>.proposals/<id>.diff` in the two-stanza format:
+5. Write the response to `plan-harness/<scenario>/.comments/<doc>.proposals/<id>.diff` in the two-stanza format:
    ```
    REPLACE:
    <anchor.exact>
