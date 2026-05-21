@@ -887,8 +887,18 @@ function startStalenessWatcher() {
   const myVersion = basename(maybeVersionDir);
   const isVersioned = /^\d+\.\d+\.\d+$/.test(myVersion);
 
+  // In dev (working copy, NOT under a versioned plugin-cache dir) we skip the
+  // watcher entirely. `npm run dev` rewrites dist/index.js every iteration; if
+  // we respawned on mtime drift the server would die mid-session whenever the
+  // user rebuilds. End users only ever run from the versioned cache, so they
+  // still get auto-respawn on upgrades there.
+  if (!isVersioned) {
+    console.error(`[plan-harness] bundle=${bundleFile} version=dev watcher=disabled (working-copy run)`);
+    return;
+  }
+
   console.error(
-    `[plan-harness] bundle=${bundleFile} version=${isVersioned ? myVersion : "dev"} watcher=${intervalMs}ms`,
+    `[plan-harness] bundle=${bundleFile} version=${myVersion} watcher=${intervalMs}ms`,
   );
 
   const timer = setInterval(() => {
@@ -908,7 +918,6 @@ function startStalenessWatcher() {
     }
 
     // (b) newer sibling version dir appeared
-    if (!isVersioned) return;
     try {
       for (const entry of readdirSync(pluginRoot)) {
         if (!/^\d+\.\d+\.\d+$/.test(entry)) continue;

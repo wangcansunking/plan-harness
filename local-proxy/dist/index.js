@@ -7402,7 +7402,8 @@ function generateScenarioDetail(scenario, options = {}) {
     const hasOpen = docTodos + docUnresolved > 0;
     const state = !exists ? "missing" : hasOpen ? "partial" : "complete";
     const stateBadge = !exists ? `<span class="doc-state doc-state-missing">Not generated</span>` : hasOpen ? "" : `<span class="doc-state doc-state-complete">Clear</span>`;
-    const primaryAction = exists ? `<a href="/view?path=${encodeURIComponent(f.path)}" class="doc-primary-action">Open \u2192</a>` : `<code class="doc-skill">${escapeHTML(def.skill)}${scenario.name ? " --scenario " + escapeHTML(scenario.name) : ""}</code>`;
+    const docHref = exists ? buildDocHref(f.path) : null;
+    const primaryAction = exists ? `<a href="${escapeAttr(docHref)}" class="doc-primary-action">Open \u2192</a>` : `<code class="doc-skill">${escapeHTML(def.skill)}${scenario.name ? " --scenario " + escapeHTML(scenario.name) : ""}</code>`;
     const countParts = [];
     if (docTodos > 0) countParts.push(`<span class="doc-count doc-count-todo" title="Open TODOs in this doc">${docTodos} TODOs</span>`);
     if (docUnresolved > 0) countParts.push(`<span class="doc-count doc-count-unresolved" title="Unresolved comments on this doc">${docUnresolved} unresolved</span>`);
@@ -7468,6 +7469,14 @@ ${docsHTML}
     scenarioName: scenario.name,
     ...options
   });
+}
+function buildDocHref(absPath) {
+  if (!absPath) return "";
+  const normalized = String(absPath).replace(/\\/g, "/");
+  const idx = normalized.lastIndexOf("/plan-harness/");
+  if (idx < 0) return "/view?path=" + encodeURIComponent(absPath);
+  const rest = normalized.slice(idx + "/plan-harness/".length);
+  return "/" + rest.split("/").map(encodeURIComponent).join("/");
 }
 function escapeHTML(str) {
   if (!str) return "";
@@ -9254,7 +9263,7 @@ function normalizePlanTabs(html, existingSiblings, scenarioDir) {
           let newHref = href;
           if (scenarioDir) {
             const absPath = scenarioDir.replace(/\\/g, "/") + "/" + basename4;
-            newHref = "/view?path=" + encodeURIComponent(absPath);
+            newHref = buildDocHref(absPath);
           }
           let newAttrs = attrs.replace(/\s+aria-disabled\s*=\s*["'][^"']*["']/gi, "").replace(/\bhref\s*=\s*["'][^"']+["']/i, 'href="' + newHref.replace(/"/g, "&quot;") + '"');
           const newBody = body.replace(/<span\b[^>]*class=["'][^"']*\bsoon\b[^"']*["'][^>]*>[\s\S]*?<\/span>/gi, "").trim();
@@ -33372,8 +33381,12 @@ function startStalenessWatcher() {
   const pluginRoot = dirname3(maybeVersionDir);
   const myVersion = basename3(maybeVersionDir);
   const isVersioned = /^\d+\.\d+\.\d+$/.test(myVersion);
+  if (!isVersioned) {
+    console.error(`[plan-harness] bundle=${bundleFile} version=dev watcher=disabled (working-copy run)`);
+    return;
+  }
   console.error(
-    `[plan-harness] bundle=${bundleFile} version=${isVersioned ? myVersion : "dev"} watcher=${intervalMs}ms`
+    `[plan-harness] bundle=${bundleFile} version=${myVersion} watcher=${intervalMs}ms`
   );
   const timer = setInterval(() => {
     try {
@@ -33388,7 +33401,6 @@ function startStalenessWatcher() {
       exitForRespawn("bundle file missing");
       return;
     }
-    if (!isVersioned) return;
     try {
       for (const entry of readdirSync(pluginRoot)) {
         if (!/^\d+\.\d+\.\d+$/.test(entry)) continue;
