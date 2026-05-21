@@ -41,6 +41,58 @@ const PALETTE_LOCKED_VALUES = {
 };
 
 const SHARED_LINK_LABELS = ['Context', 'Glossary', 'ADR'];
+const DIAGRAM_REQUIRED_DOCS = new Set(['design', 'state-machine']);
+
+function nodeText(node) {
+  return String(node?.text || '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function slugify(text) {
+  return String(text)
+    .toLowerCase()
+    .replace(/\s+/g, '-')
+    .replace(/[^a-z0-9-]/g, '')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '') || 'section';
+}
+
+function collectHeadings(root) {
+  const seen = new Map();
+  const scope = root.querySelector('main > section') || root.querySelector('main') || root;
+  return scope.querySelectorAll('h2, h3').map((heading) => {
+    const label = nodeText(heading);
+    const explicitId = heading.getAttribute('id');
+    const base = slugify(label);
+    const count = (seen.get(base) || 0) + 1;
+    seen.set(base, count);
+    return {
+      id: explicitId || (count === 1 ? base : `${base}-${count}`),
+      label,
+    };
+  }).filter(h => h.label);
+}
+
+function hasSvgOrMermaid(root) {
+  return root.querySelectorAll('svg').length > 0 || root.querySelectorAll('pre.mermaid, .mermaid').length > 0;
+}
+
+function docMentionsUx(root, metaJson) {
+  if (Array.isArray(metaJson?.uxMockups) && metaJson.uxMockups.length > 0) return true;
+  if (Array.isArray(metaJson?.userFlows) && metaJson.userFlows.length > 0) return true;
+  const scope = root.querySelector('main > section') || root.querySelector('main') || root;
+  const text = nodeText(scope).toLowerCase();
+  return /\b(ux|ui|user interface|screen|modal|form|mockup|wireframe|user flow|screen flow|journey)\b/.test(text);
+}
+
+function hasVisualNear(root, words) {
+  const visualNodes = root.querySelectorAll('svg, pre.mermaid, .mermaid, .diagram-box');
+  return visualNodes.some((node) => {
+    const text = nodeText(node.parentNode || node).toLowerCase();
+    return words.some(word => text.includes(word));
+  });
+}
 
 /**
  * Lint a single HTML document.
@@ -216,6 +268,45 @@ export function lintHtml(html, ctx = {}) {
   }
 
   // ---- L3: meta embed + link hygiene + shared link bar ------------------
+
+  if (!skip.has('L3-section-nav')) {
+    const headings = collectHeadings(root);
+    const navLinks = root.querySelectorAll('nav.toc .sections a[href^="#"]');
+    if (headings.length > 0 && navLinks.length === 0) {
+      errors.push({ rule: 'L3-section-nav', severity: 'error',
+        message: '<nav.toc .sections> has no section links, but the document has headings' });
+    } else if (navLinks.length > 0) {
+      const navTargets = navLinks.map(a => (a.getAttribute('href') || '').replace(/^#/, ''));
+      const headingIds = headings.map(h => h.id);
+      const missing = headingIds.filter(id => !navTargets.includes(id));
+      const stale = navTargets.filter(id => !headingIds.includes(id));
+      if (missing.length || stale.length) {
+        errors.push({ rule: 'L3-section-nav', severity: 'error',
+          message: `Section nav is stale — missing heading ids: [${missing.join(', ') || 'none'}], stale links: [${stale.join(', ') || 'none'}]` });
+      }
+    }
+  }
+
+  if (!skip.has('L3-diagrams') && DIAGRAM_REQUIRED_DOCS.has(ctx.docName)) {
+    if (!hasSvgOrMermaid(root)) {
+      errors.push({ rule: 'L3-diagrams', severity: 'error',
+        message: `${ctx.docName}.html must include a first-class diagram: inline <svg> preferred, <pre class="mermaid"> accepted, table-only is not enough` });
+    } else if (root.querySelectorAll('svg').length === 0) {
+      warnings.push({ rule: 'L3-diagrams', severity: 'warning',
+        message: `${ctx.docName}.html uses Mermaid only — SVG is preferred; tables are fallback only` });
+    }
+  }
+
+  if (!skip.has('L3-ux-visuals') && ctx.docName === 'design' && docMentionsUx(root, ctx.metaJson)) {
+    if (!hasVisualNear(root, ['mockup', 'wireframe', 'screen'])) {
+      errors.push({ rule: 'L3-ux-visuals', severity: 'error',
+        message: 'Design doc mentions UX/UI but has no first-class mockup/wireframe/screen visual' });
+    }
+    if (!hasVisualNear(root, ['flow', 'journey', 'screen flow', 'user flow'])) {
+      errors.push({ rule: 'L3-ux-visuals', severity: 'error',
+        message: 'Design doc mentions UX/UI but has no first-class user-flow visual' });
+    }
+  }
 
   if (!skip.has('L3-meta-embed')) {
     const metaTag = root.querySelector('script#meta');

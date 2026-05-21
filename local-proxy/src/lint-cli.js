@@ -12,7 +12,7 @@
 //   1 — one or more errors (or warnings under --warn-as-error)
 //   2 — usage error
 
-import { resolve, sep, dirname } from 'node:path';
+import { basename, resolve, sep, dirname } from 'node:path';
 import { readdir, stat } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { lintFile, formatReport } from './html-lint.js';
@@ -86,14 +86,13 @@ let totalWarnings = 0;
 let filesWithFindings = 0;
 
 function lintCtxFor(absPath) {
-  // Shared assets under plan-harness/_shared/ legitimately lack the scenario
-  // doc chrome (sidebar group, active link). Skip those rules to keep CI green.
+  const docName = basename(absPath).replace(/\.html?$/i, '');
   const parts = absPath.split(sep);
   const phIdx = parts.indexOf('plan-harness');
   if (phIdx >= 0 && parts[phIdx + 1] === '_shared') {
-    return { skipRules: ['L1-docgroup', 'L1-active'] };
+    return { docName, skipRules: ['L1-docgroup', 'L1-active'] };
   }
-  return {};
+  return { docName };
 }
 
 for (const p of targets) {
