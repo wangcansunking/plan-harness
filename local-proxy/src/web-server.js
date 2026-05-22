@@ -189,10 +189,14 @@ async function handleRequest(req, res) {
   const pathname = parsedUrl.pathname;
 
   // ---- Password protection gate ----
-  // Loopback bypass: if the request came from the host machine itself, no auth
-  // is needed — the protection is only meaningful when the dashboard is shared
-  // externally via a tunnel. This keeps the local UX frictionless.
-  const fromLoopback = auth.isLoopback(req.socket?.remoteAddress);
+  // Loopback bypass: if the request came from the host machine itself AND
+  // wasn't forwarded by a tunnel/proxy, no auth is needed — local UX stays
+  // frictionless. `auth.isLocalRequest` checks BOTH the socket peer and the
+  // absence of proxy headers (X-Forwarded-*, Forwarded, X-Real-IP, ...) so
+  // that devtunnel — which proxies external visitors through localhost:3847
+  // and shows up at the TCP layer as 127.0.0.1 — doesn't slip through the
+  // gate. Pass --strict-host to plan_share to disable loopback bypass entirely.
+  const fromLoopback = auth.isLocalRequest(req);
 
   // The login POST is the sole entry point into authentication and must be
   // reachable regardless of loopback status so the form on the login page

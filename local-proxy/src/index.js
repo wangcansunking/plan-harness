@@ -195,6 +195,11 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
             description:
               "Optional override for protected mode. If omitted, the plugin generates a secure random password and prints it in the response.",
           },
+          strictHost: {
+            type: "boolean",
+            description:
+              "When true, the host must also enter the password — no loopback bypass. Default false (host bypass on direct localhost access). The proxy-header check in protected mode already blocks tunnel visitors from inheriting the bypass; strictHost is belt-and-suspenders.",
+          },
         },
         required: ["workspaceRoot", "mode"],
       },
@@ -512,6 +517,10 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           try {
             const webServerModule = await import("./web-server.js");
             protectedPassword = webServerModule.enablePasswordProtection(args.password);
+            // Always import auth module to set strict-host flag (true if the
+            // caller asked for it, otherwise false to clear any previous state).
+            const authModule = await import("./auth.js");
+            authModule.setStrictHost(!!args.strictHost);
           } catch (err) {
             return textResult(`Cannot enable password protection: ${err.message}`);
           }
@@ -520,6 +529,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           try {
             const webServerModule = await import("./web-server.js");
             webServerModule.disablePasswordProtection();
+            const authModule = await import("./auth.js");
+            authModule.setStrictHost(false);
           } catch { /* ignore */ }
         }
 

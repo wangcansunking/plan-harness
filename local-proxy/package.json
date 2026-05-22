@@ -18,7 +18,8 @@
     "validate:meta": "node src/validate-cli.js",
     "test:lint": "node __tests__/html-lint.test.mjs",
     "test:validate": "node __tests__/meta-validate.test.mjs",
-    "test": "npm run test:lint && npm run test:validate && npm run smoke && npm run lint:html",
+    "test:auth": "node __tests__/auth.test.mjs",
+    "test": "npm run test:lint && npm run test:validate && npm run test:auth && npm run smoke && npm run lint:html",
     "prepare-release": "npm install --no-fund --no-audit && npm run build && npm run smoke"
   },
   "devDependencies": {
