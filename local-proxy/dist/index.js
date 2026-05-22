@@ -9438,6 +9438,23 @@ var init_base = __esm({
 });
 
 // src/auth.js
+var auth_exports = {};
+__export(auth_exports, {
+  checkRate: () => checkRate,
+  createSession: () => createSession,
+  disable: () => disable,
+  enable: () => enable,
+  generatePassword: () => generatePassword,
+  isEnabled: () => isEnabled,
+  isLocalRequest: () => isLocalRequest,
+  isLoopback: () => isLoopback,
+  isStrictHost: () => isStrictHost,
+  recordAttempt: () => recordAttempt,
+  revokeSession: () => revokeSession,
+  setStrictHost: () => setStrictHost,
+  verifyCookie: () => verifyCookie,
+  verifyPassword: () => verifyPassword
+});
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 function enable(customPassword) {
   password = customPassword || generatePassword();
@@ -9531,6 +9548,9 @@ function verifyCookie(cookieValue) {
   s.expiresAt = Date.now() + SESSION_TTL_MS;
   return { sid, name: s.name };
 }
+function revokeSession(sid) {
+  sessions.delete(sid);
+}
 function sanitizeName(raw) {
   const trimmed = String(raw || "").trim().replace(/[\r\n\t]/g, " ").slice(0, MAX_NAME_LEN);
   return trimmed || "Anonymous";
@@ -9554,7 +9574,22 @@ function isLoopback(addr) {
   if (!addr) return false;
   return addr === "127.0.0.1" || addr === "::1" || addr === "::ffff:127.0.0.1";
 }
-var SESSION_TTL_MS, CLEANUP_INTERVAL_MS, ATTEMPT_RESET_MS, MAX_FREE_ATTEMPTS, BACKOFF_BASE_MS, BACKOFF_MAX_MS, MAX_NAME_LEN, PASSWORD_ALPHA, PASSWORD_LEN, password, hmacKey, sessions, loginAttempts, cleanupTimer;
+function setStrictHost(value) {
+  strictHost = !!value;
+}
+function isStrictHost() {
+  return strictHost;
+}
+function isLocalRequest(req) {
+  if (strictHost) return false;
+  if (!isLoopback(req?.socket?.remoteAddress)) return false;
+  const headers = req?.headers || {};
+  for (const h of PROXY_HEADERS) {
+    if (headers[h] !== void 0) return false;
+  }
+  return true;
+}
+var SESSION_TTL_MS, CLEANUP_INTERVAL_MS, ATTEMPT_RESET_MS, MAX_FREE_ATTEMPTS, BACKOFF_BASE_MS, BACKOFF_MAX_MS, MAX_NAME_LEN, PASSWORD_ALPHA, PASSWORD_LEN, password, hmacKey, sessions, loginAttempts, cleanupTimer, PROXY_HEADERS, strictHost;
 var init_auth = __esm({
   "src/auth.js"() {
     SESSION_TTL_MS = 2 * 60 * 60 * 1e3;
@@ -9571,6 +9606,22 @@ var init_auth = __esm({
     sessions = /* @__PURE__ */ new Map();
     loginAttempts = /* @__PURE__ */ new Map();
     cleanupTimer = null;
+    PROXY_HEADERS = [
+      "x-forwarded-for",
+      "x-forwarded-host",
+      "x-forwarded-proto",
+      "x-forwarded-port",
+      "x-real-ip",
+      "forwarded",
+      // RFC 7239
+      "x-tunnel-skip-csp-headers",
+      // devtunnel-specific
+      "x-ms-tunnel-client-name",
+      // dev tunnels MS-prefixed
+      "x-azure-fdid"
+      // Azure Front Door
+    ];
+    strictHost = false;
   }
 });
 
@@ -17121,7 +17172,7 @@ function isPasswordProtected() {
 async function handleRequest(req, res) {
   const parsedUrl = new URL2(req.url, `http://${req.headers.host || "localhost"}`);
   const pathname = parsedUrl.pathname;
-  const fromLoopback = isLoopback(req.socket?.remoteAddress);
+  const fromLoopback = isLocalRequest(req);
   if (isEnabled() && pathname === "/_auth/login" && req.method === "POST") {
     return handleLogin(req, res);
   }
@@ -32274,7 +32325,7 @@ var StdioServerTransport = class {
 };
 
 // src/index.js
-import { statSync, readdirSync } from "node:fs";
+import { statSync } from "node:fs";
 import { fileURLToPath as fileURLToPath3 } from "node:url";
 import { dirname as dirname3, basename as basename3 } from "node:path";
 
@@ -32844,6 +32895,10 @@ server2.setRequestHandler(ListToolsRequestSchema, async () => ({
           password: {
             type: "string",
             description: "Optional override for protected mode. If omitted, the plugin generates a secure random password and prints it in the response."
+          },
+          strictHost: {
+            type: "boolean",
+            description: "When true, the host must also enter the password \u2014 no loopback bypass. Default false (host bypass on direct localhost access). The proxy-header check in protected mode already blocks tunnel visitors from inheriting the bypass; strictHost is belt-and-suspenders."
           }
         },
         required: ["workspaceRoot", "mode"]
@@ -33112,6 +33167,8 @@ ${ctx.structure.csprojFiles.map((f) => `  ${f}`).join("\n")}` : ""
           try {
             const webServerModule = await Promise.resolve().then(() => (init_web_server(), web_server_exports));
             protectedPassword = webServerModule.enablePasswordProtection(args.password);
+            const authModule = await Promise.resolve().then(() => (init_auth(), auth_exports));
+            authModule.setStrictHost(!!args.strictHost);
           } catch (err) {
             return textResult(`Cannot enable password protection: ${err.message}`);
           }
@@ -33119,6 +33176,8 @@ ${ctx.structure.csprojFiles.map((f) => `  ${f}`).join("\n")}` : ""
           try {
             const webServerModule = await Promise.resolve().then(() => (init_web_server(), web_server_exports));
             webServerModule.disablePasswordProtection();
+            const authModule = await Promise.resolve().then(() => (init_auth(), auth_exports));
+            authModule.setStrictHost(false);
           } catch {
           }
         }
@@ -33387,7 +33446,6 @@ function startStalenessWatcher() {
   const thisDir = dirname3(bundleFile);
   const localProxyDir = dirname3(thisDir);
   const maybeVersionDir = dirname3(localProxyDir);
-  const pluginRoot = dirname3(maybeVersionDir);
   const myVersion = basename3(maybeVersionDir);
   const isVersioned = /^\d+\.\d+\.\d+$/.test(myVersion);
   if (!isVersioned) {
@@ -33418,28 +33476,8 @@ function startStalenessWatcher() {
       exitForRespawn(`bundle file missing for ${consecutiveMisses} consecutive polls`);
       return;
     }
-    try {
-      for (const entry of readdirSync(pluginRoot)) {
-        if (!/^\d+\.\d+\.\d+$/.test(entry)) continue;
-        if (semverGt(entry, myVersion)) {
-          clearInterval(timer);
-          exitForRespawn(`upgrade detected: ${myVersion} \u2192 ${entry}`);
-          return;
-        }
-      }
-    } catch {
-    }
   }, intervalMs);
   timer.unref?.();
-}
-function semverGt(a, b) {
-  const pa = a.split(".").map(Number);
-  const pb = b.split(".").map(Number);
-  for (let i = 0; i < 3; i++) {
-    if (pa[i] > pb[i]) return true;
-    if (pa[i] < pb[i]) return false;
-  }
-  return false;
 }
 function exitForRespawn(reason) {
   console.error(`[plan-harness] exiting for respawn \u2014 ${reason}`);

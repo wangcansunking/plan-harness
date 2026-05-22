@@ -16,7 +16,7 @@ import {
   ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 
-import { statSync, readdirSync } from "node:fs";
+import { statSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, basename } from "node:path";
 
@@ -194,6 +194,11 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
             type: "string",
             description:
               "Optional override for protected mode. If omitted, the plugin generates a secure random password and prints it in the response.",
+          },
+          strictHost: {
+            type: "boolean",
+            description:
+              "When true, the host must also enter the password — no loopback bypass. Default false (host bypass on direct localhost access). The proxy-header check in protected mode already blocks tunnel visitors from inheriting the bypass; strictHost is belt-and-suspenders.",
           },
         },
         required: ["workspaceRoot", "mode"],
@@ -512,6 +517,10 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           try {
             const webServerModule = await import("./web-server.js");
             protectedPassword = webServerModule.enablePasswordProtection(args.password);
+            // Always import auth module to set strict-host flag (true if the
+            // caller asked for it, otherwise false to clear any previous state).
+            const authModule = await import("./auth.js");
+            authModule.setStrictHost(!!args.strictHost);
           } catch (err) {
             return textResult(`Cannot enable password protection: ${err.message}`);
           }
@@ -520,6 +529,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           try {
             const webServerModule = await import("./web-server.js");
             webServerModule.disablePasswordProtection();
+            const authModule = await import("./auth.js");
+            authModule.setStrictHost(false);
           } catch { /* ignore */ }
         }
 
@@ -855,13 +866,12 @@ function startStalenessWatcher() {
     return;
   }
 
-  // <cache>/<mkt>/plan-harness/<version>/local-proxy/src/index.js
-  // or bundled: .../<version>/local-proxy/dist/index.js
-  // Walk up to find a dir whose basename is a semver — that's "my version".
+  // <cache>/<mkt>/plan-harness/<version>/local-proxy/dist/index.js — walk up
+  // to find a dir whose basename is a semver. That's "my version"; absence of
+  // one means we're running from a working copy.
   const thisDir = dirname(bundleFile);
   const localProxyDir = dirname(thisDir);
   const maybeVersionDir = dirname(localProxyDir);
-  const pluginRoot = dirname(maybeVersionDir);
   const myVersion = basename(maybeVersionDir);
   const isVersioned = /^\d+\.\d+\.\d+$/.test(myVersion);
 
@@ -886,7 +896,19 @@ function startStalenessWatcher() {
   let consecutiveMisses = 0;
 
   const timer = setInterval(() => {
-    // (a) in-place mtime drift
+    // In-place mtime drift only. We deliberately do NOT scan for newer
+    // sibling version dirs anymore — that was over-eager. When multiple
+    // versions coexist in the cache, the running process would self-exit
+    // to "let Claude Code respawn into the newer version" — but Claude
+    // Code may keep spawning the same older version (marketplace pin,
+    // in-use lock, resolution timing), and we end up in a respawn loop
+    // that manifests as "MCP server keeps disconnecting".
+    //
+    // The mtime check below already covers the only case that needs
+    // automatic respawn: an in-place bundle rewrite. For full version
+    // upgrades, Claude Code itself spawns the new MCP process when the
+    // user runs `claude plugin update`; the old process is torn down by
+    // the harness, not by self-exit.
     try {
       const m = statSync(bundleFile).mtimeMs;
       consecutiveMisses = 0;
@@ -905,32 +927,8 @@ function startStalenessWatcher() {
       exitForRespawn(`bundle file missing for ${consecutiveMisses} consecutive polls`);
       return;
     }
-
-    // (b) newer sibling version dir appeared
-    try {
-      for (const entry of readdirSync(pluginRoot)) {
-        if (!/^\d+\.\d+\.\d+$/.test(entry)) continue;
-        if (semverGt(entry, myVersion)) {
-          clearInterval(timer);
-          exitForRespawn(`upgrade detected: ${myVersion} → ${entry}`);
-          return;
-        }
-      }
-    } catch {
-      // pluginRoot unreadable — ignore, try next tick
-    }
   }, intervalMs);
   timer.unref?.();
-}
-
-function semverGt(a, b) {
-  const pa = a.split(".").map(Number);
-  const pb = b.split(".").map(Number);
-  for (let i = 0; i < 3; i++) {
-    if (pa[i] > pb[i]) return true;
-    if (pa[i] < pb[i]) return false;
-  }
-  return false;
 }
 
 function exitForRespawn(reason) {

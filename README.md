@@ -142,6 +142,7 @@ Each context `.md` uses frontmatter (`name`, `description`, `tags`, `agents`) so
 | `/plan-full` | Orchestrate the whole workflow with checkpoints |
 | `/plan-sync` | Hash-diff cascade — regenerate only the downstream fields actually affected by an upstream edit |
 | `/plan-edit` | Local edit of one doc's fields via a hint (no cascade) |
+| `/plan-lint` | Re-runs html-lint + meta-validate on an existing doc and auto-fixes drift; standalone version of Phase C's gate retry |
 | `/plan-test` | Run `test-spec.html` scenarios end-to-end via Playwright MCP |
 | `/plan-share` | Share plan docs via devtunnel (public / private / password) |
 | `/plan-review` | Section-by-section review of one document |

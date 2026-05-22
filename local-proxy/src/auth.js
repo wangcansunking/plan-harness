@@ -177,3 +177,49 @@ export function isLoopback(addr) {
   if (!addr) return false;
   return addr === '127.0.0.1' || addr === '::1' || addr === '::ffff:127.0.0.1';
 }
+
+// Headers added by reverse proxies / tunnels. If ANY of these is present on a
+// request, it was forwarded by something — even if the TCP peer is 127.0.0.1
+// (which is the case for devtunnel: `devtunnel host -p 3847` runs on the host
+// machine and proxies external visitors via localhost). Treat such requests as
+// remote regardless of socket peer.
+const PROXY_HEADERS = [
+  'x-forwarded-for',
+  'x-forwarded-host',
+  'x-forwarded-proto',
+  'x-forwarded-port',
+  'x-real-ip',
+  'forwarded',                  // RFC 7239
+  'x-tunnel-skip-csp-headers',  // devtunnel-specific
+  'x-ms-tunnel-client-name',    // dev tunnels MS-prefixed
+  'x-azure-fdid',               // Azure Front Door
+];
+
+// Strict-host mode — when true, NEVER bypass auth on loopback either. Set by
+// plan_share when the host wants belt-and-suspenders protection (host must
+// also enter the password locally).
+let strictHost = false;
+export function setStrictHost(value) { strictHost = !!value; }
+export function isStrictHost() { return strictHost; }
+
+/**
+ * True when a request is a genuine host-machine access (NOT proxied).
+ *
+ * Returns false in two cases:
+ *   1. Socket peer is not loopback (normal remote access).
+ *   2. Socket peer IS loopback, but the request carries proxy/tunnel
+ *      forwarding headers — devtunnel and friends always set these. Without
+ *      this check, anyone with the tunnel URL would receive the same loopback
+ *      bypass the host gets, and the password gate becomes pointless.
+ *
+ * When strict-host mode is on (`setStrictHost(true)`), always returns false.
+ */
+export function isLocalRequest(req) {
+  if (strictHost) return false;
+  if (!isLoopback(req?.socket?.remoteAddress)) return false;
+  const headers = req?.headers || {};
+  for (const h of PROXY_HEADERS) {
+    if (headers[h] !== undefined) return false;
+  }
+  return true;
+}
