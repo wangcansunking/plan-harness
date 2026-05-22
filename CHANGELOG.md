@@ -23,6 +23,14 @@ Version fields in `.claude-plugin/plugin.json`, `.claude-plugin/marketplace.json
 
 
 
+
+## [1.8.1] — 2026-05-22
+
+### Fixed
+- fix(auth): SameSite=Strict drops session cookie on post-login redirect — switch to Lax
+
+([#21](https://github.com/wangcansunking/plan-harness/pull/21))
+
 ## [1.8.0] — 2026-05-22
 
 ### Added
