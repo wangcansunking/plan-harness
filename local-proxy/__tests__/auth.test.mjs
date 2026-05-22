@@ -83,5 +83,41 @@ it('isLocalRequest returns false in strict-host mode even for direct loopback', 
   assert.equal(isStrictHost(), false);
 });
 
+// ---- Cookie roundtrip --------------------------------------------------------
+
+import { enable as authEnable, disable as authDisable, createSession, verifyCookie } from '../src/auth.js';
+
+it('cookie roundtrip: createSession → verifyCookie returns the session', () => {
+  authEnable('test-password-aaaa');
+  const { sid, cookieValue, name } = createSession('Alice');
+  assert.equal(name, 'Alice');
+  assert.ok(cookieValue.includes('.'), 'cookie value should contain sid.signature separator');
+  const session = verifyCookie(cookieValue);
+  assert.ok(session, 'verifyCookie must return the session for a freshly-created cookie');
+  assert.equal(session.sid, sid);
+  assert.equal(session.name, 'Alice');
+  authDisable();
+});
+
+it('verifyCookie rejects a tampered signature', () => {
+  authEnable('test-password-bbbb');
+  const { cookieValue } = createSession('Bob');
+  const tampered = cookieValue.slice(0, -1) + (cookieValue.slice(-1) === 'a' ? 'b' : 'a');
+  assert.equal(verifyCookie(tampered), null, 'flipping one signature byte must invalidate');
+  authDisable();
+});
+
+it('verifyCookie rejects when auth was re-enabled (hmacKey churn invalidates old cookies)', () => {
+  // Simulates exactly the symptom users hit when the MCP server restarts:
+  // their old cookie was signed with the previous hmacKey; the new key won't
+  // verify it. After this PR the gate logs a diagnostic when this happens,
+  // but the expected behaviour stays: the cookie is rejected.
+  authEnable('test-password-cccc');
+  const { cookieValue } = createSession('Carol');
+  authEnable('test-password-cccc');                   // re-enable: fresh hmacKey, sessions cleared
+  assert.equal(verifyCookie(cookieValue), null, 'old cookie must NOT verify against the new key');
+  authDisable();
+});
+
 process.stdout.write(`\n${passed} passed, ${failed} failed\n`);
 if (failed > 0) process.exit(1);

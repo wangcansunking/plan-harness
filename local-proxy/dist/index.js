@@ -17183,6 +17183,11 @@ async function handleRequest(req, res) {
     const cookieValue = parseCookie(req.headers.cookie || "", COOKIE_NAME);
     const session = verifyCookie(cookieValue);
     if (!session) {
+      if (cookieValue) {
+        console.error(
+          `[plan-harness] auth: cookie present but verifyCookie rejected it (sid prefix: ${cookieValue.slice(0, 8)}\u2026) \u2014 likely server-side session cleared`
+        );
+      }
       return serveLoginPage(req, res);
     }
     req.user = session;
@@ -18256,7 +18261,7 @@ async function handleLogin(req, res) {
     `${COOKIE_NAME}=${cookieValue}`,
     "Path=/",
     "HttpOnly",
-    "SameSite=Strict",
+    "SameSite=Lax",
     "Secure",
     "Max-Age=7200"
   ].join("; ");

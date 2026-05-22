@@ -215,7 +215,16 @@ async function handleRequest(req, res) {
     const session = auth.verifyCookie(cookieValue);
 
     if (!session) {
-      // Not authenticated — serve login page.
+      // Diagnostic: distinguish "no cookie at all" (first visit / browser
+      // dropped the cookie) from "cookie present but rejected" (server-side
+      // HMAC key churn, session expired/evicted, tampered value). The first
+      // case is normal; the second is the symptom of a stale-key bug, so
+      // surface it loudly to make future regressions debuggable.
+      if (cookieValue) {
+        console.error(
+          `[plan-harness] auth: cookie present but verifyCookie rejected it (sid prefix: ${cookieValue.slice(0, 8)}…) — likely server-side session cleared`,
+        );
+      }
       return serveLoginPage(req, res);
     }
 
@@ -1553,13 +1562,23 @@ async function handleLogin(req, res) {
   auth.recordAttempt(clientIp, true);
   const { cookieValue } = auth.createSession(submittedName);
 
-  // Cookie is sent only to same site, only to the server, only over https.
-  // Max-Age is a browser hint — true expiry is enforced server-side in auth.js.
+  // `SameSite=Lax` is deliberate. `Strict` causes a well-known regression here:
+  // the browser may NOT include a newly-set Strict cookie on the immediate 302
+  // follow that the POST→/_auth/login response triggers, so the user lands at
+  // `/` cookie-less, the gate bounces them back to the login page, and they
+  // see "every visit asks for the password again". Lax allows top-level
+  // navigations (which a 302 follow is) while still blocking embedded
+  // cross-site requests like iframes/images. This is the standard choice for
+  // session cookies and what modern browsers default to when SameSite is
+  // omitted.
+  // `Secure` keeps the cookie HTTPS-only (devtunnel terminates TLS at the edge
+  // so browsers see HTTPS). Max-Age is a hint — true expiry is enforced
+  // server-side in auth.js.
   const cookie = [
     `${COOKIE_NAME}=${cookieValue}`,
     'Path=/',
     'HttpOnly',
-    'SameSite=Strict',
+    'SameSite=Lax',
     'Secure',
     'Max-Age=7200',
   ].join('; ');
