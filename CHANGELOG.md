@@ -22,6 +22,14 @@ Version fields in `.claude-plugin/plugin.json`, `.claude-plugin/marketplace.json
 
 
 
+
+## [1.8.0] — 2026-05-22
+
+### Added
+- v1.7.1: plan_share security fix + respawn-loop fix + /plan-lint skill
+
+([#20](https://github.com/wangcansunking/plan-harness/pull/20))
+
 ## [1.7.0] — 2026-05-21
 
 ### Added
