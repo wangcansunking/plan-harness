@@ -138,6 +138,7 @@ Each context `.md` uses frontmatter (`name`, `description`, `tags`, `agents`) so
 |---|---|
 | `/plan-context` | Create, list, edit, import context files |
 | `/plan-init` | Multi-select contexts + create / select a scenario; auto-starts dashboard server |
+| `/plan-start` | Start (or reuse) the local dashboard and surface the URL; auto-bumps the port if 3847 is busy and reports the new one |
 | `/plan-gen` | Unified generator — pick any subset of doc types; runs Phase A draft → Phase B grill → Phase C render |
 | `/plan-full` | Orchestrate the whole workflow with checkpoints |
 | `/plan-sync` | Hash-diff cascade — regenerate only the downstream fields actually affected by an upstream edit |
