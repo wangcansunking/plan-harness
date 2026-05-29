@@ -296,3 +296,4 @@ Three-tier loading (see `docs/context-design.md`):
 | `/plan-gen implementation` | `manifest.json` + `design.html` |
 | `/plan-review` | Any generated plan document |
 | `/plan-full` | Calls `/plan-init` as its first step |
+| `/plan-start` | Dashboard-only subset — use when init isn't needed and the user just wants the server back up |

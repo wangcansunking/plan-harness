@@ -138,6 +138,7 @@ devxapps-project.md          （项目：构建、约定、架构）
 |---|---|
 | `/plan-context` | 创建、列出、编辑、导入 context 文件 |
 | `/plan-init` | 多选 context + 创建/选择 scenario；自动起 dashboard server |
+| `/plan-start` | 启动（或复用）本地 dashboard 并把 URL 报给用户；3847 被占就自动 +1 直到空闲端口，并明确告诉用户实际端口 |
 | `/plan-gen` | 统一生成器 — 任意挑选文档类型子集；跑 Phase A draft → Phase B grill → Phase C render |
 | `/plan-full` | 带检查点编排整个工作流 |
 | `/plan-sync` | Hash-diff 级联 — 只重生被上游变更实际影响的字段 |
