@@ -305,10 +305,27 @@ export function lintHtml(html, ctx = {}) {
   if (!skip.has('L3-diagrams') && DIAGRAM_REQUIRED_DOCS.has(ctx.docName)) {
     if (!hasSvgOrMermaid(root)) {
       errors.push({ rule: 'L3-diagrams', severity: 'error',
-        message: `${ctx.docName}.html must include a first-class diagram: inline <svg> preferred, <pre class="mermaid"> accepted, table-only is not enough` });
-    } else if (root.querySelectorAll('svg').length === 0) {
-      warnings.push({ rule: 'L3-diagrams', severity: 'warning',
-        message: `${ctx.docName}.html uses Mermaid only — SVG is preferred; tables are fallback only` });
+        message: `${ctx.docName}.html must include a first-class diagram: inline <svg> is the default, <pre class="mermaid"> is a fallback only` });
+    }
+  }
+
+  // L3-prefer-svg — broad nudge: any doc that ships Mermaid blocks without a
+  // sibling <svg> in <main> gets a warning. SVG-first is the project default
+  // (see prompts/_html-base.md §Diagram + prompts/writer-prompt.md §2). Mermaid
+  // stays usable as the escape hatch for very dense graphs, but the warning
+  // surfaces the conversion opportunity every render so docs gravitate toward
+  // SVG over time. Warning, not error — we don't want to fail every legitimate
+  // Mermaid-only state machine; we want a visible nudge.
+  if (!skip.has('L3-prefer-svg')) {
+    const mainScope = root.querySelector('main') || root;
+    const mermaidCount = mainScope.querySelectorAll('pre.mermaid, .mermaid').length;
+    const svgCount = mainScope.querySelectorAll('svg').length;
+    if (mermaidCount > 0 && svgCount === 0) {
+      warnings.push({ rule: 'L3-prefer-svg', severity: 'warning',
+        message: `${ctx.docName || 'doc'}.html uses ${mermaidCount} Mermaid block(s) and no inline <svg> — SVG is the project default for diagrams (see prompts/_html-base.md §Diagram). Convert when feasible.` });
+    } else if (mermaidCount > 0 && svgCount > 0 && mermaidCount > svgCount) {
+      warnings.push({ rule: 'L3-prefer-svg', severity: 'warning',
+        message: `${ctx.docName || 'doc'}.html has more Mermaid blocks (${mermaidCount}) than inline <svg> (${svgCount}) — prefer SVG for new diagrams.` });
     }
   }
 

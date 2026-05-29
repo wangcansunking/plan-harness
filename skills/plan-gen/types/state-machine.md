@@ -72,7 +72,7 @@ Detailed lifecycle diagrams + ALL corner cases. The "source of truth" for tester
 
 ## Render rules (Phase C)
 
-- §1 Per-machine: `<pre class="mermaid">stateDiagram-v2 ...</pre>` is the source of truth and what gets rendered in the browser. Inline SVG is **aspirational but not required** — there is no mermaid-to-SVG converter shipped in Phase C, and writers without one default to mermaid. Lint enforces "first-class diagram present"; it does NOT enforce SVG-only for state machines.
+- §1 Per-machine: **inline `<svg>` is the default render** — hand-authored, following `prompts/styles/architecture-diagram-svg.md` for arrow z-order, stacking gap, legend, and the component-type colour map. SVG gives pixel-level control over labelling and prints to PDF cleanly. `<pre class="mermaid">stateDiagram-v2 ...</pre>` remains an acceptable **fallback** for highly complex machines (≥6 states with crossing edges, or multi-machine sequences too dense to hand-draw at a useful size). Lint raises a `L3-prefer-svg` warning whenever a state-machine doc carries Mermaid blocks without a sibling SVG, as a nudge to convert next pass.
 - §2 Transitions as a table (from · to · trigger · guard).
 - §3 **Per-story flows — REQUIRED.** One subsection per `perStoryFlows[]` entry (h3: "US1 — First-run /plan-init"). Each renders: (a) the state-path mermaid with the story's path highlighted (or a sequence diagram if multi-machine), (b) `uiMockup` inline SVG when present. Stories without UI still get the state-path diagram. Lint enforces: `perStoryFlows.length === product.userStories.length` AND every `perStoryFlows[].diagram` produces a first-class visual.
 - §4 Corner cases as a table (id · scenario · expected · machine).

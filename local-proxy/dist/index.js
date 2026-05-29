@@ -16872,13 +16872,25 @@ function lintHtml(html, ctx = {}) {
       errors.push({
         rule: "L3-diagrams",
         severity: "error",
-        message: `${ctx.docName}.html must include a first-class diagram: inline <svg> preferred, <pre class="mermaid"> accepted, table-only is not enough`
+        message: `${ctx.docName}.html must include a first-class diagram: inline <svg> is the default, <pre class="mermaid"> is a fallback only`
       });
-    } else if (root.querySelectorAll("svg").length === 0) {
+    }
+  }
+  if (!skip.has("L3-prefer-svg")) {
+    const mainScope = root.querySelector("main") || root;
+    const mermaidCount = mainScope.querySelectorAll("pre.mermaid, .mermaid").length;
+    const svgCount = mainScope.querySelectorAll("svg").length;
+    if (mermaidCount > 0 && svgCount === 0) {
       warnings.push({
-        rule: "L3-diagrams",
+        rule: "L3-prefer-svg",
         severity: "warning",
-        message: `${ctx.docName}.html uses Mermaid only \u2014 SVG is preferred; tables are fallback only`
+        message: `${ctx.docName || "doc"}.html uses ${mermaidCount} Mermaid block(s) and no inline <svg> \u2014 SVG is the project default for diagrams (see prompts/_html-base.md \xA7Diagram). Convert when feasible.`
+      });
+    } else if (mermaidCount > 0 && svgCount > 0 && mermaidCount > svgCount) {
+      warnings.push({
+        rule: "L3-prefer-svg",
+        severity: "warning",
+        message: `${ctx.docName || "doc"}.html has more Mermaid blocks (${mermaidCount}) than inline <svg> (${svgCount}) \u2014 prefer SVG for new diagrams.`
       });
     }
   }

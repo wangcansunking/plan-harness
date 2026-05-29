@@ -266,6 +266,41 @@ it('fixHtml: re-embeds canonical meta bytes when external meta differs', () => {
   assert.equal(r.unfixed.filter(e => e.rule === 'L3-meta-embed').length, 0);
 });
 
+it('L3-prefer-svg warns when a doc has Mermaid but no inline SVG', () => {
+  const bad = VALID
+    .replace(/<svg aria-label="UI mockup screen">mockup<\/svg>/, '<pre class="mermaid">flowchart LR; A-->B</pre>')
+    .replace(/<svg aria-label="user-flow workflow">user flow<\/svg>/, '<pre class="mermaid">sequenceDiagram; A->>B: x</pre>');
+  const r = lintHtml(bad, { docName: 'design' });
+  assert.ok(r.warnings.some(w => w.rule === 'L3-prefer-svg'),
+    'expected L3-prefer-svg warning when only Mermaid is present');
+});
+
+it('L3-prefer-svg does NOT fire when all diagrams are SVG', () => {
+  const r = lintHtml(VALID, { docName: 'design' });
+  assert.ok(!r.warnings.some(w => w.rule === 'L3-prefer-svg'),
+    'L3-prefer-svg must NOT fire on an SVG-only doc');
+});
+
+it('L3-prefer-svg warns when Mermaid outnumbers SVG (mixed)', () => {
+  const mixed = VALID.replace(
+    /<svg aria-label="user-flow workflow">user flow<\/svg>/,
+    '<pre class="mermaid">A</pre>\n<pre class="mermaid">B</pre>',
+  );
+  const r = lintHtml(mixed, { docName: 'design' });
+  assert.ok(r.warnings.some(w => w.rule === 'L3-prefer-svg' && /more Mermaid/.test(w.message)),
+    'expected L3-prefer-svg warning on mixed docs where mermaid outnumbers svg');
+});
+
+it('L3-prefer-svg is silent when SVG matches or exceeds Mermaid count', () => {
+  const balanced = VALID.replace(
+    /<svg aria-label="user-flow workflow">user flow<\/svg>/,
+    '<svg>user flow</svg>\n<pre class="mermaid">extra</pre>',
+  );
+  const r = lintHtml(balanced, { docName: 'design' });
+  assert.ok(!r.warnings.some(w => w.rule === 'L3-prefer-svg'),
+    'L3-prefer-svg must NOT fire when svg count >= mermaid count');
+});
+
 it('fixHtml: leaves Writer-only findings as unfixed (e.g. missing mockup visuals)', () => {
   const bad = VALID
     .replace(/<svg aria-label="UI mockup screen">mockup<\/svg>/, '')

@@ -145,11 +145,11 @@ The writer is an LLM and will summarise/elide if asked to "embed the meta". Don'
 
 Writers that ignore the placeholder convention and inline the meta will be caught by lint, but with a poorer error: "hash mismatch" instead of "placeholder not replaced". The placeholder is cheaper.
 
-## Diagram / mermaid
+## Diagram (SVG-first)
 
-- Inline SVG preferred for ≤300px width single-row flows.
-- `<pre class="mermaid">{source}</pre>` for state machines and DAGs; CDN loader script appended once at end of `<body>`.
-- Wrap every diagram in `<div class="diagram">` with `background: var(--panel2)`.
+- **Inline `<svg>` is the default for every diagram type** — mockups, layouts, component DAGs, state machines, sequence flows, per-story flows. Hand-author it; follow `prompts/styles/architecture-diagram-svg.md` for arrow z-order, 40px stacking gap, legend placement, and the component-type colour map. SVG renders offline, looks consistent across browsers, prints cleanly to PDF, and gives pixel-level control over labels.
+- `<pre class="mermaid">{source}</pre>` is a **fallback only**, reserved for diagrams whose hand-SVG cost outweighs the clarity gain (rule of thumb: ≥6 states with crossing edges, ≥10 nodes in a DAG, or a sequence diagram across more than ~5 actors). When you do use Mermaid, append the CDN loader script once at the end of `<body>` — the lint will flag any other external script. Lint also raises a `L3-prefer-svg` warning whenever a doc contains `<pre class="mermaid">` without any `<svg>` sibling in `<main>`, as a nudge to convert.
+- Wrap every diagram (SVG or Mermaid) in `<div class="diagram">` with `background: var(--panel2)`. The wrapper unifies spacing and dark-mode treatment regardless of the inner format.
 
 ## Sidebar (K1 fix shape)
 

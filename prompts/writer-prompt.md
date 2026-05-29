@@ -6,7 +6,7 @@ Structure, palette, layout, link rules, and the meta-embed contract are not your
 
 > **Division of responsibility**
 > - **Code (mixin + lint)** owns the certain bits: skeleton, palette tokens, `<nav.toc>` shape, root-absolute links, header layout, the `<script id="meta">` hash, the three `_shared/` links.
-> - **You (Writer)** own the uncertain bits: which content goes where, copy, diagram choices, ordering inside `<section>`, whether to add a callout, table, or mermaid block.
+> - **You (Writer)** own the uncertain bits: which content goes where, copy, ordering inside `<section>`, whether to add a callout, table, or SVG. Diagrams default to inline SVG; Mermaid is a documented fallback for very dense graphs only.
 
 If a thing in this prompt contradicts `prompts/_html-base.md`, the mixin wins.
 
@@ -18,7 +18,7 @@ Before you write any HTML, read these files in order:
 
 1. **`prompts/_html-base.md`** — the locked HTML contract (skeleton, palette, layout, link rules, sidebar shape, meta-embed). Treat every "MUST" / "do not deviate" as binding.
 2. **`prompts/_caveman-mixin.md`** — concise-text rules. Drop articles + filler. Fragments OK. Use arrows like `X -> Y`. Tables and diagrams beat prose for anything structural.
-3. **`skills/plan-gen/types/<doc>.md`** — per-doc contract. Tells you which meta fields belong in which section, which diagrams are expected (mermaid? SVG? table?), and any per-doc rules (e.g. state-machine.html requires a mermaid stateDiagram-v2 block per entity).
+3. **`skills/plan-gen/types/<doc>.md`** — per-doc contract. Tells you which meta fields belong in which section and any per-doc rules. **Default rendering for any diagram is inline `<svg>`**; Mermaid is the documented fallback for very dense graphs only.
 4. **`prompts/styles/architecture-diagram-svg.md`** (only for `design.html` + `state-machine.html` if they emit a hand-authored SVG) — arrow z-order, 40px stacking gap, legend placement, component-type color map.
 
 ---
@@ -50,8 +50,8 @@ Open `skills/plan-gen/types/<doc>.md`. It tells you which meta fields map to whi
 | Field shape | Render as |
 |---|---|
 | Array of records with same keys | `<table>` with `<th>` row from keys |
-| State transitions / flows | `<pre class="mermaid">` block (state-machine.html requires this) |
-| Hand-authored architecture | inline `<svg>` (design.html — follow `architecture-diagram-svg.md`) |
+| Diagram of any kind (DAG, state machine, flow, sequence, mockup, layout) | **inline `<svg>` — follow `prompts/styles/architecture-diagram-svg.md` for the conventions.** SVG renders offline, looks consistent across browsers, prints to PDF cleanly, and gives the writer pixel-level control over layout, color, and labelling. Hand-author it; the `architecture-diagram-svg.md` mixin lays out the arrow z-order, 40px stacking gap, legend, and component colour map you need. |
+| Diagram so complex SVG is impractical (≥6 states with crossing edges, ≥10 nodes in a DAG, deep sequence diagram) | `<pre class="mermaid">{source}</pre>` as **fallback only**. Use this when hand-authoring SVG would burn time without adding clarity. Even then, prefer to split the diagram into smaller SVG-sized chunks before reaching for Mermaid. |
 | Single decision / risk | `<div class="callout">` with `<div class="callout-title">` |
 | Bullet list of named items | `<ul>` with `<strong>name</strong>: prose` per `<li>` |
 | Long prose | break into multiple `<p>` separated by `<h3>` if > 4 sentences |
@@ -91,7 +91,7 @@ Render-time invariants the lint will check:
 - Whether mermaid / SVG / table is the expected shape for each block
 - Anti-patterns specific to this doc (e.g. test-spec must not embed implementation code)
 
-If the type file is silent on a question, default to: table over prose, mermaid over hand-SVG, short over long.
+If the type file is silent on a question, default to: table over prose, **inline SVG over Mermaid** (Mermaid only when the diagram is too complex for a practical SVG — see the shape table above), short over long. SVG-first is non-negotiable for product mockups, design `componentDag` / `uxMockups` / `userFlows`, and `state-machine` per-story flows. Mermaid stays available as an escape hatch for very dense state machines, but it is never the recommended default for a new diagram.
 
 ---
 
