@@ -24,6 +24,14 @@ Version fields in `.claude-plugin/plugin.json`, `.claude-plugin/marketplace.json
 
 
 
+
+## [1.9.0] — 2026-05-29
+
+### Added
+- feat(lint): deterministic html-lint auto-fix in code — `lintAndFix` + `bin/lint.mjs --fix`
+
+([#22](https://github.com/wangcansunking/plan-harness/pull/22))
+
 ## [1.8.1] — 2026-05-22
 
 ### Fixed
