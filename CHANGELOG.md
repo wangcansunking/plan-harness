@@ -26,6 +26,14 @@ Version fields in `.claude-plugin/plugin.json`, `.claude-plugin/marketplace.json
 
 
 
+
+## [1.11.0] — 2026-05-29
+
+### Added
+- feat(skills): add /plan-start — dashboard-only entry point with port-bump-on-EADDRINUSE
+
+([#24](https://github.com/wangcansunking/plan-harness/pull/24))
+
 ## [1.10.0] — 2026-05-29
 
 ### Added
