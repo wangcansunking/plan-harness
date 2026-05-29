@@ -8,7 +8,7 @@
 //   node __tests__/html-lint.test.mjs
 
 import { strict as assert } from 'node:assert';
-import { lintHtml } from '../src/html-lint.js';
+import { lintHtml, fixHtml } from '../src/html-lint.js';
 
 let passed = 0;
 let failed = 0;
@@ -193,6 +193,86 @@ it('L1-active flags missing class="active" link', () => {
   const r = lintHtml(bad, { docName: 'design' });
   assert.ok(r.errors.some(e => e.rule === 'L1-active'),
     'expected L1-active error when no active link present');
+});
+
+// ---- Auto-fix ---------------------------------------------------------------
+
+it('fixHtml: returns no-op on a clean VALID fixture', () => {
+  const r = fixHtml(VALID, { docName: 'design', metaJson: { doc: 'design', schemaVersion: 2 } });
+  assert.equal(r.html, VALID, 'clean input must not be mutated');
+  assert.equal(r.fixed.length, 0);
+  assert.equal(r.unfixed.length, 0);
+});
+
+it('fixHtml: restores missing class="active" on the current doc nav link', () => {
+  const bad = VALID.replace(' class="active"', '');
+  const r = fixHtml(bad, { docName: 'design', metaJson: { doc: 'design', schemaVersion: 2 } });
+  assert.ok(r.fixed.some(f => f.includes('active')), 'expected an "active" fix description');
+  assert.ok(/<a\b[^>]+\/demo\/design\.html[^>]*class="[^"]*active[^"]*"/.test(r.html),
+    'design nav link should now carry class="active"');
+  assert.equal(r.unfixed.filter(e => e.rule === 'L1-active').length, 0,
+    'L1-active should be resolved after fix');
+});
+
+it('fixHtml: wraps stray section links in <div class="sections">', () => {
+  const bad = VALID.replace(
+    /<div class="sections">[\s\S]*?<\/div>/,
+    '<a href="#overview">Overview</a>\n  <a href="#details">Details</a>',
+  );
+  const r = fixHtml(bad, { docName: 'design', metaJson: { doc: 'design', schemaVersion: 2 } });
+  assert.ok(r.fixed.some(f => f.includes('sections')), 'expected a sections wrapper fix');
+  assert.ok(/<div class="sections">[\s\S]*<a href="#overview">/.test(r.html),
+    'section links should now sit inside .sections wrapper');
+  assert.equal(r.unfixed.filter(e => e.rule === 'L1-nav' && e.message.includes('.sections')).length, 0);
+});
+
+it('fixHtml: restores GitHub-Dark palette when drifted', () => {
+  const bad = VALID.replace('--bg: #0d1117;', '--bg: #ffffff;');
+  const r = fixHtml(bad, { docName: 'design', metaJson: { doc: 'design', schemaVersion: 2 } });
+  assert.ok(r.fixed.some(f => f.includes('palette')), 'expected palette restore');
+  assert.ok(r.html.includes('--bg: #0d1117'), '--bg must be restored to locked value');
+});
+
+it('fixHtml: strips max-width on <section>', () => {
+  const bad = VALID.replace('max-width: none', 'max-width: 1100px');
+  const r = fixHtml(bad, { docName: 'design', metaJson: { doc: 'design', schemaVersion: 2 } });
+  assert.ok(r.fixed.some(f => f.includes('max-width')), 'expected max-width strip');
+  assert.equal(r.unfixed.filter(e => e.rule === 'L2-no-maxwidth-section').length, 0);
+});
+
+it('fixHtml: swaps .crumb color from var(--muted) to var(--fg)', () => {
+  const bad = VALID.replace('.crumb { color: var(--fg)', '.crumb { color: var(--muted)');
+  const r = fixHtml(bad, { docName: 'design', metaJson: { doc: 'design', schemaVersion: 2 } });
+  assert.ok(r.fixed.some(f => f.includes('crumb')), 'expected .crumb color fix');
+  assert.equal(r.unfixed.filter(e => e.rule === 'L2-crumb-color').length, 0);
+});
+
+it('fixHtml: re-injects the 3 canonical shared-asset links when count is wrong', () => {
+  const bad = VALID.replace(
+    /<div class="links">[\s\S]*?<\/div>/,
+    '<div class="links"><a href="/_shared/glossary/glossary.html">Glossary</a></div>',
+  );
+  const r = fixHtml(bad, { docName: 'design', metaJson: { doc: 'design', schemaVersion: 2 } });
+  assert.ok(r.fixed.some(f => f.includes('shared-asset')), 'expected shared-link fix');
+  assert.ok((r.html.match(/<header\b[\s\S]*?<\/header>/i)[0].match(/<a\b/g) || []).length >= 3,
+    'header should now carry at least 3 shared-asset links');
+  assert.equal(r.unfixed.filter(e => e.rule === 'L3-shared-link').length, 0);
+});
+
+it('fixHtml: re-embeds canonical meta bytes when external meta differs', () => {
+  const meta = { doc: 'design', schemaVersion: 2, extra: 'new' };
+  const r = fixHtml(VALID, { docName: 'design', metaJson: meta });
+  assert.ok(r.fixed.some(f => f.includes('meta.json')), 'expected meta re-embed fix');
+  assert.equal(r.unfixed.filter(e => e.rule === 'L3-meta-embed').length, 0);
+});
+
+it('fixHtml: leaves Writer-only findings as unfixed (e.g. missing mockup visuals)', () => {
+  const bad = VALID
+    .replace(/<svg aria-label="UI mockup screen">mockup<\/svg>/, '')
+    .replace(/<svg aria-label="user-flow workflow">user flow<\/svg>/, '');
+  const r = fixHtml(bad, { docName: 'design', metaJson: { doc: 'design', schemaVersion: 2 } });
+  assert.ok(r.unfixed.some(e => e.rule === 'L3-ux-visuals'),
+    'L3-ux-visuals needs real content — must remain in unfixed[]');
 });
 
 process.stdout.write(`\n${passed} passed, ${failed} failed\n`);

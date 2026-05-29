@@ -6469,8 +6469,8 @@ function formatReport(filePath, result) {
   return lines.join("\n");
 }
 async function lintFile(absPath, ctx = {}) {
-  const { readFile } = await import("node:fs/promises");
-  const html = await readFile(absPath, "utf-8");
+  const { readFile: readFile2 } = await import("node:fs/promises");
+  const html = await readFile2(absPath, "utf-8");
   if (!ctx.docName) {
     const base = absPath.substring(absPath.lastIndexOf("/") + 1);
     ctx.docName = base.replace(/\.html?$/i, "");
@@ -6478,21 +6478,212 @@ async function lintFile(absPath, ctx = {}) {
   if (!ctx.metaJson) {
     try {
       const metaPath = absPath.replace(/\.html?$/i, ".meta.json");
-      const metaRaw = await readFile(metaPath, "utf-8");
+      const metaRaw = await readFile2(metaPath, "utf-8");
       ctx.metaJson = JSON.parse(metaRaw);
     } catch {
     }
   }
   return lintHtml(html, ctx);
 }
+var LOCKED_PALETTE_DEFAULTS = {
+  ...PALETTE_LOCKED_VALUES,
+  "--muted": "#8b949e"
+};
+function fixSectionsWrapper(html) {
+  if (/<div\s+class=["'][^"']*\bsections\b[^"']*["']/i.test(html)) return null;
+  const navMatch = html.match(/(<nav\s+class=["']toc["'][^>]*>)([\s\S]*?)(<\/nav>)/i);
+  if (!navMatch) return null;
+  const before = html.slice(0, navMatch.index);
+  const navOpen = navMatch[1];
+  const navInner = navMatch[2];
+  const navClose = navMatch[3];
+  const after = html.slice(navMatch.index + navMatch[0].length);
+  const h3s = [...navInner.matchAll(/<h3\b[^>]*>[\s\S]*?<\/h3>/gi)];
+  if (h3s.length < 2) return null;
+  const secondH3End = h3s[1].index + h3s[1][0].length;
+  const head = navInner.slice(0, secondH3End);
+  const tail = navInner.slice(secondH3End);
+  const wrapped = `${head}
+  <div class="sections">${tail.trimEnd()}
+  </div>
+`;
+  return {
+    html: `${before}${navOpen}${wrapped}${navClose}${after}`,
+    description: 'wrapped nav.toc section links in <div class="sections">'
+  };
+}
+function fixDocgroupWrapper(html) {
+  if (/<div\s+class=["'][^"']*\bdocgroup\b[^"']*["']/i.test(html)) return null;
+  const navMatch = html.match(/(<nav\s+class=["']toc["'][^>]*>)([\s\S]*?)(<\/nav>)/i);
+  if (!navMatch) return null;
+  const navInner = navMatch[2];
+  const firstH3 = navInner.match(/<h3\b[^>]*>[\s\S]*?<\/h3>/i);
+  if (!firstH3) return null;
+  const afterFirstH3 = firstH3.index + firstH3[0].length;
+  const tailStart = afterFirstH3;
+  const tailHtml = navInner.slice(tailStart);
+  const endMarkerMatch = tailHtml.match(/<div\s+class=["'][^"']*\bsep\b[^"']*["']|<h3\b|<\/nav>/i);
+  if (!endMarkerMatch) return null;
+  const linkRun = tailHtml.slice(0, endMarkerMatch.index);
+  if (!/<a\s/i.test(linkRun)) return null;
+  const rest = tailHtml.slice(endMarkerMatch.index);
+  const newNavInner = navInner.slice(0, tailStart) + `
+  <div class="docgroup">${linkRun.trimEnd()}
+  </div>
+  ` + rest;
+  const before = html.slice(0, navMatch.index);
+  const after = html.slice(navMatch.index + navMatch[0].length);
+  return {
+    html: `${before}${navMatch[1]}${newNavInner}${navMatch[3]}${after}`,
+    description: 'wrapped nav.toc doc links in <div class="docgroup">'
+  };
+}
+function fixSepDivider(html) {
+  if (/<div\s+class=["'][^"']*\bsep\b[^"']*["']/i.test(html)) return null;
+  const navMatch = html.match(/(<nav\s+class=["']toc["'][^>]*>)([\s\S]*?)(<\/nav>)/i);
+  if (!navMatch) return null;
+  const navInner = navMatch[2];
+  const h3s = [...navInner.matchAll(/<h3\b[^>]*>[\s\S]*?<\/h3>/gi)];
+  if (h3s.length < 2) return null;
+  const secondH3Start = h3s[1].index;
+  const newNavInner = navInner.slice(0, secondH3Start) + `<div class="sep"></div>
+  ` + navInner.slice(secondH3Start);
+  const before = html.slice(0, navMatch.index);
+  const after = html.slice(navMatch.index + navMatch[0].length);
+  return {
+    html: `${before}${navMatch[1]}${newNavInner}${navMatch[3]}${after}`,
+    description: 'inserted <div class="sep"> divider between Documents and Sections'
+  };
+}
+function fixActiveLink(html, docName) {
+  if (!docName) return null;
+  if (/<a\b[^>]*class\s*=\s*["'][^"']*\bactive\b[^"']*["'][^>]*>/i.test(html)) return null;
+  const re = new RegExp(
+    `(<a\\b[^>]*href=["'][^"']*\\/${docName}\\.html["'][^>]*)>`,
+    "i"
+  );
+  if (!re.test(html)) return null;
+  let applied = false;
+  const newHtml = html.replace(re, (full, prefix) => {
+    if (applied) return full;
+    let mutated;
+    if (/\bclass\s*=\s*["']/i.test(prefix)) {
+      mutated = prefix.replace(/\bclass\s*=\s*["']([^"']*)["']/i, (_m, val) => `class="${val.trim()} active"`);
+    } else {
+      mutated = `${prefix} class="active"`;
+    }
+    applied = true;
+    return `${mutated}>`;
+  });
+  return applied ? { html: newHtml, description: `added class="active" to nav link for ${docName}` } : null;
+}
+function fixPaletteDrift(html) {
+  let mutated = html;
+  let touched = 0;
+  for (const [name, value] of Object.entries(LOCKED_PALETTE_DEFAULTS)) {
+    const re = new RegExp(`(${name.replace(/[-]/g, "\\-")}\\s*:\\s*)([#\\w()., %]+?)(\\s*;)`, "i");
+    const m = mutated.match(re);
+    if (!m) continue;
+    if (m[2].trim().toLowerCase() === value.toLowerCase()) continue;
+    mutated = mutated.replace(re, `$1${value}$3`);
+    touched += 1;
+  }
+  return touched > 0 ? { html: mutated, description: `restored ${touched} locked palette value(s) to GitHub-Dark defaults` } : null;
+}
+function fixSectionMaxWidth(html) {
+  let touched = false;
+  const sectionBlockRe = /((?:^|\s|,)section\b[^{}]*\{)([^}]*)(\})/gi;
+  const newHtml = html.replace(sectionBlockRe, (full, open, body, close) => {
+    if (!/max-width\s*:/i.test(body)) return full;
+    const stripped = body.replace(/(?:^|\s|;)\s*max-width\s*:\s*[^;]+;?/gi, ";").replace(/;+/g, ";");
+    if (stripped !== body) touched = true;
+    return `${open}${stripped}${close}`;
+  });
+  return touched ? { html: newHtml, description: "stripped max-width from <section> CSS rule(s)" } : null;
+}
+function fixCrumbColor(html) {
+  const re = /(\.crumb\b[^{}]*\{[^}]*color\s*:\s*)var\(\s*--muted\s*\)/i;
+  if (!re.test(html)) return null;
+  return {
+    html: html.replace(re, "$1var(--fg)"),
+    description: "changed .crumb color from var(--muted) to var(--fg)"
+  };
+}
+function fixSharedLinkBar(html) {
+  const headerMatch = html.match(/<header\s+class=["']top["'][^>]*>[\s\S]*?<\/header>/i);
+  if (!headerMatch) return null;
+  const headerHtml = headerMatch[0];
+  const linksMatch = headerHtml.match(/<div\s+class=["'][^"']*\blinks\b[^"']*["'][^>]*>([\s\S]*?)<\/div>/i);
+  const linkCount = linksMatch ? (linksMatch[1].match(/<a\b/gi) || []).length : 0;
+  if (linkCount === 3) return null;
+  const canonical = `<div class="links">
+    <a href="/_shared/context/overview.html">\u{1F4D8} Context</a>
+    <a href="/_shared/glossary/glossary.html">\u{1F4D6} Glossary</a>
+    <a href="/_shared/decisions/index.html">\u{1F4CB} ADRs</a>
+  </div>`;
+  let newHeader;
+  if (linksMatch) {
+    newHeader = headerHtml.replace(linksMatch[0], canonical);
+  } else {
+    newHeader = headerHtml.replace(/<\/header>/i, `  ${canonical}
+</header>`);
+  }
+  return {
+    html: html.replace(headerHtml, newHeader),
+    description: `replaced/inserted <header.top .links> with the 3 canonical shared-asset links`
+  };
+}
+function fixMetaEmbed(html, metaJson) {
+  if (!metaJson) return null;
+  const re = /(<script\s+[^>]*id=["']meta["'][^>]*>)([\s\S]*?)(<\/script>)/i;
+  const m = html.match(re);
+  if (!m) return null;
+  const canonical = canonicalJson(metaJson);
+  const embedded = m[2].trim();
+  const embeddedHash = embedded ? crypto.createHash("sha256").update(embedded, "utf8").digest("hex") : "";
+  const externalHash = crypto.createHash("sha256").update(canonical, "utf8").digest("hex");
+  if (embeddedHash === externalHash) return null;
+  return {
+    html: html.replace(re, `$1${canonical}$3`),
+    description: "re-embedded canonical <doc>.meta.json bytes into <script#meta>"
+  };
+}
+function fixHtml(html, ctx = {}) {
+  const before = lintHtml(html, ctx);
+  if (before.errors.length === 0 && before.warnings.length === 0) {
+    return { html, fixed: [], unfixed: [], before: before.errors };
+  }
+  const fixed = [];
+  const tryFix = (fixer) => {
+    const result = fixer(html, ctx);
+    if (result && typeof result.html === "string" && result.html !== html) {
+      html = result.html;
+      fixed.push(result.description);
+    }
+  };
+  tryFix((h) => fixDocgroupWrapper(h));
+  tryFix((h) => fixSepDivider(h));
+  tryFix((h) => fixSectionsWrapper(h));
+  tryFix((h, c) => fixActiveLink(h, c.docName));
+  tryFix((h) => fixSharedLinkBar(h));
+  tryFix((h) => fixPaletteDrift(h));
+  tryFix((h) => fixSectionMaxWidth(h));
+  tryFix((h) => fixCrumbColor(h));
+  tryFix((h, c) => fixMetaEmbed(h, c.metaJson));
+  const after = lintHtml(html, ctx);
+  return { html, fixed, unfixed: after.errors, before: before.errors };
+}
 
 // src/lint-cli.js
+import { readFile, writeFile } from "node:fs/promises";
 var __filename = fileURLToPath(import.meta.url);
 var localProxyDir = dirname(dirname(__filename));
 var repoRoot = dirname(localProxyDir);
 var args = process.argv.slice(2);
 var workspaceRoot = repoRoot;
 var warnAsError = false;
+var autoFix = false;
+var dryRun = false;
 var explicitPaths = [];
 for (let i = 0; i < args.length; i++) {
   const a = args[i];
@@ -6500,8 +6691,12 @@ for (let i = 0; i < args.length; i++) {
     workspaceRoot = resolve(args[++i] || ".");
   } else if (a === "--warn-as-error") {
     warnAsError = true;
+  } else if (a === "--fix") {
+    autoFix = true;
+  } else if (a === "--dry-run") {
+    dryRun = true;
   } else if (a === "--help" || a === "-h") {
-    process.stdout.write(`Usage: lint-cli.js [--workspace DIR] [--warn-as-error] [file.html ...]
+    process.stdout.write(`Usage: lint-cli.js [--workspace DIR] [--warn-as-error] [--fix [--dry-run]] [file.html ...]
 `);
     process.exit(0);
   } else if (a.startsWith("--")) {
@@ -6561,8 +6756,49 @@ function lintCtxFor(absPath) {
   }
   return { docName };
 }
+var totalFixed = 0;
+var filesWritten = 0;
 for (const p of targets) {
-  const result = await lintFile(p, lintCtxFor(p));
+  const ctx = lintCtxFor(p);
+  if (autoFix && !ctx.metaJson) {
+    try {
+      const metaPath = p.replace(/\.html?$/i, ".meta.json");
+      const metaRaw = await readFile(metaPath, "utf-8");
+      ctx.metaJson = JSON.parse(metaRaw);
+    } catch {
+    }
+  }
+  if (autoFix) {
+    const html = await readFile(p, "utf-8");
+    const result2 = fixHtml(html, ctx);
+    if (result2.fixed.length > 0) {
+      totalFixed += result2.fixed.length;
+      const verb = dryRun ? "would fix" : "fixed";
+      process.stdout.write(`${p}
+`);
+      for (const f of result2.fixed) process.stdout.write(`  [${verb.toUpperCase()}] ${f}
+`);
+      if (!dryRun) {
+        await writeFile(p, result2.html, "utf-8");
+        filesWritten += 1;
+      }
+    }
+    if (result2.unfixed.length > 0) {
+      filesWithFindings += 1;
+      totalErrors += result2.unfixed.length;
+      if (result2.fixed.length === 0) process.stdout.write(`${p}
+`);
+      for (const e of result2.unfixed) {
+        process.stdout.write(`  [ERROR] ${e.rule}: ${e.message}
+`);
+      }
+      process.stdout.write("\n");
+    } else if (result2.fixed.length > 0) {
+      process.stdout.write("  (all findings resolved)\n\n");
+    }
+    continue;
+  }
+  const result = await lintFile(p, ctx);
   if (result.errors.length || result.warnings.length) {
     filesWithFindings += 1;
     totalErrors += result.errors.length;
@@ -6571,6 +6807,11 @@ for (const p of targets) {
   }
 }
 var summary = `${targets.length} file(s) checked \xB7 ${filesWithFindings} with findings \xB7 ${totalErrors} error(s) \xB7 ${totalWarnings} warning(s)`;
+if (autoFix) {
+  const verb = dryRun ? "would apply" : "applied";
+  summary += ` \xB7 ${verb} ${totalFixed} fix(es)`;
+  if (!dryRun) summary += ` to ${filesWritten} file(s)`;
+}
 process.stdout.write(summary + "\n");
 if (totalErrors > 0 || warnAsError && totalWarnings > 0) {
   process.exit(1);

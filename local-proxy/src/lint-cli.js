@@ -7,6 +7,8 @@
 //   node bin/lint.mjs path/to/file.html ...              # explicit list
 //   node bin/lint.mjs --workspace /some/repo             # scan a different workspace
 //   node bin/lint.mjs --warn-as-error                    # exit 1 on warnings too
+//   node bin/lint.mjs --fix                              # apply mechanical auto-fixes in place
+//   node bin/lint.mjs --fix --dry-run                    # report what would be fixed, write nothing
 //
 // The bundled bin/lint.mjs is produced by `npm run build:lint` and ships in the
 // plugin cache so end users can lint without running `npm install` in the cache.
@@ -19,7 +21,8 @@
 import { basename, resolve, sep, dirname } from 'node:path';
 import { readdir, stat } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
-import { lintFile, formatReport } from './html-lint.js';
+import { lintFile, formatReport, fixHtml } from './html-lint.js';
+import { readFile, writeFile } from 'node:fs/promises';
 
 const __filename = fileURLToPath(import.meta.url);
 const localProxyDir = dirname(dirname(__filename)); // src/.. = local-proxy
@@ -28,6 +31,8 @@ const repoRoot = dirname(localProxyDir);
 const args = process.argv.slice(2);
 let workspaceRoot = repoRoot;
 let warnAsError = false;
+let autoFix = false;
+let dryRun = false;
 const explicitPaths = [];
 
 for (let i = 0; i < args.length; i++) {
@@ -36,8 +41,12 @@ for (let i = 0; i < args.length; i++) {
     workspaceRoot = resolve(args[++i] || '.');
   } else if (a === '--warn-as-error') {
     warnAsError = true;
+  } else if (a === '--fix') {
+    autoFix = true;
+  } else if (a === '--dry-run') {
+    dryRun = true;
   } else if (a === '--help' || a === '-h') {
-    process.stdout.write(`Usage: lint-cli.js [--workspace DIR] [--warn-as-error] [file.html ...]\n`);
+    process.stdout.write(`Usage: lint-cli.js [--workspace DIR] [--warn-as-error] [--fix [--dry-run]] [file.html ...]\n`);
     process.exit(0);
   } else if (a.startsWith('--')) {
     process.stderr.write(`Unknown flag: ${a}\n`);
@@ -99,8 +108,50 @@ function lintCtxFor(absPath) {
   return { docName };
 }
 
+let totalFixed = 0;
+let filesWritten = 0;
+
 for (const p of targets) {
-  const result = await lintFile(p, lintCtxFor(p));
+  const ctx = lintCtxFor(p);
+  // For --fix we need the meta auto-loaded; lintFile already does that, but
+  // fixHtml needs it explicitly. Pre-load via lintFile to share the path.
+  if (autoFix && !ctx.metaJson) {
+    try {
+      const metaPath = p.replace(/\.html?$/i, '.meta.json');
+      const metaRaw = await readFile(metaPath, 'utf-8');
+      ctx.metaJson = JSON.parse(metaRaw);
+    } catch { /* no meta — skip L3-meta-embed fix */ }
+  }
+
+  if (autoFix) {
+    const html = await readFile(p, 'utf-8');
+    const result = fixHtml(html, ctx);
+    if (result.fixed.length > 0) {
+      totalFixed += result.fixed.length;
+      const verb = dryRun ? 'would fix' : 'fixed';
+      process.stdout.write(`${p}\n`);
+      for (const f of result.fixed) process.stdout.write(`  [${verb.toUpperCase()}] ${f}\n`);
+      if (!dryRun) {
+        await writeFile(p, result.html, 'utf-8');
+        filesWritten += 1;
+      }
+    }
+    // Always print residual lint errors (what auto-fix couldn't reach).
+    if (result.unfixed.length > 0) {
+      filesWithFindings += 1;
+      totalErrors += result.unfixed.length;
+      if (result.fixed.length === 0) process.stdout.write(`${p}\n`);
+      for (const e of result.unfixed) {
+        process.stdout.write(`  [ERROR] ${e.rule}: ${e.message}\n`);
+      }
+      process.stdout.write('\n');
+    } else if (result.fixed.length > 0) {
+      process.stdout.write('  (all findings resolved)\n\n');
+    }
+    continue;
+  }
+
+  const result = await lintFile(p, ctx);
   if (result.errors.length || result.warnings.length) {
     filesWithFindings += 1;
     totalErrors += result.errors.length;
@@ -109,7 +160,12 @@ for (const p of targets) {
   }
 }
 
-const summary = `${targets.length} file(s) checked · ${filesWithFindings} with findings · ${totalErrors} error(s) · ${totalWarnings} warning(s)`;
+let summary = `${targets.length} file(s) checked · ${filesWithFindings} with findings · ${totalErrors} error(s) · ${totalWarnings} warning(s)`;
+if (autoFix) {
+  const verb = dryRun ? 'would apply' : 'applied';
+  summary += ` · ${verb} ${totalFixed} fix(es)`;
+  if (!dryRun) summary += ` to ${filesWritten} file(s)`;
+}
 process.stdout.write(summary + '\n');
 
 if (totalErrors > 0 || (warnAsError && totalWarnings > 0)) {
