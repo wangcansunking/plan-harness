@@ -25,6 +25,14 @@ Version fields in `.claude-plugin/plugin.json`, `.claude-plugin/marketplace.json
 
 
 
+
+## [1.10.0] — 2026-05-29
+
+### Added
+- feat(prefer-svg): make inline SVG the project default; Mermaid is a fallback + new L3-prefer-svg lint warning
+
+([#23](https://github.com/wangcansunking/plan-harness/pull/23))
+
 ## [1.9.0] — 2026-05-29
 
 ### Added
