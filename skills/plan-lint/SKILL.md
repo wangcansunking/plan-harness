@@ -40,63 +40,50 @@ This is the same self-heal procedure that Phase C enforces during `/plan-gen`, m
 
 ## Workflow
 
+The fix loop is now a single library call: `lintAndFix(absPath, ctx)` from `local-proxy/src/html-lint.js`. The orchestrator does NOT enumerate findings and apply Edits one-by-one — that's the function's job, and it's deterministic. The orchestrator only has to:
+
+1. Resolve targets.
+2. Call `lintAndFix` per target (or `node bin/lint.mjs --fix <path>` for the standalone CLI).
+3. Hand off any residual semantic findings to the Writer.
+
 ### Step 1 — Resolve targets
 
 1. Parse the argument. Resolve aliases. If `<scenario>` is omitted, look at `plan-harness/manifest.json` or `cwd` to find the current scenario.
 2. Build the target list (one or many `<doc>.html` paths). Drop any that don't exist on disk (log a one-liner per skip).
 3. If the target list is empty, print `"Nothing to lint. Pass /plan-lint <doc> or /plan-lint <scenario>."` and stop.
 
-### Step 2 — Run gates and collect findings
+### Step 2 — Auto-fix in one library call per target
 
-For each target, in order:
+For each target:
 
-1. Run `lintFile()` from `local-proxy/src/html-lint.js` (or `node bin/lint.mjs <path>` if importing fails). Shared-asset docs pass `skipRules: ['L1-docgroup', 'L1-active']`.
-2. If `--no-validate` was NOT passed, run `validateDoc()` from `local-proxy/src/meta-validate.js` against the sibling `<doc>.meta.json` + the HTML.
-3. Aggregate `{lintErrors[], validateErrors[]}` per target.
+1. Call `lintAndFix(absPath, { docName, metaJson, skipRules })` from `local-proxy/src/html-lint.js`. (Shared-asset docs pass `skipRules: ['L1-docgroup', 'L1-active']`.) It atomically:
+   - runs `lintHtml` to collect findings,
+   - applies every mechanical fixer that has a deterministic patch (`.sections` / `.docgroup` / `.sep` wrappers, `class="active"` on the current doc link, locked palette restore, `max-width` strip from `section`, `.crumb` color, shared-asset link bar, canonical meta re-embed),
+   - re-runs `lintHtml` on the patched output,
+   - writes the patched HTML back to disk when the orchestrator is in apply mode (not `--dry-run`),
+   - returns `{ html, fixed: string[], unfixed: error[], wroteBack: boolean }`.
 
-If every target is clean, print:
-```
-=== plan-lint: all clean ===
-{n} doc(s) checked · 0 errors · {w} warning(s)
-```
-and stop.
+   From the standalone CLI: `node bin/lint.mjs --fix <path>` (add `--dry-run` to report without writing). This is the same code path.
 
-### Step 3 — Categorise findings
+2. If `--no-validate` was NOT passed, then call `validateDoc()` from `local-proxy/src/meta-validate.js`. Validate has no auto-fix path — its findings either come back clean or require Writer intervention.
 
-For each finding, decide which fix path applies. The categories are not user-configurable — they map to fix mechanism:
+3. Aggregate per target: `{ fixed[], unfixed[], validateErrors[] }`. If all three are empty, the target is clean — go to Step 4 (record).
 
-| Category    | Examples of findings                                                                 | Fix path                                      |
-|-------------|--------------------------------------------------------------------------------------|-----------------------------------------------|
-| `mechanical` | `L1-nav` missing `<div class="sections">`, `L2-palette` drift, `L1-active` missing, `L3-shared-link` count off | Direct `Edit` against `<doc>.html`. No Writer. |
-| `semantic`  | `L3-product-mockups`, `L3-story-flows`, `L3-ux-visuals`, `V3-*` cross-doc refs, `V4-*` HTML coverage | Re-dispatch the Writer with the findings.     |
-| `meta-only` | `V1-shape` missing meta fields, `V2-product-mockups` (missing `mockup` field on a story) | Direct `Edit` against `<doc>.meta.json` if a value can be inferred from upstream meta; otherwise escalate to `semantic` (Writer needs to draft real content). |
+### Step 3 — Writer fallback for residual semantic findings
 
-### Step 4 — Apply fixes (retry loop, fail-closed)
+If a target has residual `unfixed` from lint, or any `validateErrors`, those are by definition not mechanical (the auto-fixer would have handled them). Dispatch:
 
-The loop is the same shape as Phase C's mandatory retry, capped at `--max-retries` (default 2):
+1. **Skip if `--no-rewriter`** — just write `<doc>.lint.json` / `<doc>.validate.json` and stop.
+2. Otherwise dispatch the Writer once (subagent_type `general-purpose`) with:
+   - the current `<doc>.html` (now carrying every mechanical fix already applied),
+   - the current `<doc>.meta.json`,
+   - the relevant upstream metas,
+   - the residual findings as "previous attempt's lint/validate output",
+   - the explicit "use `__META_JSON_PLACEHOLDER__` for the meta script body" instruction.
+3. Overwrite `<doc>.html` with Writer output, re-inject canonical meta bytes, and re-run Step 2.
+4. Cap total Writer dispatches at `--max-retries` (default 2). On still-dirty after the cap, write `<doc>.lint.json` / `<doc>.validate.json` with the residual findings, refuse to update `metaHashes[<doc>]`, and surface the report.
 
-```
-attempt = 0
-while attempt < maxRetries:
-  attempt += 1
-  apply all mechanical fixes (Edit ops)
-  if any semantic finding AND --no-rewriter NOT passed:
-    re-dispatch Writer (subagent_type: "general-purpose") with:
-      - the current <doc>.html
-      - the current <doc>.meta.json
-      - relevant upstream meta files
-      - the full findings JSON as "previous attempt failed lint with these errors"
-      - explicit instruction: "produce a corrected version using __META_JSON_PLACEHOLDER__ for the meta script body"
-    overwrite <doc>.html with the Writer's output, re-inject meta bytes verbatim
-  re-run lint + validate
-  if both clean: break
-```
-
-After the loop:
-- Clean → continue to Step 5.
-- Still dirty → write `<doc>.lint.json` and/or `<doc>.validate.json` with the residual findings; mark the manifest with the failure; surface the report to the user. Do NOT update `<doc>GeneratedAt` (the doc is still considered un-recorded since it doesn't satisfy the contract).
-
-### Step 5 — Record + report
+### Step 4 — Record + report
 
 For each target that ended clean:
 
@@ -109,7 +96,7 @@ For each target that ended clean:
    [✗] test-spec.html     unchanged (--dry-run)
    ```
 
-### Step 6 — Final summary
+### Step 5 — Final summary
 
 ```
 === plan-lint complete ===

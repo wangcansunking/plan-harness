@@ -17027,7 +17027,7 @@ function lintHtml(html, ctx = {}) {
   }
   return { errors, warnings, info };
 }
-var import_node_html_parser, SCENARIO_DOCS, LOCKED_PALETTE_VARS, PALETTE_LOCKED_VALUES, SHARED_LINK_LABELS, DIAGRAM_REQUIRED_DOCS;
+var import_node_html_parser, SCENARIO_DOCS, LOCKED_PALETTE_VARS, PALETTE_LOCKED_VALUES, SHARED_LINK_LABELS, DIAGRAM_REQUIRED_DOCS, LOCKED_PALETTE_DEFAULTS;
 var init_html_lint = __esm({
   "src/html-lint.js"() {
     import_node_html_parser = __toESM(require_dist2(), 1);
@@ -17060,6 +17060,10 @@ var init_html_lint = __esm({
     };
     SHARED_LINK_LABELS = ["Context", "Glossary", "ADR"];
     DIAGRAM_REQUIRED_DOCS = /* @__PURE__ */ new Set(["design", "state-machine"]);
+    LOCKED_PALETTE_DEFAULTS = {
+      ...PALETTE_LOCKED_VALUES,
+      "--muted": "#8b949e"
+    };
   }
 });
 
