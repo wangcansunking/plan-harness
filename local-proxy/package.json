@@ -6,8 +6,9 @@
   "scripts": {
     "//": "When you change src/** or add an npm dep, run `npm run build` and COMMIT the regenerated dist/index.js + bin/lint.mjs alongside your source change. The plugin cache reads from the committed artifacts; stale bundles ship stale behaviour. See DEVELOPMENT.md §'Build artifacts are committed' for the full contract.",
     "start": "node start.js",
-    "build": "npm run build:server && npm run build:lint && npm run build:validate",
+    "build": "npm run build:server && npm run build:daemon && npm run build:lint && npm run build:validate",
     "build:server": "esbuild src/index.js --bundle --platform=node --format=esm --target=node18 --outfile=dist/index.js",
+    "build:daemon": "esbuild src/daemon-entry.js --bundle --platform=node --format=esm --target=node18 --outfile=dist/daemon-entry.js",
     "build:lint": "esbuild src/lint-cli.js --bundle --platform=node --format=esm --target=node18 --outfile=bin/lint.mjs",
     "build:validate": "esbuild src/validate-cli.js --bundle --platform=node --format=esm --target=node18 --outfile=bin/validate.mjs",
     "sync": "node scripts/sync-to-cache.mjs",
@@ -19,7 +20,9 @@
     "test:lint": "node __tests__/html-lint.test.mjs",
     "test:validate": "node __tests__/meta-validate.test.mjs",
     "test:auth": "node __tests__/auth.test.mjs",
-    "test": "npm run test:lint && npm run test:validate && npm run test:auth && npm run smoke && npm run lint:html",
+    "test:routes": "node __tests__/web-server-routes.test.mjs",
+    "test:daemon": "node __tests__/daemon-registry.test.mjs",
+    "test": "npm run test:lint && npm run test:validate && npm run test:auth && npm run test:routes && npm run test:daemon && npm run smoke && npm run lint:html",
     "prepare-release": "npm install --no-fund --no-audit && npm run build && npm run smoke"
   },
   "devDependencies": {

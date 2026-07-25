@@ -16,9 +16,10 @@ import {
   ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 
-import { statSync } from "node:fs";
+import { statSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { dirname, basename } from "node:path";
+import { dirname, basename, resolve } from "node:path";
+import { spawn } from "node:child_process";
 
 import {
   listScenarios,
@@ -27,11 +28,6 @@ import {
   checkCompletion,
   getCodebaseContext,
 } from "./plan-manager.js";
-
-// ---------------------------------------------------------------------------
-// Dashboard server state (lazily started by plan_serve_dashboard)
-// ---------------------------------------------------------------------------
-let dashboardUrl = null;
 
 // ---------------------------------------------------------------------------
 // Devtunnel state (managed by plan_share)
@@ -483,55 +479,60 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
       // ---- plan_serve_dashboard -----------------------------------------
       case "plan_serve_dashboard": {
-        // Source of truth is isDashboardRunning() — the cached dashboardUrl
-        // can lag behind reality (HTTP server died unobserved). When the cache
-        // disagrees with the runtime, clear it and (re-)start the server.
-        const port = args.port ?? 3847;
+        // Daemon mode: ensure the single fixed-port daemon is up, register
+        // this project, and return the PROJECT-SCOPED URL. The link carries
+        // the project identity so it never collides across sessions/worktrees.
         try {
-          const url = await ensureDashboard(args.workspaceRoot, port);
-          return textResult(`Dashboard running at ${url}`);
+          const root = args.workspaceRoot ?? process.cwd();
+          const label = basename(resolve(root));
+          const { projectId, url } = await ensureDaemon(root, label);
+          return textResult(
+            `Dashboard running.\n`
+            + `Project: ${label} (${projectId})\n`
+            + `Open: ${url}\n`
+            + `Overview (all projects): ${DAEMON_ORIGIN}/`,
+          );
         } catch (err) {
-          return textResult(`Failed to start dashboard server: ${err.message}`);
+          return textResult(`Failed to start dashboard daemon: ${err.message}`);
         }
       }
 
       // ---- plan_share ----------------------------------------------------
       case "plan_share": {
-        const { spawn } = await import("node:child_process");
-
-        // 1. Ensure dashboard is running (truth-source check, not the cache)
+        // 1. Ensure the daemon is up and register this project. We tunnel the
+        //    daemon (fixed port 3100) and share the PROJECT-SCOPED URL so a
+        //    reviewer lands directly in the right project.
+        let projectId, projectUrl;
         try {
-          await ensureDashboard(args.workspaceRoot, 3847);
+          const root = args.workspaceRoot ?? process.cwd();
+          const reg = await ensureDaemon(root, basename(resolve(root)));
+          projectId = reg.projectId;
+          projectUrl = reg.url; // http://localhost:3100/p/<id>/
         } catch (err) {
-          return textResult(`Cannot start dashboard: ${err.message}. Start it first with plan_serve_dashboard.`);
+          return textResult(`Cannot start dashboard daemon: ${err.message}. Start it first with plan_serve_dashboard.`);
         }
 
-        // 2. Extract port from dashboard URL
-        const dashPort = new URL(dashboardUrl).port || "3847";
+        // 2. The tunnel exposes the daemon port.
+        const dashPort = String(DAEMON_PORT);
 
-        // 3. Enable password protection for protected mode. If the caller did
-        //    not supply a password, the plugin generates one — this is the
-        //    default path and avoids the host needing to think one up.
+        // 3. Toggle password protection ON THE DAEMON (separate process) via
+        //    its /_daemon/auth endpoint. protected → enable (generate pw if
+        //    none supplied); public/private → disable.
         let protectedPassword = null;
-        if (args.mode === "protected") {
-          try {
-            const webServerModule = await import("./web-server.js");
-            protectedPassword = webServerModule.enablePasswordProtection(args.password);
-            // Always import auth module to set strict-host flag (true if the
-            // caller asked for it, otherwise false to clear any previous state).
-            const authModule = await import("./auth.js");
-            authModule.setStrictHost(!!args.strictHost);
-          } catch (err) {
-            return textResult(`Cannot enable password protection: ${err.message}`);
-          }
-        } else {
-          // Disable password protection for public/private modes
-          try {
-            const webServerModule = await import("./web-server.js");
-            webServerModule.disablePasswordProtection();
-            const authModule = await import("./auth.js");
-            authModule.setStrictHost(false);
-          } catch { /* ignore */ }
+        try {
+          const authBody = args.mode === "protected"
+            ? { enabled: true, password: args.password, strictHost: !!args.strictHost }
+            : { enabled: false };
+          const r = await fetch(`${DAEMON_ORIGIN}/_daemon/auth`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(authBody),
+          });
+          if (!r.ok) throw new Error(`HTTP ${r.status}`);
+          const j = await r.json();
+          protectedPassword = j.password;
+        } catch (err) {
+          return textResult(`Cannot set daemon auth: ${err.message}`);
         }
 
         // 4. Kill existing tunnel if any
@@ -542,13 +543,14 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         }
 
         // 5. Start devtunnel
+        const { spawn: spawnTunnel } = await import("node:child_process");
         const tunnelArgs = ["host", "-p", dashPort];
         if (args.mode === "public" || args.mode === "protected") {
           tunnelArgs.push("--allow-anonymous");
         }
 
         try {
-          const proc = spawn("devtunnel", tunnelArgs, {
+          const proc = spawnTunnel("devtunnel", tunnelArgs, {
             stdio: ["ignore", "pipe", "pipe"],
             detached: false,
           });
@@ -589,6 +591,10 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
           tunnelUrl = await urlPromise;
 
+          // The tunnel exposes the whole daemon; the reviewer should land in
+          // THIS project. Compose the shared URL as tunnelOrigin + /p/<id>/.
+          const sharedProjectUrl = `${tunnelUrl.replace(/\/$/, '')}/p/${projectId}/`;
+
           // Auto-restart on unexpected exit
           proc.on("exit", (code) => {
             if (tunnelProcess === proc) {
@@ -612,8 +618,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             `Sharing plan dashboard via devtunnel.`,
             ``,
             `  Mode:      ${args.mode} — ${modeDesc[args.mode]}`,
-            `  URL:       ${tunnelUrl}`,
-            `  Local:     ${dashboardUrl}`,
+            `  URL:       ${sharedProjectUrl}`,
+            `  Local:     ${projectUrl}`,
           ];
 
           if (args.mode === "protected") {
@@ -663,11 +669,14 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         tunnelUrl = null;
         tunnelMode = null;
 
-        // Disable password protection
+        // Disable password protection ON THE DAEMON (the tunnel exposed it).
         try {
-          const webServerModule = await import("./web-server.js");
-          webServerModule.disablePasswordProtection();
-        } catch { /* ignore */ }
+          await fetch(`${DAEMON_ORIGIN}/_daemon/auth`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ enabled: false }),
+          });
+        } catch { /* daemon may be down already */ }
 
         return textResult(
           wasRunning
@@ -936,28 +945,115 @@ function exitForRespawn(reason) {
   setTimeout(() => process.exit(0), 50);
 }
 
-/**
- * Start the HTTP dashboard if it isn't running and return the live URL.
- *
- * The cached `dashboardUrl` is unreliable as a "running?" signal — the HTTP
- * server can die (uncaught error, manual stop) without this module being
- * notified. The truth source is `isDashboardRunning()` from web-server.js.
- * When the cache disagrees with the runtime, clear it and re-start.
- */
-async function ensureDashboard(workspaceRoot, port) {
-  const ws = await import("./web-server.js");
-  if (ws.isDashboardRunning()) {
-    const liveUrl = ws.getDashboardUrl();
-    if (liveUrl) dashboardUrl = liveUrl;
-    return dashboardUrl;
+// ---------------------------------------------------------------------------
+// Daemon mode (spec PR 1)
+//
+// A single long-lived daemon on a FIXED port holds a cross-project registry.
+// Every session's MCP process ensures the daemon is up (spawning it detached
+// if not), performs a version handshake, then registers its own project. Doc
+// links carry the project identity (/p/<id>/...) so they never collide across
+// sessions or worktrees.
+// ---------------------------------------------------------------------------
+
+const DAEMON_PORT = Number(process.env.PLAN_HARNESS_DAEMON_PORT) || 3100;
+const DAEMON_ORIGIN = `http://localhost:${DAEMON_PORT}`;
+
+/** Best-effort read of this bundle's version for the handshake. */
+function myPluginVersion() {
+  try {
+    const here = dirname(fileURLToPath(import.meta.url));
+    // src/ (or dist/) -> local-proxy/ -> plugin root
+    const manifest = resolve(here, "..", "..", ".claude-plugin", "plugin.json");
+    return String(JSON.parse(readFileSync(manifest, "utf-8")).version || "dev");
+  } catch {
+    return "dev";
   }
-  // Cache was stale — server died or never started.
-  if (dashboardUrl) console.error(`[plan-harness] cached dashboard URL ${dashboardUrl} is stale; restarting`);
-  dashboardUrl = null;
-  const url = await ws.startDashboard(workspaceRoot ?? process.cwd(), port);
-  dashboardUrl = url ?? `http://localhost:${port}`;
-  return dashboardUrl;
 }
+
+async function daemonHealth(timeoutMs = 800) {
+  try {
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), timeoutMs);
+    const r = await fetch(`${DAEMON_ORIGIN}/_daemon/health`, { signal: ctrl.signal });
+    clearTimeout(t);
+    if (!r.ok) return null;
+    return await r.json();
+  } catch {
+    return null;
+  }
+}
+
+async function daemonRegister(rootPath, label) {
+  const r = await fetch(`${DAEMON_ORIGIN}/_daemon/register`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ rootPath, label }),
+  });
+  if (!r.ok) throw new Error(`register failed: HTTP ${r.status}`);
+  return r.json();
+}
+
+function spawnDaemon() {
+  const here = dirname(fileURLToPath(import.meta.url));
+  const entry = resolve(here, "daemon-entry.js");
+  const child = spawn(process.execPath, [entry, "--port", String(DAEMON_PORT)], {
+    detached: true,
+    stdio: "ignore",
+    env: { ...process.env, PLAN_HARNESS_DAEMON_PORT: String(DAEMON_PORT) },
+  });
+  child.unref();
+}
+
+async function waitForHealth(maxMs = 5000) {
+  const start = Date.now();
+  while (Date.now() - start < maxMs) {
+    const h = await daemonHealth(400);
+    if (h?.ok) return h;
+    await new Promise((r) => setTimeout(r, 150));
+  }
+  return null;
+}
+
+/**
+ * Ensure the daemon is running (spawning it detached if needed), reconcile
+ * its version with ours, then register `rootPath`. Returns the project-scoped
+ * URL for that project.
+ * @param {string} rootPath
+ * @param {string} [label]
+ * @returns {Promise<{projectId:string, url:string}>}
+ */
+async function ensureDaemon(rootPath, label) {
+  let health = await daemonHealth();
+
+  // Version mismatch: ask the old daemon to shut down, then respawn ours.
+  const mine = myPluginVersion();
+  if (health && health.version !== mine && mine !== "dev") {
+    console.error(`[plan-harness] daemon v${health.version} != mine v${mine}; restarting`);
+    try {
+      await fetch(`${DAEMON_ORIGIN}/_daemon/shutdown`, { method: "POST" });
+    } catch { /* ignore */ }
+    // Wait for the port to free.
+    const freedBy = Date.now() + 3000;
+    while (Date.now() < freedBy && (await daemonHealth(300))) {
+      await new Promise((r) => setTimeout(r, 150));
+    }
+    health = null;
+  }
+
+  if (!health) {
+    spawnDaemon();
+    health = await waitForHealth();
+    if (!health) {
+      throw new Error(
+        `daemon did not come up on port ${DAEMON_PORT}. `
+        + `The port may be taken by another process.`,
+      );
+    }
+  }
+
+  return daemonRegister(resolve(rootPath ?? process.cwd()), label);
+}
+
 
 // ---------------------------------------------------------------------------
 // Process-wide stability guards
@@ -1027,19 +1123,20 @@ const transport = new StdioServerTransport();
 await server.connect(transport);
 console.error("[plan-harness] MCP server running on stdio.");
 
-// Auto-start the local dashboard so `localhost:<port>` is available without an
-// explicit plan_serve_dashboard call. MCP init stays non-blocking: the dashboard
-// is scheduled for the next tick. Workspace root defaults to process.cwd()
-// (Claude Code sets this to the project root when it spawns MCP servers).
-// Opt out with PLAN_HARNESS_NO_AUTO_DASHBOARD=1.
+// Auto-register this session's project with the shared daemon (spawning the
+// daemon detached if it isn't up yet) so `localhost:3100` shows this project
+// without an explicit plan_serve_dashboard call. MCP init stays non-blocking:
+// registration is scheduled for the next tick. Workspace root defaults to
+// process.cwd() (Claude Code sets this to the project root when it spawns MCP
+// servers). Opt out with PLAN_HARNESS_NO_AUTO_DASHBOARD=1.
 if (!process.env.PLAN_HARNESS_NO_AUTO_DASHBOARD) {
   setImmediate(async () => {
     try {
-      const port = Number(process.env.PLAN_HARNESS_DASHBOARD_PORT) || 3847;
-      const url = await ensureDashboard(process.cwd(), port);
-      console.error(`[plan-harness] Dashboard auto-started at ${url}`);
+      const root = process.cwd();
+      const { projectId, url } = await ensureDaemon(root, basename(resolve(root)));
+      console.error(`[plan-harness] project registered: ${projectId} -> ${url}`);
     } catch (err) {
-      console.error(`[plan-harness] Dashboard auto-start failed (non-fatal): ${err.message}`);
+      console.error(`[plan-harness] daemon auto-register failed (non-fatal): ${err.message}`);
     }
   });
 }

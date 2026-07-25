@@ -380,9 +380,13 @@ async function main() {
       }
     }
 
-    // ---- 404 on missing routes ----
-    const miss = await getText('/does-not-exist');
-    expect(miss.status === 404, 'unknown path returns 404');
+    // ---- graceful fallback on unknown GET routes ----
+    // Unknown GET paths no longer dead-end on a 404 — they 302 to the
+    // dashboard so a stale/shared link still lands somewhere useful.
+    // (See __tests__/web-server-routes.test.mjs for the full contract.)
+    const missRaw = await fetch(base + '/does-not-exist', { redirect: 'manual' });
+    expect(missRaw.status === 302, 'unknown GET path redirects (302)');
+    expect(missRaw.headers.get('location') === '/', 'unknown GET path redirects to dashboard');
 
   } finally {
     await stopDashboard();

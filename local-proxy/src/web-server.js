@@ -4,12 +4,15 @@
 
 import { createServer } from 'node:http';
 import { readdir, readFile, stat } from 'node:fs/promises';
+import { statSync, readFileSync } from 'node:fs';
 import { join, basename, extname, resolve, sep, dirname } from 'node:path';
 import { URL, fileURLToPath } from 'node:url';
+import { createHash } from 'node:crypto';
 
 const ICON_PATH = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', 'assets', 'icon.png');
 import {
   generateDashboard,
+  generateOverview,
   generateScenarioDetail,
   injectSectionIds,
   injectPlanMeta,
@@ -19,6 +22,7 @@ import {
   getThemeInitScript,
   getThemeToggleHTML,
   normalizePlanTabs,
+  normalizeDocGroup,
   normalizeAssetLinks,
   normalizeChecklistItems
 } from './templates/base.js';
@@ -31,6 +35,8 @@ import { lintHtml } from './html-lint.js';
 let server = null;
 let serverPort = null;
 let workspaceRootPath = null;
+let daemonMode = false;
+let daemonVersion = 'dev';
 
 const COOKIE_NAME = 'plan_session';
 
@@ -154,6 +160,384 @@ export function getDashboardUrl() {
   return `http://localhost:${serverPort}`;
 }
 
+// ---- Daemon + project registry (spec PR 1) -------------------------------
+//
+// A single long-lived daemon on a FIXED port holds an in-memory registry of
+// projects (project → scenario → files is the dashboard hierarchy). Each
+// request resolves its project root from the projectId in the URL against
+// this registry — never a process global — so project A's link can never
+// resolve to project B's file (kills the multi-session bleed). Links carry a
+// full origin + projectId, so a copied link is unambiguous across sessions.
+//
+// The registry is in-memory only: it self-cleans via an existence probe (a
+// project whose root has vanished — e.g. a deleted worktree — drops out), and
+// a daemon restart starts empty, rebuilt by each session's next register call.
+
+const DAEMON_DEFAULT_PORT = 3100;
+
+/** @type {Map<string, {projectId:string, rootPath:string, label:string, lastSeen:number}>} */
+const projectRegistry = new Map();
+
+/** Resolve the plugin version for the health handshake (best-effort). */
+function readDaemonVersion() {
+  try {
+    const here = dirname(fileURLToPath(import.meta.url));
+    // src/ -> local-proxy/ -> plugin root
+    const manifest = resolve(here, '..', '..', '.claude-plugin', 'plugin.json');
+    const json = JSON.parse(readFileSync(manifest, 'utf-8'));
+    if (json?.version) return String(json.version);
+  } catch { /* fall through */ }
+  return 'dev';
+}
+
+/**
+ * Canonicalise a filesystem path for stable hashing across separators / case.
+ * @param {string} p
+ */
+function canonicalRoot(p) {
+  let c = resolve(p).replace(/\\/g, '/').replace(/\/+$/, '');
+  if (process.platform === 'win32') c = c.toLowerCase();
+  return c;
+}
+
+/** Slugify a directory name into a URL-safe, readable token. */
+function slugForRoot(rootPath) {
+  const base = basename(resolve(rootPath)) || 'project';
+  const slug = base.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+  return slug || 'project';
+}
+
+/**
+ * Compute the stable projectId for a root path: `<slug>-<hash6>`.
+ * Distinct roots (incl. different worktrees of the same repo) → distinct ids.
+ * @param {string} rootPath
+ * @returns {string}
+ */
+export function computeProjectId(rootPath) {
+  const hash6 = createHash('sha1').update(canonicalRoot(rootPath)).digest('hex').slice(0, 6);
+  return `${slugForRoot(rootPath)}-${hash6}`;
+}
+
+/** Does a directory still exist on disk? (existence-probe for self-clean.) */
+function rootStillExists(rootPath) {
+  try {
+    return statSync(rootPath).isDirectory();
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Drop registry entries whose root has vanished (deleted worktree, etc.).
+ * @returns {Array} the surviving entries.
+ */
+function pruneRegistry() {
+  for (const [id, entry] of projectRegistry) {
+    if (!rootStillExists(entry.rootPath)) projectRegistry.delete(id);
+  }
+  return [...projectRegistry.values()];
+}
+
+/**
+ * Register (or refresh) a project in the daemon's registry. Idempotent: the
+ * same rootPath always maps to the same projectId.
+ * @param {string} rootPath - absolute path to the project/repo root.
+ * @param {string} [label]  - human label for the overview (defaults to dir name).
+ * @returns {{projectId:string, url:string}}
+ */
+export function registerProject(rootPath, label) {
+  const abs = resolve(rootPath);
+  const projectId = computeProjectId(abs);
+  projectRegistry.set(projectId, {
+    projectId,
+    rootPath: abs,
+    label: label || basename(abs),
+    lastSeen: Date.now(),
+  });
+  const origin = getDaemonOrigin() || `http://localhost:${DAEMON_DEFAULT_PORT}`;
+  return { projectId, url: `${origin}/p/${projectId}/` };
+}
+
+/** Look up a live project entry by id, pruning stale ones first. */
+function lookupProject(projectId) {
+  const entry = projectRegistry.get(projectId);
+  if (!entry) return null;
+  if (!rootStillExists(entry.rootPath)) {
+    projectRegistry.delete(projectId);
+    return null;
+  }
+  return entry;
+}
+
+/** Origin string of the running daemon, or null. */
+function getDaemonOrigin() {
+  if (!serverPort) return null;
+  return `http://localhost:${serverPort}`;
+}
+
+/** @returns {boolean} */
+export function isDaemonRunning() {
+  return server !== null && server.listening;
+}
+
+/**
+ * Start the daemon on a FIXED port (no auto-bump — a stable port is the
+ * precondition for offset-free links). If the port is taken by another
+ * process, this rejects with a clear error instead of silently drifting.
+ * @param {number} [port=3100]
+ * @returns {Promise<string>} the origin, e.g. http://localhost:3100
+ */
+export function startDaemon(port = DAEMON_DEFAULT_PORT) {
+  if (server && server.listening) return Promise.resolve(getDaemonOrigin());
+  daemonMode = true;
+  daemonVersion = readDaemonVersion();
+
+  return new Promise((resolvePromise, rejectPromise) => {
+    server = createServer(async (req, res) => {
+      try {
+        await handleRequest(req, res);
+      } catch (err) {
+        console.error('[plan-harness] Request error:', err);
+        res.writeHead(500, { 'Content-Type': 'text/plain' });
+        res.end('Internal Server Error');
+      }
+    });
+
+    server.on('error', (err) => {
+      if (err.code === 'EADDRINUSE') {
+        // Fixed port: do NOT auto-bump. Surface a clear, actionable error.
+        server = null;
+        rejectPromise(new Error(
+          `[plan-harness] port ${port} is already in use by another process. `
+          + `The daemon uses a fixed port so links stay stable. `
+          + `Free port ${port} or set a different daemon port.`,
+        ));
+      } else {
+        console.error('[plan-harness] daemon error (non-fatal):', err);
+        if (!serverPort) rejectPromise(err);
+      }
+    });
+
+    server.on('clientError', (err, socket) => {
+      console.error('[plan-harness] clientError (absorbed):', err?.code || err?.message);
+      try { socket.destroy(); } catch { /* socket already gone */ }
+    });
+    server.on('connection', (socket) => {
+      socket.on('error', (err) => {
+        console.error('[plan-harness] socket error (absorbed):', err?.code || err?.message);
+      });
+    });
+
+    server.on('close', () => {
+      server = null;
+      serverPort = null;
+    });
+
+    server.keepAliveTimeout = 120_000;
+    server.headersTimeout = 125_000;
+    server.requestTimeout = 0;
+
+    server.listen(port, '127.0.0.1', () => {
+      serverPort = port;
+      console.error(`[plan-harness] daemon running at ${getDaemonOrigin()} (v${daemonVersion})`);
+      resolvePromise(getDaemonOrigin());
+    });
+  });
+}
+
+/** Stop the daemon and clear the registry. */
+export async function stopDaemon() {
+  projectRegistry.clear();
+  if (!server) return;
+  return new Promise((resolvePromise) => {
+    server.close(() => {
+      server = null;
+      serverPort = null;
+      resolvePromise();
+    });
+  });
+}
+
+// ---- Daemon request handlers ----
+
+async function handleDaemonEndpoint(req, res, pathname) {
+  // GET /_daemon/health -> { ok, version, port }
+  if (pathname === '/_daemon/health' && req.method === 'GET') {
+    return sendJson(res, 200, { ok: true, version: daemonVersion, port: serverPort });
+  }
+
+  // POST /_daemon/register { rootPath, label } -> { projectId, url }
+  if (pathname === '/_daemon/register' && req.method === 'POST') {
+    let body;
+    try { body = await readJsonBody(req); }
+    catch (e) { return sendJson(res, 400, { error: e.message }); }
+    const rootPath = body?.rootPath;
+    if (!rootPath || typeof rootPath !== 'string') {
+      return sendJson(res, 400, { error: 'rootPath is required' });
+    }
+    if (!rootStillExists(rootPath)) {
+      return sendJson(res, 400, { error: `rootPath does not exist: ${rootPath}` });
+    }
+    const { projectId, url } = registerProject(rootPath, body?.label);
+    return sendJson(res, 200, { projectId, url });
+  }
+
+  // POST /_daemon/shutdown -> ack then close (frees the port for a respawn).
+  if (pathname === '/_daemon/shutdown' && req.method === 'POST') {
+    sendJson(res, 200, { ok: true, stopping: true });
+    // Close after the response flushes so the caller gets the ack.
+    setTimeout(() => { stopDaemon().catch(() => {}); }, 20);
+    return;
+  }
+
+  // POST /_daemon/auth { enabled, password?, strictHost? } -> { enabled, password }
+  // Toggles password protection ON THE DAEMON PROCESS. plan_share tunnels the
+  // daemon, so auth must be set here (the MCP process is separate).
+  if (pathname === '/_daemon/auth' && req.method === 'POST') {
+    let body;
+    try { body = await readJsonBody(req); }
+    catch (e) { return sendJson(res, 400, { error: e.message }); }
+    try {
+      if (body?.enabled) {
+        const pw = enablePasswordProtection(body.password);
+        auth.setStrictHost(!!body.strictHost);
+        return sendJson(res, 200, { enabled: true, password: pw });
+      }
+      disablePasswordProtection();
+      auth.setStrictHost(false);
+      return sendJson(res, 200, { enabled: false, password: null });
+    } catch (e) {
+      return sendJson(res, 500, { error: e.message });
+    }
+  }
+
+  res.writeHead(404, { 'Content-Type': 'text/plain' });
+  res.end('Unknown daemon endpoint');
+}
+
+async function handleProjectRoute(req, res, parsedUrl, pathname) {
+  // /p/<projectId>/<rest...>
+  const m = pathname.match(/^\/p\/([^/]+)(\/.*)?$/);
+  if (!m) {
+    res.writeHead(404, { 'Content-Type': 'text/plain' });
+    res.end('Not Found');
+    return;
+  }
+  const projectId = decodeURIComponent(m[1]);
+  const rest = m[2] || '/';
+
+  const project = lookupProject(projectId);
+  if (!project) {
+    // Unknown/vanished project — 404 with a hint. NEVER fall through to
+    // another project's file (this is the anti-bleed guarantee).
+    res.writeHead(404, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
+    res.end(
+      `<!doctype html><meta charset="utf-8"><body style="font-family:system-ui;padding:2rem">`
+      + `<h1>Project not registered</h1>`
+      + `<p>No project <code>${escapeHtml(projectId)}</code> is registered with this daemon.</p>`
+      + `<p>Open the project's directory and run <code>/plan-start</code> to register it, `
+      + `then return to <a href="/">the overview</a>.</p></body>`,
+    );
+    return;
+  }
+
+  // GET /p/<id>/  -> that project's scenario listing (reuses the overview,
+  // anchored to the project). Keep it simple: render the single-project view.
+  if ((rest === '/' || rest === '') && req.method === 'GET') {
+    return serveProjectHome(req, res, project);
+  }
+
+  // GET /p/<id>/<scenario>/<doc>.html -> serve from that project's root only.
+  const docMatch = rest.match(/^\/([^_/][^/]*)\/([^/]+\.html)$/);
+  if (docMatch && req.method === 'GET') {
+    const scenarioName = decodeURIComponent(docMatch[1]);
+    const docFile = decodeURIComponent(docMatch[2]);
+    if (scenarioName.includes('..') || docFile.includes('..')) {
+      res.writeHead(403, { 'Content-Type': 'text/plain' });
+      res.end('Path traversal not allowed');
+      return;
+    }
+    const docPath = await resolveDocPathIn(project.rootPath, scenarioName, docFile);
+    if (docPath) {
+      const fromLoopback = auth.isLocalRequest(req);
+      return serveHtmlFile(req, res, docPath, { fromLoopback, projectRoot: project.rootPath, projectId });
+    }
+    // Missing doc within a known project: redirect to the project home rather
+    // than dead-ending — but stay INSIDE this project (no cross-project guess).
+    res.writeHead(302, { Location: `/p/${projectId}/`, 'Cache-Control': 'no-store' });
+    res.end();
+    return;
+  }
+
+  // GET /p/<id>/_shared/<rest>.html -> shared asset under this project's root.
+  if (req.method === 'GET' && rest.startsWith('/_shared/') && rest.endsWith('.html')) {
+    const sharedRest = rest.slice('/_shared/'.length);
+    if (sharedRest.includes('..')) {
+      res.writeHead(403, { 'Content-Type': 'text/plain' });
+      res.end('Path traversal not allowed');
+      return;
+    }
+    const candidate = resolve(project.rootPath, 'plan-harness', '_shared', sharedRest);
+    const fromLoopback = auth.isLocalRequest(req);
+    return serveHtmlFile(req, res, candidate, { fromLoopback, projectRoot: project.rootPath, projectId });
+  }
+
+  res.writeHead(404, { 'Content-Type': 'text/plain' });
+  res.end('Not Found');
+}
+
+/** Resolve a scenario doc within a SPECIFIC project root (scanner order). */
+async function resolveDocPathIn(projectRoot, scenarioName, docFile) {
+  for (const rootName of ['plan-harness', 'plans']) {
+    const candidate = resolve(projectRoot, rootName, scenarioName, docFile);
+    try {
+      await stat(candidate);
+      return candidate;
+    } catch { /* try next root */ }
+  }
+  return null;
+}
+
+/** Scan a specific project root for scenarios (project-scoped). */
+async function scanScenariosIn(projectRoot) {
+  const saved = workspaceRootPath;
+  workspaceRootPath = projectRoot;
+  try {
+    return await scanScenarios();
+  } finally {
+    workspaceRootPath = saved;
+  }
+}
+
+/** Render the cross-project overview: every live project, its scenarios. */
+async function serveOverview(req, res) {
+  const projects = pruneRegistry();
+  const groups = [];
+  for (const p of projects) {
+    const scenarios = await scanScenariosIn(p.rootPath);
+    groups.push({ ...p, scenarios });
+  }
+  const html = generateOverview(groups, {
+    title: 'Plan Dashboard',
+    subtitle: `${groups.length} project${groups.length === 1 ? '' : 's'} registered`,
+    meta: `Generated ${new Date().toISOString().slice(0, 10)}`,
+  });
+  res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-cache' });
+  res.end(html);
+}
+
+/** Render one project's scenario listing (project home). */
+async function serveProjectHome(req, res, project) {
+  const scenarios = await scanScenariosIn(project.rootPath);
+  const html = generateOverview([{ ...project, scenarios }], {
+    title: project.label,
+    subtitle: 'Project',
+    meta: `Generated ${new Date().toISOString().slice(0, 10)}`,
+  });
+  res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-cache' });
+  res.end(html);
+}
+
 // ---- Password protection API ----
 
 /**
@@ -187,6 +571,21 @@ export function isPasswordProtected() {
 async function handleRequest(req, res) {
   const parsedUrl = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
   const pathname = parsedUrl.pathname;
+
+  // ---- Daemon control endpoints (spec PR 1) ----
+  // These are local-only management calls from the MCP layer; they sit ahead
+  // of the auth gate so registration works before any password is set.
+  if (daemonMode && pathname.startsWith('/_daemon/')) {
+    return handleDaemonEndpoint(req, res, pathname);
+  }
+
+  // ---- Project-scoped routes: /p/<projectId>/... (spec PR 1) ----
+  // Every doc link carries its project identity, so a request resolves its
+  // root from the registry, never a process global. Unknown/vanished projects
+  // 404 with a hint — they NEVER fall through to another project's file.
+  if (daemonMode && pathname.startsWith('/p/')) {
+    return handleProjectRoute(req, res, parsedUrl, pathname);
+  }
 
   // ---- Password protection gate ----
   // Loopback bypass: if the request came from the host machine itself AND
@@ -234,6 +633,7 @@ async function handleRequest(req, res) {
 
   // Route: GET / -> Dashboard
   if (pathname === '/' && req.method === 'GET') {
+    if (daemonMode) return serveOverview(req, res);
     return serveDashboard(req, res);
   }
 
@@ -361,9 +761,19 @@ async function handleRequest(req, res) {
     return serveHtmlFile(req, res, candidate, { fromLoopback });
   }
 
-  // GET /<scenario>/<doc>.html — serve from plan-harness/<scenario>/<doc>.html.
+  // GET /<scenario>/<doc>.html — serve from <root>/<scenario>/<doc>.html.
+  // <root> is tried in the same order the scanner uses (plan-harness/ then
+  // plans/) so v1 and v2 layouts both resolve.
   const docMatch = pathname.match(/^\/([^_/][^/]*)\/([^/]+\.html)$/);
   if (docMatch && req.method === 'GET') {
+    // Daemon mode: a bare /<scenario>/<doc>.html carries NO project identity —
+    // it's the root cause of the cross-project bleed. Send it to the overview
+    // rather than guessing a project (spec §3.3).
+    if (daemonMode) {
+      res.writeHead(302, { Location: '/', 'Cache-Control': 'no-store' });
+      res.end();
+      return;
+    }
     const scenarioName = decodeURIComponent(docMatch[1]);
     const docFile = decodeURIComponent(docMatch[2]);
     if (scenarioName.includes('..') || docFile.includes('..')) {
@@ -371,18 +781,74 @@ async function handleRequest(req, res) {
       res.end('Path traversal not allowed');
       return;
     }
-    const docPath = resolve(workspaceRootPath, 'plan-harness', scenarioName, docFile);
-    try {
-      await stat(docPath);
+
+    const docPath = await resolveDocPath(scenarioName, docFile);
+    if (docPath) {
       return serveHtmlFile(req, res, docPath, { fromLoopback });
-    } catch {
-      // Missing — fall through to the global 404 below.
     }
+
+    // The doc file does not exist. Rather than dead-ending on a 404 — which is
+    // what users hit when they click a baked nav link for a doc that was never
+    // generated — redirect to the most specific page that DOES exist:
+    //   scenario dir present -> /scenario/<name> (scenario home)
+    //   scenario absent       -> /               (dashboard)
+    // This keeps navigation forgiving as plans are filled in incrementally.
+    const scenarioExists = await scenarioDirExists(scenarioName);
+    const target = scenarioExists
+      ? `/scenario/${encodeURIComponent(scenarioName)}`
+      : '/';
+    console.error(`[plan-harness] doc not found: ${pathname} -> redirecting to ${target}`);
+    res.writeHead(302, { Location: target, 'Cache-Control': 'no-store' });
+    res.end();
+    return;
   }
 
-  // 404
+  // Fallback — for GET navigations to genuinely unroutable paths (not doc
+  // links), redirect to the dashboard so a stale/broken URL still lands
+  // somewhere useful instead of a dead end. Non-GET requests get an honest
+  // 404 (redirecting a POST/DELETE would be surprising).
+  if (req.method === 'GET') {
+    console.error(`[plan-harness] unrouted GET: ${pathname} -> redirecting to /`);
+    res.writeHead(302, { Location: '/', 'Cache-Control': 'no-store' });
+    res.end();
+    return;
+  }
   res.writeHead(404, { 'Content-Type': 'text/plain' });
   res.end('Not Found');
+}
+
+/**
+ * Resolve a scenario doc file to an absolute path, trying each plan root in
+ * scanner order. Returns the first existing path, or null if none exist.
+ * @param {string} scenarioName
+ * @param {string} docFile  e.g. "product.html"
+ * @returns {Promise<string|null>}
+ */
+async function resolveDocPath(scenarioName, docFile) {
+  for (const rootName of ['plan-harness', 'plans']) {
+    const candidate = resolve(workspaceRootPath, rootName, scenarioName, docFile);
+    try {
+      await stat(candidate);
+      return candidate;
+    } catch { /* try next root */ }
+  }
+  return null;
+}
+
+/**
+ * Does a scenario directory exist under any plan root?
+ * @param {string} scenarioName
+ * @returns {Promise<boolean>}
+ */
+async function scenarioDirExists(scenarioName) {
+  for (const rootName of ['plan-harness', 'plans']) {
+    const candidate = resolve(workspaceRootPath, rootName, scenarioName);
+    try {
+      const s = await stat(candidate);
+      if (s.isDirectory()) return true;
+    } catch { /* try next root */ }
+  }
+  return false;
 }
 
 // ---- Comment route helpers ----
@@ -694,12 +1160,14 @@ async function serveHtmlFile(req, res, filePath, ctx = {}) {
     return;
   }
 
-  // Resolve and validate path: must be an absolute path under the workspace root.
-  // Use path-separator suffix so that /foo/barEvil does not pass when root is /foo/bar.
+  // Resolve and validate path: must be an absolute path under the workspace
+  // root (legacy dashboard) OR the project root (daemon mode). Use a
+  // path-separator suffix so /foo/barEvil does not pass when root is /foo/bar.
   const resolved = resolve(filePath);
-  if (resolved !== workspaceRootPath && !resolved.startsWith(workspaceRootPath + sep)) {
+  const guardRoot = ctx.projectRoot ? resolve(ctx.projectRoot) : workspaceRootPath;
+  if (!guardRoot || (resolved !== guardRoot && !resolved.startsWith(guardRoot + sep))) {
     res.writeHead(403, { 'Content-Type': 'text/plain' });
-    res.end('Access denied: path is outside workspace root');
+    res.end('Access denied: path is outside the project root');
     return;
   }
 
@@ -732,7 +1200,14 @@ async function serveHtmlFile(req, res, filePath, ctx = {}) {
       const siblingEntries = await readdir(scenarioDir);
       siblingSet = new Set(siblingEntries.filter(e => /\.html?$/i.test(e)));
     } catch { /* best-effort; if readdir fails, skip normalization */ }
-    const withTabsFixed = normalizePlanTabs(raw, siblingSet, scenarioDir);
+    const withTabsFixed = normalizePlanTabs(raw, siblingSet, scenarioDir, ctx.projectId);
+
+    // 0a. Reconcile the cross-doc nav (nav.toc .docgroup) against disk. Docs
+    //     bake the full 7-link workflow nav regardless of which siblings
+    //     exist; links to not-yet-generated docs get disabled here so they
+    //     can't be clicked into a redirect/404. Existing links are rewritten
+    //     to the root-absolute form.
+    const withDocGroupFixed = normalizeDocGroup(withTabsFixed, siblingSet, scenarioDir, ctx.projectId);
 
     // Scenario docs under plan-harness/<scenario>/ (excluding _shared) already
     // ship with the locked GitHub-Dark palette, full chrome, and a <nav.toc>
@@ -740,10 +1215,10 @@ async function serveHtmlFile(req, res, filePath, ctx = {}) {
     // sidebar-panel injection would double the chrome and override the locked
     // palette with a light theme. Detect via the <script#meta> tag (only
     // self-contained docs embed it) and skip both injectors.
-    const isSelfContained = isScenarioDoc && /<script[^>]+id=["']meta["']/i.test(withTabsFixed);
+    const isSelfContained = isScenarioDoc && /<script[^>]+id=["']meta["']/i.test(withDocGroupFixed);
     const withDocChrome = isSelfContained
-      ? withTabsFixed
-      : normalizeServedDocChrome(withTabsFixed, resolved);
+      ? withDocGroupFixed
+      : normalizeServedDocChrome(withDocGroupFixed, resolved);
 
     // 0b. Collapse doubled-up checklist markers (<input type="checkbox"> paired
     //     with a redundant `[x]` / `[ ]` text marker). Syncs `checked` from the

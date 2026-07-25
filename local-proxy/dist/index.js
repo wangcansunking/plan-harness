@@ -2982,7 +2982,7 @@ var require_compile = __commonJS({
       const schOrFunc = root.refs[ref];
       if (schOrFunc)
         return schOrFunc;
-      let _sch = resolve4.call(this, root, ref);
+      let _sch = resolve5.call(this, root, ref);
       if (_sch === void 0) {
         const schema = (_a2 = root.localRefs) === null || _a2 === void 0 ? void 0 : _a2[ref];
         const { schemaId } = this.opts;
@@ -3009,7 +3009,7 @@ var require_compile = __commonJS({
     function sameSchemaEnv(s1, s2) {
       return s1.schema === s2.schema && s1.root === s2.root && s1.baseId === s2.baseId;
     }
-    function resolve4(root, ref) {
+    function resolve5(root, ref) {
       let sch;
       while (typeof (sch = this.refs[ref]) == "string")
         ref = sch;
@@ -3584,7 +3584,7 @@ var require_fast_uri = __commonJS({
       }
       return uri;
     }
-    function resolve4(baseURI, relativeURI, options) {
+    function resolve5(baseURI, relativeURI, options) {
       const schemelessOptions = options ? Object.assign({ scheme: "null" }, options) : { scheme: "null" };
       const resolved = resolveComponent(parse4(baseURI, schemelessOptions), parse4(relativeURI, schemelessOptions), schemelessOptions, true);
       schemelessOptions.skipEscape = true;
@@ -3811,7 +3811,7 @@ var require_fast_uri = __commonJS({
     var fastUri = {
       SCHEMES,
       normalize,
-      resolve: resolve4,
+      resolve: resolve5,
       resolveComponent,
       equal,
       serialize,
@@ -6800,6 +6800,1005 @@ var require_dist = __commonJS({
   }
 });
 
+// src/comment-manager.js
+var comment_manager_exports = {};
+__export(comment_manager_exports, {
+  CommentError: () => CommentError,
+  PERSONA_NAMES: () => PERSONA_NAMES,
+  appendComment: () => appendComment,
+  broadcastCommentEvent: () => broadcastCommentEvent,
+  checkRate: () => checkRate,
+  deleteComment: () => deleteComment,
+  extractMentions: () => extractMentions,
+  listComments: () => listComments,
+  listPendingMentions: () => listPendingMentions,
+  patchComment: () => patchComment,
+  postPersonaReply: () => postPersonaReply,
+  reanchorDocument: () => reanchorDocument,
+  reanchorScenario: () => reanchorScenario,
+  registerSseClient: () => registerSseClient,
+  sseHeartbeat: () => sseHeartbeat
+});
+import { appendFile, mkdir as mkdir2, readFile as readFile2 } from "node:fs/promises";
+import { join as join2, resolve, sep as sep2 } from "node:path";
+import { randomBytes } from "node:crypto";
+function extractMentions(body) {
+  if (typeof body !== "string" || body.length === 0) return [];
+  const found = /* @__PURE__ */ new Set();
+  let m;
+  MENTION_RE.lastIndex = 0;
+  while ((m = MENTION_RE.exec(body)) !== null) {
+    const persona = m[1].toLowerCase();
+    if (PERSONA_SET.has(persona)) found.add(persona);
+  }
+  return Array.from(found);
+}
+function assertName(value, label) {
+  if (typeof value !== "string" || !NAME_RE.test(value) || value.length > NAME_MAX) {
+    throw new CommentError("BAD_REQUEST", `invalid ${label}`, 400);
+  }
+}
+function commentFilePath(workspaceRoot, scenario, doc) {
+  assertName(scenario, "scenario");
+  assertName(doc, "doc");
+  const plansRoot = resolve(workspaceRoot, "plans");
+  const file2 = resolve(plansRoot, scenario, ".comments", `${doc}.jsonl`);
+  if (!file2.startsWith(plansRoot + sep2)) {
+    throw new CommentError("BAD_REQUEST", "path traversal rejected", 400);
+  }
+  return file2;
+}
+function validateAnchor(a) {
+  if (a == null) return null;
+  if (typeof a !== "object" || Array.isArray(a)) {
+    throw new CommentError("BAD_REQUEST", "anchor must be an object or null", 400);
+  }
+  const out = {};
+  if (a.sectionId != null) {
+    if (typeof a.sectionId !== "string" || !/^sec-[a-f0-9]{16}(-[0-9]+)?$/.test(a.sectionId)) {
+      throw new CommentError("BAD_REQUEST", "anchor.sectionId must be sec-<16hex>", 400);
+    }
+    out.sectionId = a.sectionId;
+  }
+  if (a.exact != null) {
+    if (typeof a.exact !== "string" || a.exact.length === 0 || a.exact.length > EXACT_MAX) {
+      throw new CommentError("BAD_REQUEST", `anchor.exact must be 1..${EXACT_MAX} chars`, 400);
+    }
+    out.exact = a.exact;
+  }
+  if (a.prefix != null) {
+    if (typeof a.prefix !== "string" || a.prefix.length > AFFIX_MAX) throw new CommentError("BAD_REQUEST", "anchor.prefix too long", 400);
+    out.prefix = a.prefix;
+  }
+  if (a.suffix != null) {
+    if (typeof a.suffix !== "string" || a.suffix.length > AFFIX_MAX) throw new CommentError("BAD_REQUEST", "anchor.suffix too long", 400);
+    out.suffix = a.suffix;
+  }
+  return out;
+}
+function validateBody(body) {
+  if (typeof body !== "string" || body.length < BODY_MIN || body.length > BODY_MAX) {
+    throw new CommentError("BAD_REQUEST", `body must be ${BODY_MIN}..${BODY_MAX} chars`, 400);
+  }
+  return body;
+}
+function validateIntent(intent, role) {
+  if (intent == null || intent === "comment") return "comment";
+  if (intent === "revise") {
+    if (role !== "host") {
+      throw new CommentError("FORBIDDEN", "revise intent requires host role", 403);
+    }
+    return "revise";
+  }
+  throw new CommentError("BAD_REQUEST", 'intent must be "comment" or "revise"', 400);
+}
+function validateTodoResolves(flag, role) {
+  if (flag == null || flag === false) return false;
+  if (flag !== true) {
+    throw new CommentError("BAD_REQUEST", "todoResolves must be a boolean", 400);
+  }
+  if (role !== "host") {
+    throw new CommentError("FORBIDDEN", "resolving a TODO requires host role", 403);
+  }
+  return true;
+}
+async function readEvents(file2) {
+  try {
+    const text = await readFile2(file2, "utf8");
+    const events = [];
+    for (const line of text.split("\n")) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+      try {
+        events.push(JSON.parse(trimmed));
+      } catch {
+      }
+    }
+    return events;
+  } catch (err) {
+    if (err.code === "ENOENT") return [];
+    throw err;
+  }
+}
+async function appendEvent(file2, event) {
+  await mkdir2(join2(file2, ".."), { recursive: true });
+  await appendFile(file2, JSON.stringify(event) + "\n", "utf8");
+}
+function collapse(events) {
+  const byId = /* @__PURE__ */ new Map();
+  for (const ev of events) {
+    if (!ev || typeof ev !== "object" || !ev.id) continue;
+    let c = byId.get(ev.id);
+    if (!c) {
+      if (ev.op !== "create") continue;
+      c = {
+        id: ev.id,
+        createdAt: ev.createdAt,
+        author: ev.author,
+        anchor: ev.anchor || null,
+        body: ev.body,
+        threadId: ev.threadId || ev.id,
+        replyTo: ev.replyTo || null,
+        intent: ev.intent || "comment",
+        todoResolves: ev.todoResolves === true,
+        resolved: false,
+        resolvedBy: null,
+        resolvedAt: null,
+        deleted: false,
+        deletedBy: null,
+        editedAt: null,
+        reviseStatus: ev.intent === "revise" ? "pending" : null,
+        reviseProposalRef: null,
+        // @-mention payload: personas referenced in the body and the
+        // optional personaRole a persona-reply was posted under. The
+        // presence of mentionedPersonas[] means a reviewer summoned one
+        // or more agent personas; personaRole != null means this very
+        // comment is a persona's reply.
+        mentionedPersonas: Array.isArray(ev.mentionedPersonas) ? ev.mentionedPersonas.slice() : [],
+        personaRole: typeof ev.personaRole === "string" ? ev.personaRole : null
+      };
+      byId.set(ev.id, c);
+      continue;
+    }
+    if (ev.op === "edit" && typeof ev.body === "string") {
+      c.body = ev.body;
+      c.editedAt = ev.at || (/* @__PURE__ */ new Date()).toISOString();
+    } else if (ev.op === "resolve") {
+      c.resolved = !!ev.resolved;
+      c.resolvedBy = ev.by || null;
+      c.resolvedAt = ev.at || null;
+    } else if (ev.op === "delete") {
+      c.deleted = true;
+      c.deletedBy = ev.by || null;
+      c.body = "[deleted]";
+    } else if (ev.op === "revise") {
+      if (typeof ev.reviseStatus === "string") c.reviseStatus = ev.reviseStatus;
+      if (ev.proposalRef != null) c.reviseProposalRef = ev.proposalRef;
+    } else if (ev.op === "reanchor") {
+      if (ev.anchor && typeof ev.anchor === "object") {
+        c.anchor = Object.assign({}, c.anchor || {}, ev.anchor);
+      }
+      if (ev.anchor && ev.anchor.orphaned != null) {
+        c.anchor = c.anchor || {};
+        c.anchor.orphaned = !!ev.anchor.orphaned;
+      }
+      if (ev.anchor && ev.anchor.migratedFrom != null) {
+        c.anchor = c.anchor || {};
+        c.anchor.migratedFrom = ev.anchor.migratedFrom;
+      }
+    }
+  }
+  return Array.from(byId.values());
+}
+function threadTree(comments) {
+  const roots = [];
+  const byId = /* @__PURE__ */ new Map();
+  for (const c of comments) byId.set(c.id, c);
+  for (const c of comments) {
+    if (!c.replyTo) {
+      c.replies = [];
+      roots.push(c);
+    }
+  }
+  for (const c of comments) {
+    if (c.replyTo) {
+      const parent = byId.get(c.threadId) || byId.get(c.replyTo);
+      if (parent) {
+        parent.replies = parent.replies || [];
+        parent.replies.push(c);
+      }
+    }
+  }
+  roots.sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)));
+  for (const r of roots) r.replies.sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)));
+  return roots;
+}
+function genId() {
+  return "cmt_" + randomBytes(3).toString("hex");
+}
+async function listComments(workspaceRoot, scenario, doc) {
+  const file2 = commentFilePath(workspaceRoot, scenario, doc);
+  const events = await readEvents(file2);
+  const flat = collapse(events);
+  const roots = threadTree(flat);
+  const total = flat.length;
+  const resolved = flat.filter((c) => c.resolved).length;
+  const orphaned = flat.filter((c) => c.anchor && c.anchor.orphaned).length;
+  return { comments: roots, meta: { total, resolved, orphaned } };
+}
+async function appendComment(workspaceRoot, scenario, doc, payload, actor) {
+  if (!actor || !actor.name) throw new CommentError("FORBIDDEN", "actor required", 403);
+  const body = validateBody(payload.body);
+  const anchor = validateAnchor(payload.anchor);
+  const intent = validateIntent(payload.intent, actor.role);
+  const todoResolves = validateTodoResolves(payload.todoResolves, actor.role);
+  let threadId = null;
+  let replyTo = null;
+  if (payload.replyTo != null) {
+    if (typeof payload.replyTo !== "string" || !ID_RE.test(payload.replyTo)) {
+      throw new CommentError("BAD_REQUEST", "replyTo must be cmt_<6hex>", 400);
+    }
+    const file3 = commentFilePath(workspaceRoot, scenario, doc);
+    const existing = collapse(await readEvents(file3));
+    const parent = existing.find((c) => c.id === payload.replyTo);
+    if (!parent) throw new CommentError("NOT_FOUND", "parent comment not found", 404);
+    if (parent.deleted) throw new CommentError("BAD_REQUEST", "cannot reply to deleted comment", 400);
+    replyTo = parent.id;
+    threadId = parent.threadId;
+  }
+  const id = genId();
+  const createdAt = (/* @__PURE__ */ new Date()).toISOString();
+  const mentionedPersonas = extractMentions(body);
+  const event = {
+    op: "create",
+    id,
+    createdAt,
+    author: actor.name,
+    anchor,
+    body,
+    threadId: threadId || id,
+    replyTo,
+    intent
+  };
+  if (todoResolves) event.todoResolves = true;
+  if (mentionedPersonas.length > 0) event.mentionedPersonas = mentionedPersonas;
+  const file2 = commentFilePath(workspaceRoot, scenario, doc);
+  await appendEvent(file2, event);
+  return {
+    id,
+    createdAt,
+    author: actor.name,
+    anchor,
+    body,
+    threadId: event.threadId,
+    replyTo,
+    intent,
+    todoResolves,
+    resolved: false,
+    resolvedBy: null,
+    resolvedAt: null,
+    deleted: false,
+    deletedBy: null,
+    editedAt: null,
+    reviseStatus: intent === "revise" ? "pending" : null,
+    reviseProposalRef: null,
+    mentionedPersonas,
+    personaRole: null,
+    replies: []
+  };
+}
+async function patchComment(workspaceRoot, scenario, doc, id, patch, actor) {
+  if (!actor || !actor.name) throw new CommentError("FORBIDDEN", "actor required", 403);
+  if (!ID_RE.test(id)) throw new CommentError("BAD_REQUEST", "invalid id", 400);
+  const file2 = commentFilePath(workspaceRoot, scenario, doc);
+  const events = await readEvents(file2);
+  const existing = collapse(events).find((c) => c.id === id);
+  if (!existing) throw new CommentError("NOT_FOUND", "comment not found", 404);
+  if (existing.deleted) throw new CommentError("BAD_REQUEST", "cannot patch deleted comment", 400);
+  const now = (/* @__PURE__ */ new Date()).toISOString();
+  if (typeof patch.body === "string") {
+    if (existing.author !== actor.name && actor.role !== "host") {
+      throw new CommentError("FORBIDDEN", "body edit is author-only", 403);
+    }
+    if (Date.now() - Date.parse(existing.createdAt) > EDIT_WINDOW_MS) {
+      throw new CommentError("FORBIDDEN", "edit window expired", 403);
+    }
+    const body = validateBody(patch.body);
+    await appendEvent(file2, { op: "edit", id, body, at: now, by: actor.name });
+  } else if (typeof patch.resolved === "boolean") {
+    if (actor.role !== "host" && existing.author !== actor.name) {
+      throw new CommentError("FORBIDDEN", "resolve requires host or author", 403);
+    }
+    await appendEvent(file2, { op: "resolve", id, resolved: patch.resolved, at: now, by: actor.name });
+  } else {
+    throw new CommentError("BAD_REQUEST", "patch must set body or resolved", 400);
+  }
+  const refreshed = collapse(await readEvents(file2)).find((c) => c.id === id);
+  refreshed.replies = [];
+  return refreshed;
+}
+async function listPendingMentions(workspaceRoot, scenario) {
+  assertName(scenario, "scenario");
+  const commentsDir = resolve(workspaceRoot, "plans", scenario, ".comments");
+  let files;
+  try {
+    const { readdir: readdir3 } = await import("node:fs/promises");
+    files = await readdir3(commentsDir);
+  } catch {
+    return [];
+  }
+  const out = [];
+  for (const name of files) {
+    if (!name.endsWith(".jsonl")) continue;
+    const docSlug = name.slice(0, -".jsonl".length);
+    let data;
+    try {
+      data = await listComments(workspaceRoot, scenario, docSlug);
+    } catch {
+      continue;
+    }
+    const flat = [];
+    (function walk(list) {
+      for (const c of list) {
+        flat.push(c);
+        if (c.replies) walk(c.replies);
+      }
+    })(data.comments || []);
+    const byId = new Map(flat.map((c) => [c.id, c]));
+    for (const c of flat) {
+      if (c.deleted) continue;
+      if (!c.mentionedPersonas || c.mentionedPersonas.length === 0) continue;
+      const threadReplies = flat.filter(
+        (r) => r.threadId === c.threadId && !r.deleted && r.personaRole != null
+      );
+      for (const persona of c.mentionedPersonas) {
+        const fulfilled = threadReplies.some(
+          (r) => r.personaRole === persona && String(r.createdAt) >= String(c.createdAt)
+        );
+        if (!fulfilled) {
+          out.push({
+            scenario,
+            doc: docSlug,
+            id: c.id,
+            threadId: c.threadId,
+            replyTo: c.replyTo,
+            persona,
+            author: c.author,
+            body: c.body,
+            anchor: c.anchor,
+            createdAt: c.createdAt
+          });
+        }
+      }
+    }
+  }
+  out.sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)));
+  return out;
+}
+async function postPersonaReply(workspaceRoot, scenario, doc, parentId, persona, body, actor) {
+  if (!actor || !actor.name) throw new CommentError("FORBIDDEN", "actor required", 403);
+  if (!PERSONA_SET.has(String(persona || "").toLowerCase())) {
+    throw new CommentError("BAD_REQUEST", `unknown persona "${persona}"`, 400);
+  }
+  const personaLc = String(persona).toLowerCase();
+  const validatedBody = validateBody(body);
+  if (!ID_RE.test(parentId)) throw new CommentError("BAD_REQUEST", "invalid parent id", 400);
+  const file2 = commentFilePath(workspaceRoot, scenario, doc);
+  const existing = collapse(await readEvents(file2));
+  const parent = existing.find((c) => c.id === parentId);
+  if (!parent) throw new CommentError("NOT_FOUND", "parent comment not found", 404);
+  if (parent.deleted) throw new CommentError("BAD_REQUEST", "cannot reply to deleted comment", 400);
+  if (!parent.mentionedPersonas || !parent.mentionedPersonas.includes(personaLc)) {
+    throw new CommentError("BAD_REQUEST", `parent comment does not mention @${personaLc}`, 400);
+  }
+  const id = genId();
+  const createdAt = (/* @__PURE__ */ new Date()).toISOString();
+  const event = {
+    op: "create",
+    id,
+    createdAt,
+    author: personaLc,
+    anchor: parent.anchor || null,
+    body: validatedBody,
+    threadId: parent.threadId || parent.id,
+    replyTo: parent.id,
+    intent: "comment",
+    personaRole: personaLc,
+    postedBy: actor.name
+    // audit trail: which MCP caller relayed this
+  };
+  await appendEvent(file2, event);
+  return {
+    id,
+    createdAt,
+    author: personaLc,
+    anchor: parent.anchor || null,
+    body: validatedBody,
+    threadId: event.threadId,
+    replyTo: parent.id,
+    intent: "comment",
+    todoResolves: false,
+    resolved: false,
+    resolvedBy: null,
+    resolvedAt: null,
+    deleted: false,
+    deletedBy: null,
+    editedAt: null,
+    reviseStatus: null,
+    reviseProposalRef: null,
+    mentionedPersonas: [],
+    personaRole: personaLc,
+    replies: []
+  };
+}
+function tokens(s) {
+  const t = String(s || "").replace(/<[^>]+>/g, " ").replace(/&[a-zA-Z#0-9]+;/g, " ").toLowerCase().replace(/[^a-z0-9\u00a0-\uffff]+/g, " ").trim();
+  return new Set(t ? t.split(/\s+/) : []);
+}
+function jaccard(a, b) {
+  if (a.size === 0 && b.size === 0) return 1;
+  let intersect = 0;
+  const small = a.size < b.size ? a : b;
+  const other = small === a ? b : a;
+  for (const t of small) if (other.has(t)) intersect += 1;
+  const union2 = a.size + b.size - intersect;
+  return union2 === 0 ? 0 : intersect / union2;
+}
+function indexDocSections(html) {
+  const out = /* @__PURE__ */ new Map();
+  const re = /<h[234][^>]*\bdata-section-id\s*=\s*["']([^"']+)["'][^>]*>([\s\S]*?)<\/h[234]>([\s\S]*?)(?=<h[234][^>]*\bdata-section-id|$)/gi;
+  let m;
+  while (m = re.exec(html)) {
+    out.set(m[1], { heading: m[2], content: m[3] });
+  }
+  return out;
+}
+function reanchorOne(docSections, anchor) {
+  if (!anchor || !anchor.exact) {
+    return { orphaned: true };
+  }
+  const needle = anchor.exact;
+  const sec = anchor.sectionId ? docSections.get(anchor.sectionId) : null;
+  if (sec) {
+    const combined = (anchor.prefix || "") + needle + (anchor.suffix || "");
+    if (combined.length > 0 && sec.content.includes(combined)) {
+      return { sectionId: anchor.sectionId, orphaned: false };
+    }
+  }
+  if (sec && sec.content.includes(needle)) {
+    return { sectionId: anchor.sectionId, orphaned: false };
+  }
+  const needleTokens = tokens(needle);
+  let best = { sectionId: null, score: 0 };
+  for (const [sid, s] of docSections) {
+    const chunks = s.content.match(/<(?:p|li|td|span|h[234]|strong|em|div)[^>]*>([\s\S]*?)<\/(?:p|li|td|span|h[234]|strong|em|div)>/gi) || [];
+    for (const chunk of chunks) {
+      const score = jaccard(needleTokens, tokens(chunk));
+      if (score > best.score) best = { sectionId: sid, score };
+    }
+  }
+  if (best.sectionId && best.score >= JACCARD_THRESHOLD) {
+    return {
+      sectionId: best.sectionId,
+      migratedFrom: anchor.sectionId || null,
+      orphaned: false
+    };
+  }
+  return { orphaned: true, migratedFrom: anchor.sectionId || null };
+}
+async function reanchorDocument(workspaceRoot, scenario, doc) {
+  assertName(scenario, "scenario");
+  assertName(doc, "doc");
+  const plansRoot = resolve(workspaceRoot, "plans");
+  const htmlPath = resolve(plansRoot, scenario, `${doc}.html`);
+  if (!htmlPath.startsWith(plansRoot + sep2)) {
+    throw new CommentError("BAD_REQUEST", "path traversal rejected", 400);
+  }
+  let html;
+  try {
+    html = await readFile2(htmlPath, "utf8");
+  } catch (err) {
+    if (err.code === "ENOENT") return { held: 0, migrated: 0, orphaned: 0, total: 0 };
+    throw err;
+  }
+  const sections = indexDocSections(html);
+  const file2 = commentFilePath(workspaceRoot, scenario, doc);
+  const existing = collapse(await readEvents(file2));
+  let held = 0, migrated = 0, orphaned = 0;
+  for (const c of existing) {
+    if (c.deleted) continue;
+    if (!c.anchor) continue;
+    const result = reanchorOne(sections, c.anchor);
+    const movedSection = result.sectionId && result.sectionId !== c.anchor.sectionId;
+    const justOrphaned = !!result.orphaned && !c.anchor.orphaned;
+    const cleared = !result.orphaned && c.anchor.orphaned;
+    if (!movedSection && !justOrphaned && !cleared) {
+      held += 1;
+      continue;
+    }
+    const newAnchor = {};
+    if (result.sectionId) newAnchor.sectionId = result.sectionId;
+    if (result.orphaned != null) newAnchor.orphaned = !!result.orphaned;
+    if (result.migratedFrom != null) newAnchor.migratedFrom = result.migratedFrom;
+    await appendEvent(file2, {
+      op: "reanchor",
+      id: c.id,
+      anchor: newAnchor,
+      at: (/* @__PURE__ */ new Date()).toISOString()
+    });
+    if (result.orphaned) orphaned += 1;
+    else migrated += 1;
+  }
+  console.error(`[comments] reanchor ${scenario}/${doc} held=${held} migrated=${migrated} orphaned=${orphaned}`);
+  return { held, migrated, orphaned, total: held + migrated + orphaned };
+}
+async function reanchorScenario(workspaceRoot, scenario) {
+  assertName(scenario, "scenario");
+  const commentsDir = resolve(workspaceRoot, "plans", scenario, ".comments");
+  let files = [];
+  try {
+    const { readdir: readdir3 } = await import("node:fs/promises");
+    files = await readdir3(commentsDir);
+  } catch {
+    return { held: 0, migrated: 0, orphaned: 0, total: 0, docs: [] };
+  }
+  const agg = { held: 0, migrated: 0, orphaned: 0, total: 0, docs: [] };
+  for (const name of files) {
+    if (!name.endsWith(".jsonl")) continue;
+    const doc = name.slice(0, -".jsonl".length);
+    try {
+      const r = await reanchorDocument(workspaceRoot, scenario, doc);
+      agg.held += r.held;
+      agg.migrated += r.migrated;
+      agg.orphaned += r.orphaned;
+      agg.total += r.total;
+      agg.docs.push({ doc, ...r });
+    } catch (err) {
+      agg.docs.push({ doc, error: err.message || String(err) });
+    }
+  }
+  return agg;
+}
+async function deleteComment(workspaceRoot, scenario, doc, id, actor) {
+  if (!actor || !actor.name) throw new CommentError("FORBIDDEN", "actor required", 403);
+  if (!ID_RE.test(id)) throw new CommentError("BAD_REQUEST", "invalid id", 400);
+  const file2 = commentFilePath(workspaceRoot, scenario, doc);
+  const events = await readEvents(file2);
+  const existing = collapse(events).find((c) => c.id === id);
+  if (!existing) throw new CommentError("NOT_FOUND", "comment not found", 404);
+  if (existing.deleted) return;
+  if (existing.author !== actor.name && actor.role !== "host") {
+    throw new CommentError("FORBIDDEN", "delete requires author or host", 403);
+  }
+  await appendEvent(file2, { op: "delete", id, at: (/* @__PURE__ */ new Date()).toISOString(), by: actor.name });
+}
+function checkRate(key) {
+  const now = Date.now();
+  let b = buckets.get(key);
+  if (!b) {
+    b = { tokens: BUCKET_CAPACITY, lastRefillAt: now };
+    buckets.set(key, b);
+  }
+  const elapsed = now - b.lastRefillAt;
+  if (elapsed > 0) {
+    const refill = elapsed / BUCKET_WINDOW_MS * BUCKET_CAPACITY;
+    b.tokens = Math.min(BUCKET_CAPACITY, b.tokens + refill);
+    b.lastRefillAt = now;
+  }
+  if (b.tokens < 1) {
+    const shortfall = 1 - b.tokens;
+    const retryAfter = Math.ceil(shortfall / BUCKET_CAPACITY * (BUCKET_WINDOW_MS / 1e3));
+    return { ok: false, retryAfter };
+  }
+  b.tokens -= 1;
+  return { ok: true, retryAfter: 0 };
+}
+function sseKey(scenario, doc) {
+  return `${scenario}::${doc}`;
+}
+function registerSseClient(scenario, doc, res) {
+  const key = sseKey(scenario, doc);
+  let set2 = sseClients.get(key);
+  if (!set2) {
+    set2 = /* @__PURE__ */ new Set();
+    sseClients.set(key, set2);
+  }
+  set2.add(res);
+  return () => {
+    const s = sseClients.get(key);
+    if (!s) return;
+    s.delete(res);
+    if (s.size === 0) sseClients.delete(key);
+  };
+}
+function broadcastCommentEvent(scenario, doc, op, comment) {
+  const key = sseKey(scenario, doc);
+  const set2 = sseClients.get(key);
+  if (!set2 || set2.size === 0) return;
+  const payload = `event: comment
+data: ${JSON.stringify({ op, comment })}
+
+`;
+  for (const res of set2) {
+    try {
+      res.write(payload);
+    } catch {
+    }
+  }
+}
+function sseHeartbeat() {
+  for (const set2 of sseClients.values()) {
+    for (const res of set2) {
+      try {
+        res.write("event: ping\ndata: {}\n\n");
+      } catch {
+      }
+    }
+  }
+}
+var NAME_RE, NAME_MAX, ID_RE, BODY_MIN, BODY_MAX, EXACT_MAX, AFFIX_MAX, EDIT_WINDOW_MS, PERSONA_NAMES, PERSONA_SET, MENTION_RE, CommentError, JACCARD_THRESHOLD, BUCKET_CAPACITY, BUCKET_WINDOW_MS, buckets, sseClients;
+var init_comment_manager = __esm({
+  "src/comment-manager.js"() {
+    NAME_RE = /^[a-zA-Z0-9_-]+$/;
+    NAME_MAX = 80;
+    ID_RE = /^cmt_[a-f0-9]{6}$/;
+    BODY_MIN = 1;
+    BODY_MAX = 4e3;
+    EXACT_MAX = 2e3;
+    AFFIX_MAX = 64;
+    EDIT_WINDOW_MS = 10 * 60 * 1e3;
+    PERSONA_NAMES = ["architect", "pm", "tester", "frontend", "backend", "writer"];
+    PERSONA_SET = new Set(PERSONA_NAMES);
+    MENTION_RE = new RegExp("(?:^|[^a-zA-Z0-9_])@(" + PERSONA_NAMES.join("|") + ")(?![a-zA-Z0-9_])", "gi");
+    CommentError = class extends Error {
+      constructor(code, message, status) {
+        super(message);
+        this.code = code;
+        this.status = status || 400;
+      }
+    };
+    JACCARD_THRESHOLD = 0.72;
+    BUCKET_CAPACITY = 5;
+    BUCKET_WINDOW_MS = 10 * 1e3;
+    buckets = /* @__PURE__ */ new Map();
+    sseClients = /* @__PURE__ */ new Map();
+    if (!globalThis.__PH_SSE_HEARTBEAT_STARTED__) {
+      globalThis.__PH_SSE_HEARTBEAT_STARTED__ = true;
+      setInterval(sseHeartbeat, 30 * 1e3).unref();
+    }
+  }
+});
+
+// src/revise-dispatcher.js
+var revise_dispatcher_exports = {};
+__export(revise_dispatcher_exports, {
+  acceptProposal: () => acceptProposal,
+  attachProposal: () => attachProposal,
+  dispatchRevise: () => dispatchRevise,
+  listPendingRevises: () => listPendingRevises,
+  maybeAutoDispatch: () => maybeAutoDispatch,
+  readProposal: () => readProposal,
+  rejectProposal: () => rejectProposal
+});
+import { appendFile as appendFile2, mkdir as mkdir3, readFile as readFile3, writeFile as writeFile2 } from "node:fs/promises";
+import { join as join3, resolve as resolve2, sep as sep3 } from "node:path";
+async function readConfig(workspaceRoot, scenario) {
+  const file2 = resolve2(workspaceRoot, "plans", scenario, ".comment-config.json");
+  try {
+    const text = await readFile3(file2, "utf8");
+    const parsed = JSON.parse(text);
+    const mode = parsed && parsed.reviseMode === "active" ? "active" : "passive";
+    return { reviseMode: mode };
+  } catch {
+    return { ...DEFAULT_CONFIG };
+  }
+}
+function assertName2(value, label) {
+  if (typeof value !== "string" || !/^[a-zA-Z0-9_-]+$/.test(value) || value.length > 80) {
+    throw new CommentError("BAD_REQUEST", `invalid ${label}`, 400);
+  }
+}
+function proposalPath(workspaceRoot, scenario, doc, commentId) {
+  assertName2(scenario, "scenario");
+  assertName2(doc, "doc");
+  if (!/^cmt_[a-f0-9]{6}$/.test(commentId)) {
+    throw new CommentError("BAD_REQUEST", "invalid comment id", 400);
+  }
+  const plansRoot = resolve2(workspaceRoot, "plans");
+  const file2 = resolve2(plansRoot, scenario, ".comments", `${doc}.proposals`, `${commentId}.diff`);
+  if (!file2.startsWith(plansRoot + sep3)) {
+    throw new CommentError("BAD_REQUEST", "path traversal rejected", 400);
+  }
+  return file2;
+}
+function commentFilePath2(workspaceRoot, scenario, doc) {
+  assertName2(scenario, "scenario");
+  assertName2(doc, "doc");
+  const plansRoot = resolve2(workspaceRoot, "plans");
+  const file2 = resolve2(plansRoot, scenario, ".comments", `${doc}.jsonl`);
+  if (!file2.startsWith(plansRoot + sep3)) {
+    throw new CommentError("BAD_REQUEST", "path traversal rejected", 400);
+  }
+  return file2;
+}
+function docHtmlPath(workspaceRoot, scenario, doc) {
+  assertName2(scenario, "scenario");
+  assertName2(doc, "doc");
+  const plansRoot = resolve2(workspaceRoot, "plans");
+  const file2 = resolve2(plansRoot, scenario, `${doc}.html`);
+  if (!file2.startsWith(plansRoot + sep3)) {
+    throw new CommentError("BAD_REQUEST", "path traversal rejected", 400);
+  }
+  return file2;
+}
+async function appendEvent2(file2, event) {
+  await mkdir3(join3(file2, ".."), { recursive: true });
+  await appendFile2(file2, JSON.stringify(event) + "\n", "utf8");
+}
+function decodeEntity(ent) {
+  const inner = ent.slice(1, -1);
+  if (inner.startsWith("#")) {
+    const code = inner.startsWith("#x") ? parseInt(inner.slice(2), 16) : parseInt(inner.slice(1), 10);
+    return Number.isFinite(code) ? String.fromCodePoint(code) : ent;
+  }
+  return ENT_NAMED[inner] ?? ent;
+}
+function normalizeSpaces(s) {
+  return (s || "").replace(/\s+/g, " ").trim();
+}
+function renderText(html) {
+  const text = [];
+  const map2 = [];
+  const charRawLen = [];
+  let lastWasSpace = true;
+  let i = 0;
+  while (i < html.length) {
+    const c = html[i];
+    if (c === "<") {
+      const end = html.indexOf(">", i);
+      if (end === -1) {
+        i++;
+        continue;
+      }
+      i = end + 1;
+      continue;
+    }
+    if (c === "&") {
+      const semi = html.indexOf(";", i);
+      if (semi !== -1 && semi - i <= 10) {
+        const ent = html.slice(i, semi + 1);
+        const decoded = decodeEntity(ent);
+        if (decoded !== ent) {
+          const raw = ent.length;
+          for (let j = 0; j < decoded.length; j++) {
+            const ch = decoded[j];
+            if (/\s/.test(ch)) {
+              if (!lastWasSpace) {
+                text.push(" ");
+                map2.push(i);
+                charRawLen.push(j === decoded.length - 1 ? raw : 0);
+                lastWasSpace = true;
+              }
+            } else {
+              text.push(ch);
+              map2.push(i);
+              charRawLen.push(j === decoded.length - 1 ? raw : 0);
+              lastWasSpace = false;
+            }
+          }
+          i += raw;
+          continue;
+        }
+      }
+      text.push("&");
+      map2.push(i);
+      charRawLen.push(1);
+      lastWasSpace = false;
+      i++;
+      continue;
+    }
+    if (/\s/.test(c)) {
+      if (!lastWasSpace) {
+        text.push(" ");
+        map2.push(i);
+        charRawLen.push(1);
+        lastWasSpace = true;
+      }
+      i++;
+      continue;
+    }
+    text.push(c);
+    map2.push(i);
+    charRawLen.push(1);
+    lastWasSpace = false;
+    i++;
+  }
+  while (text.length && text[text.length - 1] === " ") {
+    text.pop();
+    map2.pop();
+    charRawLen.pop();
+  }
+  return { text: text.join(""), map: map2, charRawLen };
+}
+function requireHost(actor) {
+  if (!actor || actor.role !== "host") {
+    throw new CommentError("FORBIDDEN", "revise flow is host-only", 403);
+  }
+}
+async function dispatchRevise(workspaceRoot, scenario, doc, commentId, actor) {
+  requireHost(actor);
+  const file2 = commentFilePath2(workspaceRoot, scenario, doc);
+  await appendEvent2(file2, {
+    op: "revise",
+    id: commentId,
+    reviseStatus: "dispatched",
+    at: (/* @__PURE__ */ new Date()).toISOString(),
+    by: actor.name
+  });
+}
+async function attachProposal(workspaceRoot, scenario, doc, commentId, diffContent, actor) {
+  requireHost(actor);
+  const file2 = proposalPath(workspaceRoot, scenario, doc, commentId);
+  await mkdir3(join3(file2, ".."), { recursive: true });
+  await writeFile2(file2, diffContent, "utf8");
+  const eventFile = commentFilePath2(workspaceRoot, scenario, doc);
+  const relRef = `.comments/${doc}.proposals/${commentId}.diff`;
+  await appendEvent2(eventFile, {
+    op: "revise",
+    id: commentId,
+    reviseStatus: "proposed",
+    proposalRef: relRef,
+    at: (/* @__PURE__ */ new Date()).toISOString(),
+    by: actor.name
+  });
+}
+async function acceptProposal(workspaceRoot, scenario, doc, commentId, anchor, actor) {
+  requireHost(actor);
+  const propFile = proposalPath(workspaceRoot, scenario, doc, commentId);
+  const diff = await readFile3(propFile, "utf8");
+  const parsed = parseProposal(diff);
+  if (!parsed) throw new CommentError("BAD_REQUEST", "proposal format unrecognized", 400);
+  const htmlPath = docHtmlPath(workspaceRoot, scenario, doc);
+  const html = await readFile3(htmlPath, "utf8");
+  const rendered = renderText(html);
+  if (anchor && anchor.exact) {
+    const a = normalizeSpaces(anchor.exact);
+    if (a && rendered.text.indexOf(a) === -1) {
+      throw new CommentError("ANCHOR_DRIFT", "anchor no longer matches; reattach manually", 409);
+    }
+  }
+  const needle = normalizeSpaces(parsed.from);
+  const nIdx = rendered.text.indexOf(needle);
+  if (nIdx === -1) {
+    throw new CommentError("ANCHOR_DRIFT", "proposal target text not found in doc", 409);
+  }
+  if (rendered.text.indexOf(needle, nIdx + 1) !== -1) {
+    throw new CommentError("AMBIGUOUS_TARGET", "proposal target appears more than once; refine the anchor", 409);
+  }
+  const rawStart = rendered.map[nIdx];
+  const rawEnd = rendered.map[nIdx + needle.length - 1] + rendered.charRawLen[nIdx + needle.length - 1];
+  const next = html.slice(0, rawStart) + parsed.to + html.slice(rawEnd);
+  await writeFile2(htmlPath, next, "utf8");
+  const eventFile = commentFilePath2(workspaceRoot, scenario, doc);
+  await appendEvent2(eventFile, {
+    op: "revise",
+    id: commentId,
+    reviseStatus: "accepted",
+    at: (/* @__PURE__ */ new Date()).toISOString(),
+    by: actor.name
+  });
+  await appendEvent2(eventFile, {
+    op: "resolve",
+    id: commentId,
+    resolved: true,
+    at: (/* @__PURE__ */ new Date()).toISOString(),
+    by: actor.name
+  });
+}
+async function rejectProposal(workspaceRoot, scenario, doc, commentId, actor) {
+  requireHost(actor);
+  const eventFile = commentFilePath2(workspaceRoot, scenario, doc);
+  await appendEvent2(eventFile, {
+    op: "revise",
+    id: commentId,
+    reviseStatus: "rejected",
+    at: (/* @__PURE__ */ new Date()).toISOString(),
+    by: actor.name
+  });
+}
+async function readProposal(workspaceRoot, scenario, doc, commentId) {
+  const file2 = proposalPath(workspaceRoot, scenario, doc, commentId);
+  try {
+    return await readFile3(file2, "utf8");
+  } catch (err) {
+    if (err.code === "ENOENT") return null;
+    throw err;
+  }
+}
+async function maybeAutoDispatch(workspaceRoot, scenario, doc, commentId, actor) {
+  const cfg = await readConfig(workspaceRoot, scenario);
+  if (cfg.reviseMode !== "active") return { mode: "passive", dispatched: false };
+  try {
+    await dispatchRevise(workspaceRoot, scenario, doc, commentId, actor);
+    return { mode: "active", dispatched: true };
+  } catch {
+    return { mode: "active", dispatched: false };
+  }
+}
+async function listPendingRevises(workspaceRoot, scenario) {
+  assertName2(scenario, "scenario");
+  const commentsDir = resolve2(workspaceRoot, "plans", scenario, ".comments");
+  let files;
+  try {
+    const { readdir: readdir3 } = await import("node:fs/promises");
+    files = await readdir3(commentsDir);
+  } catch {
+    return [];
+  }
+  const out = [];
+  for (const name of files) {
+    if (!name.endsWith(".jsonl")) continue;
+    const docSlug = name.slice(0, -".jsonl".length);
+    try {
+      const { listComments: listComments2 } = await Promise.resolve().then(() => (init_comment_manager(), comment_manager_exports));
+      const data = await listComments2(workspaceRoot, scenario, docSlug);
+      (function walk(list) {
+        for (const c of list) {
+          if (c.intent === "revise" && c.reviseStatus === "pending" && !c.deleted) {
+            out.push({
+              scenario,
+              doc: docSlug,
+              id: c.id,
+              body: c.body,
+              anchor: c.anchor,
+              author: c.author,
+              createdAt: c.createdAt
+            });
+          }
+          if (c.replies) walk(c.replies);
+        }
+      })(data.comments || []);
+    } catch {
+    }
+  }
+  return out;
+}
+function parseProposal(diff) {
+  const m = /^REPLACE:\s*\n([\s\S]*?)\nWITH:\s*\n([\s\S]*)$/m.exec(String(diff || ""));
+  if (!m) return null;
+  return { from: m[1], to: m[2] };
+}
+var DEFAULT_CONFIG, ENT_NAMED;
+var init_revise_dispatcher = __esm({
+  "src/revise-dispatcher.js"() {
+    init_comment_manager();
+    DEFAULT_CONFIG = { reviseMode: "passive" };
+    ENT_NAMED = {
+      mdash: "\u2014",
+      ndash: "\u2013",
+      hellip: "\u2026",
+      lsquo: "\u2018",
+      rsquo: "\u2019",
+      ldquo: "\u201C",
+      rdquo: "\u201D",
+      nbsp: "\xA0",
+      amp: "&",
+      lt: "<",
+      gt: ">",
+      quot: '"',
+      apos: "'",
+      times: "\xD7",
+      check: "\u2713",
+      cross: "\u2717",
+      laquo: "\xAB",
+      raquo: "\xBB",
+      copy: "\xA9",
+      reg: "\xAE",
+      trade: "\u2122"
+    };
+  }
+});
+
 // src/templates/base.js
 import { createHash } from "node:crypto";
 function getBaseCSS() {
@@ -7358,6 +8357,108 @@ function filterScenarios() {
     ...options
   });
 }
+function generateOverview(groups, options = {}) {
+  const planTypes = ["product", "analysis", "design", "state-machine", "test-spec", "implementation", "test-report"];
+  const totalProjects = groups.length;
+  const totalScenarios = groups.reduce((s, g) => s + g.scenarios.length, 0);
+  const existingFiles = groups.reduce((s, g) => s + g.scenarios.reduce((t, sc) => t + (sc.files ? sc.files.filter((f) => f.exists).length : 0), 0), 0);
+  const totalUnresolved = groups.reduce((s, g) => s + g.scenarios.reduce((t, sc) => t + (sc.unresolvedComments || 0), 0), 0);
+  const summaryCards = `
+<div class="summary-grid">
+  <div class="summary-card"><div class="summary-value">${totalProjects}</div><div class="summary-label">Projects</div></div>
+  <div class="summary-card"><div class="summary-value">${totalScenarios}</div><div class="summary-label">Scenarios</div></div>
+  <div class="summary-card"><div class="summary-value" style="color:var(--green)">${existingFiles}</div><div class="summary-label">Plan Files</div></div>
+  ${totalUnresolved > 0 ? `<div class="summary-card"><div class="summary-value" style="color:var(--accent)">${totalUnresolved}</div><div class="summary-label">Unresolved comments</div></div>` : ""}
+</div>
+`;
+  const scenarioCard = (projectId, sc) => {
+    const todos = sc.todos || 0;
+    const unresolved = sc.unresolvedComments || 0;
+    const fileCount = sc.files ? sc.files.length : 0;
+    const existCount = sc.files ? sc.files.filter((f) => f.exists).length : 0;
+    const filePills = planTypes.map((type) => {
+      const file2 = sc.files ? sc.files.find((f) => f.type === type) : null;
+      const exists = file2 && file2.exists;
+      const pillClass = exists ? "badge-green" : "";
+      const pillStyle = !exists ? "background:var(--code-bg);color:var(--muted);border:1px solid var(--border);" : "";
+      return `<span class="badge ${pillClass}" style="${pillStyle}font-size:0.7rem;">${type}</span>`;
+    }).join(" ");
+    const open = todos + unresolved;
+    const statusDot = open === 0 && existCount > 0 ? '<span style="color:var(--green);font-size:1.2rem;" title="No open items">&#10003;</span>' : open > 0 ? '<span style="color:var(--yellow);font-size:1.2rem;" title="Open items">&#9679;</span>' : '<span style="color:var(--muted);font-size:1.2rem;" title="No tracked items">&#9675;</span>';
+    const firstDoc = sc.files ? sc.files.find((f) => f.exists) : null;
+    const cardHref = firstDoc ? buildDocHref(firstDoc.path, projectId) : `/p/${encodeURIComponent(projectId)}/`;
+    return `
+<div class="scenario-card" style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:1.2rem;cursor:pointer;transition:box-shadow 0.15s,border-color 0.15s;" onclick="window.location.href='${escapeAttr(cardHref)}'" onmouseover="this.style.boxShadow='var(--shadow-lg)';this.style.borderColor='var(--accent)'" onmouseout="this.style.boxShadow='';this.style.borderColor='var(--border)'">
+  <div style="display:flex;align-items:center;gap:0.6rem;margin-bottom:0.6rem;">
+    ${statusDot}
+    <span style="font-size:1.05rem;font-weight:700;">${escapeHTML(sc.name)}</span>
+  </div>
+  ${sc.description ? `<p style="font-size:0.85rem;color:var(--muted);margin-bottom:0.6rem;">${escapeHTML(sc.description)}</p>` : ""}
+  <div style="margin-bottom:0.6rem;">${filePills}</div>
+  <div style="display:flex;align-items:center;gap:0.9rem;font-size:0.85rem;flex-wrap:wrap;">
+    <span style="color:var(--muted);">${existCount}/${fileCount} files</span>
+    ${todos > 0 ? `<span style="color:var(--yellow);font-weight:600;">${todos} todo</span>` : ""}
+    ${unresolved > 0 ? `<span style="color:var(--accent);font-weight:600;">${unresolved} unresolved</span>` : ""}
+  </div>
+</div>`;
+  };
+  const projectGroups = groups.map((g) => {
+    const cards = g.scenarios.length ? g.scenarios.map((sc) => scenarioCard(g.projectId, sc)).join("\n") : `<p style="color:var(--muted);font-size:0.9rem;">No scenarios yet \u2014 run <code>/plan-init</code> in this project.</p>`;
+    return `
+<details class="project-group" open style="margin-bottom:1.4rem;border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;">
+  <summary style="padding:0.9rem 1.1rem;cursor:pointer;background:var(--surface);font-weight:700;display:flex;align-items:center;gap:0.6rem;">
+    <span style="font-size:1.05rem;">${escapeHTML(g.label)}</span>
+    <span style="color:var(--muted);font-weight:400;font-size:0.8rem;">${escapeHTML(g.rootPath)}</span>
+    <span style="margin-left:auto;color:var(--muted);font-weight:400;font-size:0.8rem;">${g.scenarios.length} scenario${g.scenarios.length === 1 ? "" : "s"}</span>
+  </summary>
+  <div style="padding:1rem;">
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(360px,1fr));gap:1rem;">
+${cards}
+    </div>
+  </div>
+</details>`;
+  }).join("\n");
+  const emptyState = groups.length === 0 ? `<p style="color:var(--muted);">No projects registered yet. Run <code>/plan-start</code> in a project directory to register it.</p>` : "";
+  const content = `
+${summaryCards}
+
+<h2 id="projects">Projects</h2>
+
+<div class="filter-bar" style="margin-bottom:1rem;">
+  <input type="text" id="overviewSearch" placeholder="Search projects & scenarios..." oninput="filterOverview()" style="font-family:inherit;font-size:13px;padding:6px 10px;border:1px solid var(--border);border-radius:4px;background:var(--surface);color:var(--text);width:280px;">
+</div>
+
+${projectGroups}
+${emptyState}
+`;
+  const scripts = `
+<script>
+function filterOverview() {
+  var query = document.getElementById('overviewSearch').value.toLowerCase();
+  document.querySelectorAll('.project-group').forEach(function(group) {
+    var anyVisible = false;
+    group.querySelectorAll('.scenario-card').forEach(function(card) {
+      var show = card.textContent.toLowerCase().includes(query);
+      card.style.display = show ? '' : 'none';
+      if (show) anyVisible = true;
+    });
+    var summaryText = group.querySelector('summary').textContent.toLowerCase();
+    group.style.display = (anyVisible || summaryText.includes(query) || !query) ? '' : 'none';
+  });
+}
+</script>
+`;
+  return wrapPage(content, {
+    title: options.title || "Plan Dashboard",
+    subtitle: options.subtitle || "",
+    meta: options.meta || `Generated ${(/* @__PURE__ */ new Date()).toISOString().slice(0, 10)}`,
+    tags: options.tags || [],
+    sections: [],
+    scripts,
+    storageKey: "plan-dashboard-theme",
+    ...options
+  });
+}
 function generateScenarioDetail(scenario, options = {}) {
   const PLAN_DEFS = [
     { type: "product", label: "Product", blurb: "PRD: why, who, user stories, metrics, scope", skill: "/plan-gen product" },
@@ -7470,9 +8571,22 @@ ${docsHTML}
     ...options
   });
 }
-function buildDocHref(absPath) {
+function buildDocHref(absPath, projectId) {
   if (!absPath) return "";
   const normalized = String(absPath).replace(/\\/g, "/");
+  if (projectId) {
+    for (const rootName of ["plan-harness", "plans"]) {
+      const needle = `/${rootName}/`;
+      const idx2 = normalized.lastIndexOf(needle);
+      if (idx2 >= 0) {
+        const rest2 = normalized.slice(idx2 + needle.length);
+        const enc = rest2.split("/").map(encodeURIComponent).join("/");
+        return `/p/${encodeURIComponent(projectId)}/${enc}`;
+      }
+    }
+    const base = normalized.split("/").pop();
+    return `/p/${encodeURIComponent(projectId)}/${encodeURIComponent(base)}`;
+  }
   const idx = normalized.lastIndexOf("/plan-harness/");
   if (idx < 0) return "/view?path=" + encodeURIComponent(absPath);
   const rest = normalized.slice(idx + "/plan-harness/".length);
@@ -9246,7 +10360,7 @@ function normalizeChecklistItems(html) {
   if (/<\/head>/i.test(out)) return out.replace(/<\/head>/i, style + "</head>");
   return style + out;
 }
-function normalizePlanTabs(html, existingSiblings, scenarioDir) {
+function normalizePlanTabs(html, existingSiblings, scenarioDir, projectId) {
   if (!html || typeof html !== "string" || !existingSiblings || existingSiblings.size === 0) return html;
   return html.replace(
     /<nav\b[^>]*class=["'][^"']*\bplan-tabs\b[^"']*["'][^>]*>([\s\S]*?)<\/nav>/gi,
@@ -9263,7 +10377,7 @@ function normalizePlanTabs(html, existingSiblings, scenarioDir) {
           let newHref = href;
           if (scenarioDir) {
             const absPath = scenarioDir.replace(/\\/g, "/") + "/" + basename4;
-            newHref = buildDocHref(absPath);
+            newHref = buildDocHref(absPath, projectId);
           }
           let newAttrs = attrs.replace(/\s+aria-disabled\s*=\s*["'][^"']*["']/gi, "").replace(/\bhref\s*=\s*["'][^"']+["']/i, 'href="' + newHref.replace(/"/g, "&quot;") + '"');
           const newBody = body.replace(/<span\b[^>]*class=["'][^"']*\bsoon\b[^"']*["'][^>]*>[\s\S]*?<\/span>/gi, "").trim();
@@ -9273,6 +10387,69 @@ function normalizePlanTabs(html, existingSiblings, scenarioDir) {
       return match.replace(inner, newInner);
     }
   );
+}
+function normalizeDocGroup(html, existingSiblings, scenarioDir, projectId) {
+  if (!html || typeof html !== "string" || !existingSiblings) return html;
+  let disabledAny = false;
+  let out = html.replace(
+    /<div\b[^>]*class=["'][^"']*\bdocgroup\b[^"']*["'][^>]*>([\s\S]*?)<\/div>/gi,
+    function(block, inner) {
+      const newInner = inner.replace(
+        /<a\b([^>]*)>([\s\S]*?)<\/a>/gi,
+        function(aMatch, attrs, body) {
+          const hrefMatch = attrs.match(/\bhref\s*=\s*["']([^"']+)["']/i);
+          if (!hrefMatch) return aMatch;
+          const href = hrefMatch[1];
+          if (/^(https?:|mailto:|#)/i.test(href)) return aMatch;
+          const basename4 = href.split(/[\\/]/).pop().split(/[#?]/)[0];
+          if (!basename4 || !/\.html?$/i.test(basename4)) return aMatch;
+          if (existingSiblings.has(basename4)) {
+            let newHref = href;
+            if (scenarioDir) {
+              const absPath = scenarioDir.replace(/\\/g, "/") + "/" + basename4;
+              newHref = buildDocHref(absPath, projectId);
+            }
+            let newAttrs2 = attrs.replace(/\s+aria-disabled\s*=\s*["'][^"']*["']/gi, "").replace(/\s+title\s*=\s*["'][^"']*not generated[^"']*["']/gi, "").replace(/\bhref\s*=\s*["'][^"']+["']/i, 'href="' + newHref.replace(/"/g, "&quot;") + '"');
+            newAttrs2 = newAttrs2.replace(
+              /\bclass\s*=\s*["']([^"']*)["']/i,
+              (m, cls) => {
+                const kept = cls.split(/\s+/).filter((c) => c && c !== "missing").join(" ");
+                return kept ? `class="${kept}"` : "";
+              }
+            );
+            return "<a" + newAttrs2 + ">" + body + "</a>";
+          }
+          disabledAny = true;
+          let newAttrs = attrs.replace(/\s*\bhref\s*=\s*["'][^"']*["']/i, "");
+          if (!/\baria-disabled\s*=/i.test(newAttrs)) {
+            newAttrs += ' aria-disabled="true"';
+          }
+          if (!/\btitle\s*=/i.test(newAttrs)) {
+            newAttrs += ' title="Not generated yet"';
+          }
+          if (/\bclass\s*=\s*["']/i.test(newAttrs)) {
+            newAttrs = newAttrs.replace(
+              /\bclass\s*=\s*["']([^"']*)["']/i,
+              (m, cls) => /\bmissing\b/.test(cls) ? m : `class="${(cls + " missing").trim()}"`
+            );
+          } else {
+            newAttrs += ' class="missing"';
+          }
+          return "<a" + newAttrs + ">" + body + "</a>";
+        }
+      );
+      return block.replace(inner, newInner);
+    }
+  );
+  if (disabledAny && !/id=["']ph-docgroup-missing["']/i.test(out)) {
+    const style = `<style id="ph-docgroup-missing">nav.toc .docgroup a.missing,nav.toc .docgroup a[aria-disabled="true"]{opacity:.4;cursor:not-allowed;pointer-events:none;text-decoration:none;}</style>`;
+    if (/<\/head>/i.test(out)) {
+      out = out.replace(/<\/head>/i, `${style}</head>`);
+    } else {
+      out = style + out;
+    }
+  }
+  return out;
 }
 function normalizeAssetLinks(html, scenarioDir) {
   if (!html || typeof html !== "string" || !scenarioDir) return html;
@@ -9438,27 +10615,10 @@ var init_base = __esm({
 });
 
 // src/auth.js
-var auth_exports = {};
-__export(auth_exports, {
-  checkRate: () => checkRate,
-  createSession: () => createSession,
-  disable: () => disable,
-  enable: () => enable,
-  generatePassword: () => generatePassword,
-  isEnabled: () => isEnabled,
-  isLocalRequest: () => isLocalRequest,
-  isLoopback: () => isLoopback,
-  isStrictHost: () => isStrictHost,
-  recordAttempt: () => recordAttempt,
-  revokeSession: () => revokeSession,
-  setStrictHost: () => setStrictHost,
-  verifyCookie: () => verifyCookie,
-  verifyPassword: () => verifyPassword
-});
-import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
+import { createHmac, randomBytes as randomBytes2, timingSafeEqual } from "node:crypto";
 function enable(customPassword) {
   password = customPassword || generatePassword();
-  hmacKey = randomBytes(32);
+  hmacKey = randomBytes2(32);
   sessions.clear();
   loginAttempts.clear();
   if (cleanupTimer === null) {
@@ -9481,7 +10641,7 @@ function isEnabled() {
   return password !== null;
 }
 function generatePassword() {
-  const bytes = randomBytes(PASSWORD_LEN);
+  const bytes = randomBytes2(PASSWORD_LEN);
   let out = "";
   for (let i = 0; i < PASSWORD_LEN; i++) {
     out += PASSWORD_ALPHA[bytes[i] % PASSWORD_ALPHA.length];
@@ -9498,7 +10658,7 @@ function verifyPassword(provided) {
   }
   return timingSafeEqual(a, b);
 }
-function checkRate(ip) {
+function checkRate2(ip) {
   const a = loginAttempts.get(ip);
   if (!a) return { allowed: true };
   if (Date.now() < a.nextAllowedAt) {
@@ -9524,7 +10684,7 @@ function recordAttempt(ip, success2) {
 function createSession(rawName) {
   if (hmacKey === null) throw new Error("auth disabled");
   const name = sanitizeName(rawName);
-  const sid = randomBytes(16).toString("hex");
+  const sid = randomBytes2(16).toString("hex");
   const now = Date.now();
   sessions.set(sid, { name, createdAt: now, expiresAt: now + SESSION_TTL_MS });
   return { sid, name, cookieValue: serializeSid(sid) };
@@ -9547,9 +10707,6 @@ function verifyCookie(cookieValue) {
   }
   s.expiresAt = Date.now() + SESSION_TTL_MS;
   return { sid, name: s.name };
-}
-function revokeSession(sid) {
-  sessions.delete(sid);
 }
 function sanitizeName(raw) {
   const trimmed = String(raw || "").trim().replace(/[\r\n\t]/g, " ").slice(0, MAX_NAME_LEN);
@@ -9576,9 +10733,6 @@ function isLoopback(addr) {
 }
 function setStrictHost(value) {
   strictHost = !!value;
-}
-function isStrictHost() {
-  return strictHost;
 }
 function isLocalRequest(req) {
   if (strictHost) return false;
@@ -9622,1005 +10776,6 @@ var init_auth = __esm({
       // Azure Front Door
     ];
     strictHost = false;
-  }
-});
-
-// src/comment-manager.js
-var comment_manager_exports = {};
-__export(comment_manager_exports, {
-  CommentError: () => CommentError,
-  PERSONA_NAMES: () => PERSONA_NAMES,
-  appendComment: () => appendComment,
-  broadcastCommentEvent: () => broadcastCommentEvent,
-  checkRate: () => checkRate2,
-  deleteComment: () => deleteComment,
-  extractMentions: () => extractMentions,
-  listComments: () => listComments,
-  listPendingMentions: () => listPendingMentions,
-  patchComment: () => patchComment,
-  postPersonaReply: () => postPersonaReply,
-  reanchorDocument: () => reanchorDocument,
-  reanchorScenario: () => reanchorScenario,
-  registerSseClient: () => registerSseClient,
-  sseHeartbeat: () => sseHeartbeat
-});
-import { appendFile, mkdir as mkdir2, readFile as readFile2 } from "node:fs/promises";
-import { join as join2, resolve, sep as sep2 } from "node:path";
-import { randomBytes as randomBytes2 } from "node:crypto";
-function extractMentions(body) {
-  if (typeof body !== "string" || body.length === 0) return [];
-  const found = /* @__PURE__ */ new Set();
-  let m;
-  MENTION_RE.lastIndex = 0;
-  while ((m = MENTION_RE.exec(body)) !== null) {
-    const persona = m[1].toLowerCase();
-    if (PERSONA_SET.has(persona)) found.add(persona);
-  }
-  return Array.from(found);
-}
-function assertName(value, label) {
-  if (typeof value !== "string" || !NAME_RE.test(value) || value.length > NAME_MAX) {
-    throw new CommentError("BAD_REQUEST", `invalid ${label}`, 400);
-  }
-}
-function commentFilePath(workspaceRoot, scenario, doc) {
-  assertName(scenario, "scenario");
-  assertName(doc, "doc");
-  const plansRoot = resolve(workspaceRoot, "plans");
-  const file2 = resolve(plansRoot, scenario, ".comments", `${doc}.jsonl`);
-  if (!file2.startsWith(plansRoot + sep2)) {
-    throw new CommentError("BAD_REQUEST", "path traversal rejected", 400);
-  }
-  return file2;
-}
-function validateAnchor(a) {
-  if (a == null) return null;
-  if (typeof a !== "object" || Array.isArray(a)) {
-    throw new CommentError("BAD_REQUEST", "anchor must be an object or null", 400);
-  }
-  const out = {};
-  if (a.sectionId != null) {
-    if (typeof a.sectionId !== "string" || !/^sec-[a-f0-9]{16}(-[0-9]+)?$/.test(a.sectionId)) {
-      throw new CommentError("BAD_REQUEST", "anchor.sectionId must be sec-<16hex>", 400);
-    }
-    out.sectionId = a.sectionId;
-  }
-  if (a.exact != null) {
-    if (typeof a.exact !== "string" || a.exact.length === 0 || a.exact.length > EXACT_MAX) {
-      throw new CommentError("BAD_REQUEST", `anchor.exact must be 1..${EXACT_MAX} chars`, 400);
-    }
-    out.exact = a.exact;
-  }
-  if (a.prefix != null) {
-    if (typeof a.prefix !== "string" || a.prefix.length > AFFIX_MAX) throw new CommentError("BAD_REQUEST", "anchor.prefix too long", 400);
-    out.prefix = a.prefix;
-  }
-  if (a.suffix != null) {
-    if (typeof a.suffix !== "string" || a.suffix.length > AFFIX_MAX) throw new CommentError("BAD_REQUEST", "anchor.suffix too long", 400);
-    out.suffix = a.suffix;
-  }
-  return out;
-}
-function validateBody(body) {
-  if (typeof body !== "string" || body.length < BODY_MIN || body.length > BODY_MAX) {
-    throw new CommentError("BAD_REQUEST", `body must be ${BODY_MIN}..${BODY_MAX} chars`, 400);
-  }
-  return body;
-}
-function validateIntent(intent, role) {
-  if (intent == null || intent === "comment") return "comment";
-  if (intent === "revise") {
-    if (role !== "host") {
-      throw new CommentError("FORBIDDEN", "revise intent requires host role", 403);
-    }
-    return "revise";
-  }
-  throw new CommentError("BAD_REQUEST", 'intent must be "comment" or "revise"', 400);
-}
-function validateTodoResolves(flag, role) {
-  if (flag == null || flag === false) return false;
-  if (flag !== true) {
-    throw new CommentError("BAD_REQUEST", "todoResolves must be a boolean", 400);
-  }
-  if (role !== "host") {
-    throw new CommentError("FORBIDDEN", "resolving a TODO requires host role", 403);
-  }
-  return true;
-}
-async function readEvents(file2) {
-  try {
-    const text = await readFile2(file2, "utf8");
-    const events = [];
-    for (const line of text.split("\n")) {
-      const trimmed = line.trim();
-      if (!trimmed) continue;
-      try {
-        events.push(JSON.parse(trimmed));
-      } catch {
-      }
-    }
-    return events;
-  } catch (err) {
-    if (err.code === "ENOENT") return [];
-    throw err;
-  }
-}
-async function appendEvent(file2, event) {
-  await mkdir2(join2(file2, ".."), { recursive: true });
-  await appendFile(file2, JSON.stringify(event) + "\n", "utf8");
-}
-function collapse(events) {
-  const byId = /* @__PURE__ */ new Map();
-  for (const ev of events) {
-    if (!ev || typeof ev !== "object" || !ev.id) continue;
-    let c = byId.get(ev.id);
-    if (!c) {
-      if (ev.op !== "create") continue;
-      c = {
-        id: ev.id,
-        createdAt: ev.createdAt,
-        author: ev.author,
-        anchor: ev.anchor || null,
-        body: ev.body,
-        threadId: ev.threadId || ev.id,
-        replyTo: ev.replyTo || null,
-        intent: ev.intent || "comment",
-        todoResolves: ev.todoResolves === true,
-        resolved: false,
-        resolvedBy: null,
-        resolvedAt: null,
-        deleted: false,
-        deletedBy: null,
-        editedAt: null,
-        reviseStatus: ev.intent === "revise" ? "pending" : null,
-        reviseProposalRef: null,
-        // @-mention payload: personas referenced in the body and the
-        // optional personaRole a persona-reply was posted under. The
-        // presence of mentionedPersonas[] means a reviewer summoned one
-        // or more agent personas; personaRole != null means this very
-        // comment is a persona's reply.
-        mentionedPersonas: Array.isArray(ev.mentionedPersonas) ? ev.mentionedPersonas.slice() : [],
-        personaRole: typeof ev.personaRole === "string" ? ev.personaRole : null
-      };
-      byId.set(ev.id, c);
-      continue;
-    }
-    if (ev.op === "edit" && typeof ev.body === "string") {
-      c.body = ev.body;
-      c.editedAt = ev.at || (/* @__PURE__ */ new Date()).toISOString();
-    } else if (ev.op === "resolve") {
-      c.resolved = !!ev.resolved;
-      c.resolvedBy = ev.by || null;
-      c.resolvedAt = ev.at || null;
-    } else if (ev.op === "delete") {
-      c.deleted = true;
-      c.deletedBy = ev.by || null;
-      c.body = "[deleted]";
-    } else if (ev.op === "revise") {
-      if (typeof ev.reviseStatus === "string") c.reviseStatus = ev.reviseStatus;
-      if (ev.proposalRef != null) c.reviseProposalRef = ev.proposalRef;
-    } else if (ev.op === "reanchor") {
-      if (ev.anchor && typeof ev.anchor === "object") {
-        c.anchor = Object.assign({}, c.anchor || {}, ev.anchor);
-      }
-      if (ev.anchor && ev.anchor.orphaned != null) {
-        c.anchor = c.anchor || {};
-        c.anchor.orphaned = !!ev.anchor.orphaned;
-      }
-      if (ev.anchor && ev.anchor.migratedFrom != null) {
-        c.anchor = c.anchor || {};
-        c.anchor.migratedFrom = ev.anchor.migratedFrom;
-      }
-    }
-  }
-  return Array.from(byId.values());
-}
-function threadTree(comments) {
-  const roots = [];
-  const byId = /* @__PURE__ */ new Map();
-  for (const c of comments) byId.set(c.id, c);
-  for (const c of comments) {
-    if (!c.replyTo) {
-      c.replies = [];
-      roots.push(c);
-    }
-  }
-  for (const c of comments) {
-    if (c.replyTo) {
-      const parent = byId.get(c.threadId) || byId.get(c.replyTo);
-      if (parent) {
-        parent.replies = parent.replies || [];
-        parent.replies.push(c);
-      }
-    }
-  }
-  roots.sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)));
-  for (const r of roots) r.replies.sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)));
-  return roots;
-}
-function genId() {
-  return "cmt_" + randomBytes2(3).toString("hex");
-}
-async function listComments(workspaceRoot, scenario, doc) {
-  const file2 = commentFilePath(workspaceRoot, scenario, doc);
-  const events = await readEvents(file2);
-  const flat = collapse(events);
-  const roots = threadTree(flat);
-  const total = flat.length;
-  const resolved = flat.filter((c) => c.resolved).length;
-  const orphaned = flat.filter((c) => c.anchor && c.anchor.orphaned).length;
-  return { comments: roots, meta: { total, resolved, orphaned } };
-}
-async function appendComment(workspaceRoot, scenario, doc, payload, actor) {
-  if (!actor || !actor.name) throw new CommentError("FORBIDDEN", "actor required", 403);
-  const body = validateBody(payload.body);
-  const anchor = validateAnchor(payload.anchor);
-  const intent = validateIntent(payload.intent, actor.role);
-  const todoResolves = validateTodoResolves(payload.todoResolves, actor.role);
-  let threadId = null;
-  let replyTo = null;
-  if (payload.replyTo != null) {
-    if (typeof payload.replyTo !== "string" || !ID_RE.test(payload.replyTo)) {
-      throw new CommentError("BAD_REQUEST", "replyTo must be cmt_<6hex>", 400);
-    }
-    const file3 = commentFilePath(workspaceRoot, scenario, doc);
-    const existing = collapse(await readEvents(file3));
-    const parent = existing.find((c) => c.id === payload.replyTo);
-    if (!parent) throw new CommentError("NOT_FOUND", "parent comment not found", 404);
-    if (parent.deleted) throw new CommentError("BAD_REQUEST", "cannot reply to deleted comment", 400);
-    replyTo = parent.id;
-    threadId = parent.threadId;
-  }
-  const id = genId();
-  const createdAt = (/* @__PURE__ */ new Date()).toISOString();
-  const mentionedPersonas = extractMentions(body);
-  const event = {
-    op: "create",
-    id,
-    createdAt,
-    author: actor.name,
-    anchor,
-    body,
-    threadId: threadId || id,
-    replyTo,
-    intent
-  };
-  if (todoResolves) event.todoResolves = true;
-  if (mentionedPersonas.length > 0) event.mentionedPersonas = mentionedPersonas;
-  const file2 = commentFilePath(workspaceRoot, scenario, doc);
-  await appendEvent(file2, event);
-  return {
-    id,
-    createdAt,
-    author: actor.name,
-    anchor,
-    body,
-    threadId: event.threadId,
-    replyTo,
-    intent,
-    todoResolves,
-    resolved: false,
-    resolvedBy: null,
-    resolvedAt: null,
-    deleted: false,
-    deletedBy: null,
-    editedAt: null,
-    reviseStatus: intent === "revise" ? "pending" : null,
-    reviseProposalRef: null,
-    mentionedPersonas,
-    personaRole: null,
-    replies: []
-  };
-}
-async function patchComment(workspaceRoot, scenario, doc, id, patch, actor) {
-  if (!actor || !actor.name) throw new CommentError("FORBIDDEN", "actor required", 403);
-  if (!ID_RE.test(id)) throw new CommentError("BAD_REQUEST", "invalid id", 400);
-  const file2 = commentFilePath(workspaceRoot, scenario, doc);
-  const events = await readEvents(file2);
-  const existing = collapse(events).find((c) => c.id === id);
-  if (!existing) throw new CommentError("NOT_FOUND", "comment not found", 404);
-  if (existing.deleted) throw new CommentError("BAD_REQUEST", "cannot patch deleted comment", 400);
-  const now = (/* @__PURE__ */ new Date()).toISOString();
-  if (typeof patch.body === "string") {
-    if (existing.author !== actor.name && actor.role !== "host") {
-      throw new CommentError("FORBIDDEN", "body edit is author-only", 403);
-    }
-    if (Date.now() - Date.parse(existing.createdAt) > EDIT_WINDOW_MS) {
-      throw new CommentError("FORBIDDEN", "edit window expired", 403);
-    }
-    const body = validateBody(patch.body);
-    await appendEvent(file2, { op: "edit", id, body, at: now, by: actor.name });
-  } else if (typeof patch.resolved === "boolean") {
-    if (actor.role !== "host" && existing.author !== actor.name) {
-      throw new CommentError("FORBIDDEN", "resolve requires host or author", 403);
-    }
-    await appendEvent(file2, { op: "resolve", id, resolved: patch.resolved, at: now, by: actor.name });
-  } else {
-    throw new CommentError("BAD_REQUEST", "patch must set body or resolved", 400);
-  }
-  const refreshed = collapse(await readEvents(file2)).find((c) => c.id === id);
-  refreshed.replies = [];
-  return refreshed;
-}
-async function listPendingMentions(workspaceRoot, scenario) {
-  assertName(scenario, "scenario");
-  const commentsDir = resolve(workspaceRoot, "plans", scenario, ".comments");
-  let files;
-  try {
-    const { readdir: readdir3 } = await import("node:fs/promises");
-    files = await readdir3(commentsDir);
-  } catch {
-    return [];
-  }
-  const out = [];
-  for (const name of files) {
-    if (!name.endsWith(".jsonl")) continue;
-    const docSlug = name.slice(0, -".jsonl".length);
-    let data;
-    try {
-      data = await listComments(workspaceRoot, scenario, docSlug);
-    } catch {
-      continue;
-    }
-    const flat = [];
-    (function walk(list) {
-      for (const c of list) {
-        flat.push(c);
-        if (c.replies) walk(c.replies);
-      }
-    })(data.comments || []);
-    const byId = new Map(flat.map((c) => [c.id, c]));
-    for (const c of flat) {
-      if (c.deleted) continue;
-      if (!c.mentionedPersonas || c.mentionedPersonas.length === 0) continue;
-      const threadReplies = flat.filter(
-        (r) => r.threadId === c.threadId && !r.deleted && r.personaRole != null
-      );
-      for (const persona of c.mentionedPersonas) {
-        const fulfilled = threadReplies.some(
-          (r) => r.personaRole === persona && String(r.createdAt) >= String(c.createdAt)
-        );
-        if (!fulfilled) {
-          out.push({
-            scenario,
-            doc: docSlug,
-            id: c.id,
-            threadId: c.threadId,
-            replyTo: c.replyTo,
-            persona,
-            author: c.author,
-            body: c.body,
-            anchor: c.anchor,
-            createdAt: c.createdAt
-          });
-        }
-      }
-    }
-  }
-  out.sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)));
-  return out;
-}
-async function postPersonaReply(workspaceRoot, scenario, doc, parentId, persona, body, actor) {
-  if (!actor || !actor.name) throw new CommentError("FORBIDDEN", "actor required", 403);
-  if (!PERSONA_SET.has(String(persona || "").toLowerCase())) {
-    throw new CommentError("BAD_REQUEST", `unknown persona "${persona}"`, 400);
-  }
-  const personaLc = String(persona).toLowerCase();
-  const validatedBody = validateBody(body);
-  if (!ID_RE.test(parentId)) throw new CommentError("BAD_REQUEST", "invalid parent id", 400);
-  const file2 = commentFilePath(workspaceRoot, scenario, doc);
-  const existing = collapse(await readEvents(file2));
-  const parent = existing.find((c) => c.id === parentId);
-  if (!parent) throw new CommentError("NOT_FOUND", "parent comment not found", 404);
-  if (parent.deleted) throw new CommentError("BAD_REQUEST", "cannot reply to deleted comment", 400);
-  if (!parent.mentionedPersonas || !parent.mentionedPersonas.includes(personaLc)) {
-    throw new CommentError("BAD_REQUEST", `parent comment does not mention @${personaLc}`, 400);
-  }
-  const id = genId();
-  const createdAt = (/* @__PURE__ */ new Date()).toISOString();
-  const event = {
-    op: "create",
-    id,
-    createdAt,
-    author: personaLc,
-    anchor: parent.anchor || null,
-    body: validatedBody,
-    threadId: parent.threadId || parent.id,
-    replyTo: parent.id,
-    intent: "comment",
-    personaRole: personaLc,
-    postedBy: actor.name
-    // audit trail: which MCP caller relayed this
-  };
-  await appendEvent(file2, event);
-  return {
-    id,
-    createdAt,
-    author: personaLc,
-    anchor: parent.anchor || null,
-    body: validatedBody,
-    threadId: event.threadId,
-    replyTo: parent.id,
-    intent: "comment",
-    todoResolves: false,
-    resolved: false,
-    resolvedBy: null,
-    resolvedAt: null,
-    deleted: false,
-    deletedBy: null,
-    editedAt: null,
-    reviseStatus: null,
-    reviseProposalRef: null,
-    mentionedPersonas: [],
-    personaRole: personaLc,
-    replies: []
-  };
-}
-function tokens(s) {
-  const t = String(s || "").replace(/<[^>]+>/g, " ").replace(/&[a-zA-Z#0-9]+;/g, " ").toLowerCase().replace(/[^a-z0-9\u00a0-\uffff]+/g, " ").trim();
-  return new Set(t ? t.split(/\s+/) : []);
-}
-function jaccard(a, b) {
-  if (a.size === 0 && b.size === 0) return 1;
-  let intersect = 0;
-  const small = a.size < b.size ? a : b;
-  const other = small === a ? b : a;
-  for (const t of small) if (other.has(t)) intersect += 1;
-  const union2 = a.size + b.size - intersect;
-  return union2 === 0 ? 0 : intersect / union2;
-}
-function indexDocSections(html) {
-  const out = /* @__PURE__ */ new Map();
-  const re = /<h[234][^>]*\bdata-section-id\s*=\s*["']([^"']+)["'][^>]*>([\s\S]*?)<\/h[234]>([\s\S]*?)(?=<h[234][^>]*\bdata-section-id|$)/gi;
-  let m;
-  while (m = re.exec(html)) {
-    out.set(m[1], { heading: m[2], content: m[3] });
-  }
-  return out;
-}
-function reanchorOne(docSections, anchor) {
-  if (!anchor || !anchor.exact) {
-    return { orphaned: true };
-  }
-  const needle = anchor.exact;
-  const sec = anchor.sectionId ? docSections.get(anchor.sectionId) : null;
-  if (sec) {
-    const combined = (anchor.prefix || "") + needle + (anchor.suffix || "");
-    if (combined.length > 0 && sec.content.includes(combined)) {
-      return { sectionId: anchor.sectionId, orphaned: false };
-    }
-  }
-  if (sec && sec.content.includes(needle)) {
-    return { sectionId: anchor.sectionId, orphaned: false };
-  }
-  const needleTokens = tokens(needle);
-  let best = { sectionId: null, score: 0 };
-  for (const [sid, s] of docSections) {
-    const chunks = s.content.match(/<(?:p|li|td|span|h[234]|strong|em|div)[^>]*>([\s\S]*?)<\/(?:p|li|td|span|h[234]|strong|em|div)>/gi) || [];
-    for (const chunk of chunks) {
-      const score = jaccard(needleTokens, tokens(chunk));
-      if (score > best.score) best = { sectionId: sid, score };
-    }
-  }
-  if (best.sectionId && best.score >= JACCARD_THRESHOLD) {
-    return {
-      sectionId: best.sectionId,
-      migratedFrom: anchor.sectionId || null,
-      orphaned: false
-    };
-  }
-  return { orphaned: true, migratedFrom: anchor.sectionId || null };
-}
-async function reanchorDocument(workspaceRoot, scenario, doc) {
-  assertName(scenario, "scenario");
-  assertName(doc, "doc");
-  const plansRoot = resolve(workspaceRoot, "plans");
-  const htmlPath = resolve(plansRoot, scenario, `${doc}.html`);
-  if (!htmlPath.startsWith(plansRoot + sep2)) {
-    throw new CommentError("BAD_REQUEST", "path traversal rejected", 400);
-  }
-  let html;
-  try {
-    html = await readFile2(htmlPath, "utf8");
-  } catch (err) {
-    if (err.code === "ENOENT") return { held: 0, migrated: 0, orphaned: 0, total: 0 };
-    throw err;
-  }
-  const sections = indexDocSections(html);
-  const file2 = commentFilePath(workspaceRoot, scenario, doc);
-  const existing = collapse(await readEvents(file2));
-  let held = 0, migrated = 0, orphaned = 0;
-  for (const c of existing) {
-    if (c.deleted) continue;
-    if (!c.anchor) continue;
-    const result = reanchorOne(sections, c.anchor);
-    const movedSection = result.sectionId && result.sectionId !== c.anchor.sectionId;
-    const justOrphaned = !!result.orphaned && !c.anchor.orphaned;
-    const cleared = !result.orphaned && c.anchor.orphaned;
-    if (!movedSection && !justOrphaned && !cleared) {
-      held += 1;
-      continue;
-    }
-    const newAnchor = {};
-    if (result.sectionId) newAnchor.sectionId = result.sectionId;
-    if (result.orphaned != null) newAnchor.orphaned = !!result.orphaned;
-    if (result.migratedFrom != null) newAnchor.migratedFrom = result.migratedFrom;
-    await appendEvent(file2, {
-      op: "reanchor",
-      id: c.id,
-      anchor: newAnchor,
-      at: (/* @__PURE__ */ new Date()).toISOString()
-    });
-    if (result.orphaned) orphaned += 1;
-    else migrated += 1;
-  }
-  console.error(`[comments] reanchor ${scenario}/${doc} held=${held} migrated=${migrated} orphaned=${orphaned}`);
-  return { held, migrated, orphaned, total: held + migrated + orphaned };
-}
-async function reanchorScenario(workspaceRoot, scenario) {
-  assertName(scenario, "scenario");
-  const commentsDir = resolve(workspaceRoot, "plans", scenario, ".comments");
-  let files = [];
-  try {
-    const { readdir: readdir3 } = await import("node:fs/promises");
-    files = await readdir3(commentsDir);
-  } catch {
-    return { held: 0, migrated: 0, orphaned: 0, total: 0, docs: [] };
-  }
-  const agg = { held: 0, migrated: 0, orphaned: 0, total: 0, docs: [] };
-  for (const name of files) {
-    if (!name.endsWith(".jsonl")) continue;
-    const doc = name.slice(0, -".jsonl".length);
-    try {
-      const r = await reanchorDocument(workspaceRoot, scenario, doc);
-      agg.held += r.held;
-      agg.migrated += r.migrated;
-      agg.orphaned += r.orphaned;
-      agg.total += r.total;
-      agg.docs.push({ doc, ...r });
-    } catch (err) {
-      agg.docs.push({ doc, error: err.message || String(err) });
-    }
-  }
-  return agg;
-}
-async function deleteComment(workspaceRoot, scenario, doc, id, actor) {
-  if (!actor || !actor.name) throw new CommentError("FORBIDDEN", "actor required", 403);
-  if (!ID_RE.test(id)) throw new CommentError("BAD_REQUEST", "invalid id", 400);
-  const file2 = commentFilePath(workspaceRoot, scenario, doc);
-  const events = await readEvents(file2);
-  const existing = collapse(events).find((c) => c.id === id);
-  if (!existing) throw new CommentError("NOT_FOUND", "comment not found", 404);
-  if (existing.deleted) return;
-  if (existing.author !== actor.name && actor.role !== "host") {
-    throw new CommentError("FORBIDDEN", "delete requires author or host", 403);
-  }
-  await appendEvent(file2, { op: "delete", id, at: (/* @__PURE__ */ new Date()).toISOString(), by: actor.name });
-}
-function checkRate2(key) {
-  const now = Date.now();
-  let b = buckets.get(key);
-  if (!b) {
-    b = { tokens: BUCKET_CAPACITY, lastRefillAt: now };
-    buckets.set(key, b);
-  }
-  const elapsed = now - b.lastRefillAt;
-  if (elapsed > 0) {
-    const refill = elapsed / BUCKET_WINDOW_MS * BUCKET_CAPACITY;
-    b.tokens = Math.min(BUCKET_CAPACITY, b.tokens + refill);
-    b.lastRefillAt = now;
-  }
-  if (b.tokens < 1) {
-    const shortfall = 1 - b.tokens;
-    const retryAfter = Math.ceil(shortfall / BUCKET_CAPACITY * (BUCKET_WINDOW_MS / 1e3));
-    return { ok: false, retryAfter };
-  }
-  b.tokens -= 1;
-  return { ok: true, retryAfter: 0 };
-}
-function sseKey(scenario, doc) {
-  return `${scenario}::${doc}`;
-}
-function registerSseClient(scenario, doc, res) {
-  const key = sseKey(scenario, doc);
-  let set2 = sseClients.get(key);
-  if (!set2) {
-    set2 = /* @__PURE__ */ new Set();
-    sseClients.set(key, set2);
-  }
-  set2.add(res);
-  return () => {
-    const s = sseClients.get(key);
-    if (!s) return;
-    s.delete(res);
-    if (s.size === 0) sseClients.delete(key);
-  };
-}
-function broadcastCommentEvent(scenario, doc, op, comment) {
-  const key = sseKey(scenario, doc);
-  const set2 = sseClients.get(key);
-  if (!set2 || set2.size === 0) return;
-  const payload = `event: comment
-data: ${JSON.stringify({ op, comment })}
-
-`;
-  for (const res of set2) {
-    try {
-      res.write(payload);
-    } catch {
-    }
-  }
-}
-function sseHeartbeat() {
-  for (const set2 of sseClients.values()) {
-    for (const res of set2) {
-      try {
-        res.write("event: ping\ndata: {}\n\n");
-      } catch {
-      }
-    }
-  }
-}
-var NAME_RE, NAME_MAX, ID_RE, BODY_MIN, BODY_MAX, EXACT_MAX, AFFIX_MAX, EDIT_WINDOW_MS, PERSONA_NAMES, PERSONA_SET, MENTION_RE, CommentError, JACCARD_THRESHOLD, BUCKET_CAPACITY, BUCKET_WINDOW_MS, buckets, sseClients;
-var init_comment_manager = __esm({
-  "src/comment-manager.js"() {
-    NAME_RE = /^[a-zA-Z0-9_-]+$/;
-    NAME_MAX = 80;
-    ID_RE = /^cmt_[a-f0-9]{6}$/;
-    BODY_MIN = 1;
-    BODY_MAX = 4e3;
-    EXACT_MAX = 2e3;
-    AFFIX_MAX = 64;
-    EDIT_WINDOW_MS = 10 * 60 * 1e3;
-    PERSONA_NAMES = ["architect", "pm", "tester", "frontend", "backend", "writer"];
-    PERSONA_SET = new Set(PERSONA_NAMES);
-    MENTION_RE = new RegExp("(?:^|[^a-zA-Z0-9_])@(" + PERSONA_NAMES.join("|") + ")(?![a-zA-Z0-9_])", "gi");
-    CommentError = class extends Error {
-      constructor(code, message, status) {
-        super(message);
-        this.code = code;
-        this.status = status || 400;
-      }
-    };
-    JACCARD_THRESHOLD = 0.72;
-    BUCKET_CAPACITY = 5;
-    BUCKET_WINDOW_MS = 10 * 1e3;
-    buckets = /* @__PURE__ */ new Map();
-    sseClients = /* @__PURE__ */ new Map();
-    if (!globalThis.__PH_SSE_HEARTBEAT_STARTED__) {
-      globalThis.__PH_SSE_HEARTBEAT_STARTED__ = true;
-      setInterval(sseHeartbeat, 30 * 1e3).unref();
-    }
-  }
-});
-
-// src/revise-dispatcher.js
-var revise_dispatcher_exports = {};
-__export(revise_dispatcher_exports, {
-  acceptProposal: () => acceptProposal,
-  attachProposal: () => attachProposal,
-  dispatchRevise: () => dispatchRevise,
-  listPendingRevises: () => listPendingRevises,
-  maybeAutoDispatch: () => maybeAutoDispatch,
-  readProposal: () => readProposal,
-  rejectProposal: () => rejectProposal
-});
-import { appendFile as appendFile2, mkdir as mkdir3, readFile as readFile3, writeFile as writeFile2 } from "node:fs/promises";
-import { join as join3, resolve as resolve2, sep as sep3 } from "node:path";
-async function readConfig(workspaceRoot, scenario) {
-  const file2 = resolve2(workspaceRoot, "plans", scenario, ".comment-config.json");
-  try {
-    const text = await readFile3(file2, "utf8");
-    const parsed = JSON.parse(text);
-    const mode = parsed && parsed.reviseMode === "active" ? "active" : "passive";
-    return { reviseMode: mode };
-  } catch {
-    return { ...DEFAULT_CONFIG };
-  }
-}
-function assertName2(value, label) {
-  if (typeof value !== "string" || !/^[a-zA-Z0-9_-]+$/.test(value) || value.length > 80) {
-    throw new CommentError("BAD_REQUEST", `invalid ${label}`, 400);
-  }
-}
-function proposalPath(workspaceRoot, scenario, doc, commentId) {
-  assertName2(scenario, "scenario");
-  assertName2(doc, "doc");
-  if (!/^cmt_[a-f0-9]{6}$/.test(commentId)) {
-    throw new CommentError("BAD_REQUEST", "invalid comment id", 400);
-  }
-  const plansRoot = resolve2(workspaceRoot, "plans");
-  const file2 = resolve2(plansRoot, scenario, ".comments", `${doc}.proposals`, `${commentId}.diff`);
-  if (!file2.startsWith(plansRoot + sep3)) {
-    throw new CommentError("BAD_REQUEST", "path traversal rejected", 400);
-  }
-  return file2;
-}
-function commentFilePath2(workspaceRoot, scenario, doc) {
-  assertName2(scenario, "scenario");
-  assertName2(doc, "doc");
-  const plansRoot = resolve2(workspaceRoot, "plans");
-  const file2 = resolve2(plansRoot, scenario, ".comments", `${doc}.jsonl`);
-  if (!file2.startsWith(plansRoot + sep3)) {
-    throw new CommentError("BAD_REQUEST", "path traversal rejected", 400);
-  }
-  return file2;
-}
-function docHtmlPath(workspaceRoot, scenario, doc) {
-  assertName2(scenario, "scenario");
-  assertName2(doc, "doc");
-  const plansRoot = resolve2(workspaceRoot, "plans");
-  const file2 = resolve2(plansRoot, scenario, `${doc}.html`);
-  if (!file2.startsWith(plansRoot + sep3)) {
-    throw new CommentError("BAD_REQUEST", "path traversal rejected", 400);
-  }
-  return file2;
-}
-async function appendEvent2(file2, event) {
-  await mkdir3(join3(file2, ".."), { recursive: true });
-  await appendFile2(file2, JSON.stringify(event) + "\n", "utf8");
-}
-function decodeEntity(ent) {
-  const inner = ent.slice(1, -1);
-  if (inner.startsWith("#")) {
-    const code = inner.startsWith("#x") ? parseInt(inner.slice(2), 16) : parseInt(inner.slice(1), 10);
-    return Number.isFinite(code) ? String.fromCodePoint(code) : ent;
-  }
-  return ENT_NAMED[inner] ?? ent;
-}
-function normalizeSpaces(s) {
-  return (s || "").replace(/\s+/g, " ").trim();
-}
-function renderText(html) {
-  const text = [];
-  const map2 = [];
-  const charRawLen = [];
-  let lastWasSpace = true;
-  let i = 0;
-  while (i < html.length) {
-    const c = html[i];
-    if (c === "<") {
-      const end = html.indexOf(">", i);
-      if (end === -1) {
-        i++;
-        continue;
-      }
-      i = end + 1;
-      continue;
-    }
-    if (c === "&") {
-      const semi = html.indexOf(";", i);
-      if (semi !== -1 && semi - i <= 10) {
-        const ent = html.slice(i, semi + 1);
-        const decoded = decodeEntity(ent);
-        if (decoded !== ent) {
-          const raw = ent.length;
-          for (let j = 0; j < decoded.length; j++) {
-            const ch = decoded[j];
-            if (/\s/.test(ch)) {
-              if (!lastWasSpace) {
-                text.push(" ");
-                map2.push(i);
-                charRawLen.push(j === decoded.length - 1 ? raw : 0);
-                lastWasSpace = true;
-              }
-            } else {
-              text.push(ch);
-              map2.push(i);
-              charRawLen.push(j === decoded.length - 1 ? raw : 0);
-              lastWasSpace = false;
-            }
-          }
-          i += raw;
-          continue;
-        }
-      }
-      text.push("&");
-      map2.push(i);
-      charRawLen.push(1);
-      lastWasSpace = false;
-      i++;
-      continue;
-    }
-    if (/\s/.test(c)) {
-      if (!lastWasSpace) {
-        text.push(" ");
-        map2.push(i);
-        charRawLen.push(1);
-        lastWasSpace = true;
-      }
-      i++;
-      continue;
-    }
-    text.push(c);
-    map2.push(i);
-    charRawLen.push(1);
-    lastWasSpace = false;
-    i++;
-  }
-  while (text.length && text[text.length - 1] === " ") {
-    text.pop();
-    map2.pop();
-    charRawLen.pop();
-  }
-  return { text: text.join(""), map: map2, charRawLen };
-}
-function requireHost(actor) {
-  if (!actor || actor.role !== "host") {
-    throw new CommentError("FORBIDDEN", "revise flow is host-only", 403);
-  }
-}
-async function dispatchRevise(workspaceRoot, scenario, doc, commentId, actor) {
-  requireHost(actor);
-  const file2 = commentFilePath2(workspaceRoot, scenario, doc);
-  await appendEvent2(file2, {
-    op: "revise",
-    id: commentId,
-    reviseStatus: "dispatched",
-    at: (/* @__PURE__ */ new Date()).toISOString(),
-    by: actor.name
-  });
-}
-async function attachProposal(workspaceRoot, scenario, doc, commentId, diffContent, actor) {
-  requireHost(actor);
-  const file2 = proposalPath(workspaceRoot, scenario, doc, commentId);
-  await mkdir3(join3(file2, ".."), { recursive: true });
-  await writeFile2(file2, diffContent, "utf8");
-  const eventFile = commentFilePath2(workspaceRoot, scenario, doc);
-  const relRef = `.comments/${doc}.proposals/${commentId}.diff`;
-  await appendEvent2(eventFile, {
-    op: "revise",
-    id: commentId,
-    reviseStatus: "proposed",
-    proposalRef: relRef,
-    at: (/* @__PURE__ */ new Date()).toISOString(),
-    by: actor.name
-  });
-}
-async function acceptProposal(workspaceRoot, scenario, doc, commentId, anchor, actor) {
-  requireHost(actor);
-  const propFile = proposalPath(workspaceRoot, scenario, doc, commentId);
-  const diff = await readFile3(propFile, "utf8");
-  const parsed = parseProposal(diff);
-  if (!parsed) throw new CommentError("BAD_REQUEST", "proposal format unrecognized", 400);
-  const htmlPath = docHtmlPath(workspaceRoot, scenario, doc);
-  const html = await readFile3(htmlPath, "utf8");
-  const rendered = renderText(html);
-  if (anchor && anchor.exact) {
-    const a = normalizeSpaces(anchor.exact);
-    if (a && rendered.text.indexOf(a) === -1) {
-      throw new CommentError("ANCHOR_DRIFT", "anchor no longer matches; reattach manually", 409);
-    }
-  }
-  const needle = normalizeSpaces(parsed.from);
-  const nIdx = rendered.text.indexOf(needle);
-  if (nIdx === -1) {
-    throw new CommentError("ANCHOR_DRIFT", "proposal target text not found in doc", 409);
-  }
-  if (rendered.text.indexOf(needle, nIdx + 1) !== -1) {
-    throw new CommentError("AMBIGUOUS_TARGET", "proposal target appears more than once; refine the anchor", 409);
-  }
-  const rawStart = rendered.map[nIdx];
-  const rawEnd = rendered.map[nIdx + needle.length - 1] + rendered.charRawLen[nIdx + needle.length - 1];
-  const next = html.slice(0, rawStart) + parsed.to + html.slice(rawEnd);
-  await writeFile2(htmlPath, next, "utf8");
-  const eventFile = commentFilePath2(workspaceRoot, scenario, doc);
-  await appendEvent2(eventFile, {
-    op: "revise",
-    id: commentId,
-    reviseStatus: "accepted",
-    at: (/* @__PURE__ */ new Date()).toISOString(),
-    by: actor.name
-  });
-  await appendEvent2(eventFile, {
-    op: "resolve",
-    id: commentId,
-    resolved: true,
-    at: (/* @__PURE__ */ new Date()).toISOString(),
-    by: actor.name
-  });
-}
-async function rejectProposal(workspaceRoot, scenario, doc, commentId, actor) {
-  requireHost(actor);
-  const eventFile = commentFilePath2(workspaceRoot, scenario, doc);
-  await appendEvent2(eventFile, {
-    op: "revise",
-    id: commentId,
-    reviseStatus: "rejected",
-    at: (/* @__PURE__ */ new Date()).toISOString(),
-    by: actor.name
-  });
-}
-async function readProposal(workspaceRoot, scenario, doc, commentId) {
-  const file2 = proposalPath(workspaceRoot, scenario, doc, commentId);
-  try {
-    return await readFile3(file2, "utf8");
-  } catch (err) {
-    if (err.code === "ENOENT") return null;
-    throw err;
-  }
-}
-async function maybeAutoDispatch(workspaceRoot, scenario, doc, commentId, actor) {
-  const cfg = await readConfig(workspaceRoot, scenario);
-  if (cfg.reviseMode !== "active") return { mode: "passive", dispatched: false };
-  try {
-    await dispatchRevise(workspaceRoot, scenario, doc, commentId, actor);
-    return { mode: "active", dispatched: true };
-  } catch {
-    return { mode: "active", dispatched: false };
-  }
-}
-async function listPendingRevises(workspaceRoot, scenario) {
-  assertName2(scenario, "scenario");
-  const commentsDir = resolve2(workspaceRoot, "plans", scenario, ".comments");
-  let files;
-  try {
-    const { readdir: readdir3 } = await import("node:fs/promises");
-    files = await readdir3(commentsDir);
-  } catch {
-    return [];
-  }
-  const out = [];
-  for (const name of files) {
-    if (!name.endsWith(".jsonl")) continue;
-    const docSlug = name.slice(0, -".jsonl".length);
-    try {
-      const { listComments: listComments2 } = await Promise.resolve().then(() => (init_comment_manager(), comment_manager_exports));
-      const data = await listComments2(workspaceRoot, scenario, docSlug);
-      (function walk(list) {
-        for (const c of list) {
-          if (c.intent === "revise" && c.reviseStatus === "pending" && !c.deleted) {
-            out.push({
-              scenario,
-              doc: docSlug,
-              id: c.id,
-              body: c.body,
-              anchor: c.anchor,
-              author: c.author,
-              createdAt: c.createdAt
-            });
-          }
-          if (c.replies) walk(c.replies);
-        }
-      })(data.comments || []);
-    } catch {
-    }
-  }
-  return out;
-}
-function parseProposal(diff) {
-  const m = /^REPLACE:\s*\n([\s\S]*?)\nWITH:\s*\n([\s\S]*)$/m.exec(String(diff || ""));
-  if (!m) return null;
-  return { from: m[1], to: m[2] };
-}
-var DEFAULT_CONFIG, ENT_NAMED;
-var init_revise_dispatcher = __esm({
-  "src/revise-dispatcher.js"() {
-    init_comment_manager();
-    DEFAULT_CONFIG = { reviseMode: "passive" };
-    ENT_NAMED = {
-      mdash: "\u2014",
-      ndash: "\u2013",
-      hellip: "\u2026",
-      lsquo: "\u2018",
-      rsquo: "\u2019",
-      ldquo: "\u201C",
-      rdquo: "\u201D",
-      nbsp: "\xA0",
-      amp: "&",
-      lt: "<",
-      gt: ">",
-      quot: '"',
-      apos: "'",
-      times: "\xD7",
-      check: "\u2713",
-      cross: "\u2717",
-      laquo: "\xAB",
-      raquo: "\xBB",
-      copy: "\xA9",
-      reg: "\xAE",
-      trade: "\u2122"
-    };
   }
 });
 
@@ -13191,11 +13346,11 @@ var require_feeds = __commonJS({
           if (href2) {
             entry.link = href2;
           }
-          var description = fetch("summary", children) || fetch("content", children);
+          var description = fetch2("summary", children) || fetch2("content", children);
           if (description) {
             entry.description = description;
           }
-          var pubDate = fetch("updated", children);
+          var pubDate = fetch2("updated", children);
           if (pubDate) {
             entry.pubDate = new Date(pubDate);
           }
@@ -13209,7 +13364,7 @@ var require_feeds = __commonJS({
         feed.link = href;
       }
       addConditionally(feed, "description", "subtitle", childs);
-      var updated = fetch("updated", childs);
+      var updated = fetch2("updated", childs);
       if (updated) {
         feed.updated = new Date(updated);
       }
@@ -13229,7 +13384,7 @@ var require_feeds = __commonJS({
           addConditionally(entry, "title", "title", children);
           addConditionally(entry, "link", "link", children);
           addConditionally(entry, "description", "description", children);
-          var pubDate = fetch("pubDate", children) || fetch("dc:date", children);
+          var pubDate = fetch2("pubDate", children) || fetch2("dc:date", children);
           if (pubDate)
             entry.pubDate = new Date(pubDate);
           return entry;
@@ -13238,7 +13393,7 @@ var require_feeds = __commonJS({
       addConditionally(feed, "title", "title", childs);
       addConditionally(feed, "link", "link", childs);
       addConditionally(feed, "description", "description", childs);
-      var updated = fetch("lastBuildDate", childs);
+      var updated = fetch2("lastBuildDate", childs);
       if (updated) {
         feed.updated = new Date(updated);
       }
@@ -13284,7 +13439,7 @@ var require_feeds = __commonJS({
     function getOneElement(tagName, node) {
       return (0, legacy_js_1.getElementsByTagName)(tagName, node, true, 1)[0];
     }
-    function fetch(tagName, where, recurse) {
+    function fetch2(tagName, where, recurse) {
       if (recurse === void 0) {
         recurse = false;
       }
@@ -13294,7 +13449,7 @@ var require_feeds = __commonJS({
       if (recurse === void 0) {
         recurse = false;
       }
-      var val = fetch(tagName, where, recurse);
+      var val = fetch2(tagName, where, recurse);
       if (val)
         obj[prop] = val;
     }
@@ -17082,18 +17237,25 @@ var init_html_lint = __esm({
 // src/web-server.js
 var web_server_exports = {};
 __export(web_server_exports, {
+  computeProjectId: () => computeProjectId,
   disablePasswordProtection: () => disablePasswordProtection,
   enablePasswordProtection: () => enablePasswordProtection,
   getDashboardUrl: () => getDashboardUrl,
+  isDaemonRunning: () => isDaemonRunning,
   isDashboardRunning: () => isDashboardRunning,
   isPasswordProtected: () => isPasswordProtected,
+  registerProject: () => registerProject,
+  startDaemon: () => startDaemon,
   startDashboard: () => startDashboard,
+  stopDaemon: () => stopDaemon,
   stopDashboard: () => stopDashboard
 });
 import { createServer } from "node:http";
 import { readdir as readdir2, readFile as readFile4, stat as stat2 } from "node:fs/promises";
+import { statSync, readFileSync } from "node:fs";
 import { join as join4, basename as basename2, extname as extname2, resolve as resolve3, sep as sep4, dirname as dirname2 } from "node:path";
 import { URL as URL2, fileURLToPath as fileURLToPath2 } from "node:url";
+import { createHash as createHash2 } from "node:crypto";
 async function startDashboard(workspaceRoot, port = 3847) {
   if (server) {
     if (server.listening) return getDashboardUrl();
@@ -17173,6 +17335,282 @@ function getDashboardUrl() {
   if (!serverPort) return null;
   return `http://localhost:${serverPort}`;
 }
+function readDaemonVersion() {
+  try {
+    const here = dirname2(fileURLToPath2(import.meta.url));
+    const manifest = resolve3(here, "..", "..", ".claude-plugin", "plugin.json");
+    const json2 = JSON.parse(readFileSync(manifest, "utf-8"));
+    if (json2?.version) return String(json2.version);
+  } catch {
+  }
+  return "dev";
+}
+function canonicalRoot(p) {
+  let c = resolve3(p).replace(/\\/g, "/").replace(/\/+$/, "");
+  if (process.platform === "win32") c = c.toLowerCase();
+  return c;
+}
+function slugForRoot(rootPath) {
+  const base = basename2(resolve3(rootPath)) || "project";
+  const slug = base.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+  return slug || "project";
+}
+function computeProjectId(rootPath) {
+  const hash6 = createHash2("sha1").update(canonicalRoot(rootPath)).digest("hex").slice(0, 6);
+  return `${slugForRoot(rootPath)}-${hash6}`;
+}
+function rootStillExists(rootPath) {
+  try {
+    return statSync(rootPath).isDirectory();
+  } catch {
+    return false;
+  }
+}
+function pruneRegistry() {
+  for (const [id, entry] of projectRegistry) {
+    if (!rootStillExists(entry.rootPath)) projectRegistry.delete(id);
+  }
+  return [...projectRegistry.values()];
+}
+function registerProject(rootPath, label) {
+  const abs = resolve3(rootPath);
+  const projectId = computeProjectId(abs);
+  projectRegistry.set(projectId, {
+    projectId,
+    rootPath: abs,
+    label: label || basename2(abs),
+    lastSeen: Date.now()
+  });
+  const origin = getDaemonOrigin() || `http://localhost:${DAEMON_DEFAULT_PORT}`;
+  return { projectId, url: `${origin}/p/${projectId}/` };
+}
+function lookupProject(projectId) {
+  const entry = projectRegistry.get(projectId);
+  if (!entry) return null;
+  if (!rootStillExists(entry.rootPath)) {
+    projectRegistry.delete(projectId);
+    return null;
+  }
+  return entry;
+}
+function getDaemonOrigin() {
+  if (!serverPort) return null;
+  return `http://localhost:${serverPort}`;
+}
+function isDaemonRunning() {
+  return server !== null && server.listening;
+}
+function startDaemon(port = DAEMON_DEFAULT_PORT) {
+  if (server && server.listening) return Promise.resolve(getDaemonOrigin());
+  daemonMode = true;
+  daemonVersion = readDaemonVersion();
+  return new Promise((resolvePromise, rejectPromise) => {
+    server = createServer(async (req, res) => {
+      try {
+        await handleRequest(req, res);
+      } catch (err) {
+        console.error("[plan-harness] Request error:", err);
+        res.writeHead(500, { "Content-Type": "text/plain" });
+        res.end("Internal Server Error");
+      }
+    });
+    server.on("error", (err) => {
+      if (err.code === "EADDRINUSE") {
+        server = null;
+        rejectPromise(new Error(
+          `[plan-harness] port ${port} is already in use by another process. The daemon uses a fixed port so links stay stable. Free port ${port} or set a different daemon port.`
+        ));
+      } else {
+        console.error("[plan-harness] daemon error (non-fatal):", err);
+        if (!serverPort) rejectPromise(err);
+      }
+    });
+    server.on("clientError", (err, socket) => {
+      console.error("[plan-harness] clientError (absorbed):", err?.code || err?.message);
+      try {
+        socket.destroy();
+      } catch {
+      }
+    });
+    server.on("connection", (socket) => {
+      socket.on("error", (err) => {
+        console.error("[plan-harness] socket error (absorbed):", err?.code || err?.message);
+      });
+    });
+    server.on("close", () => {
+      server = null;
+      serverPort = null;
+    });
+    server.keepAliveTimeout = 12e4;
+    server.headersTimeout = 125e3;
+    server.requestTimeout = 0;
+    server.listen(port, "127.0.0.1", () => {
+      serverPort = port;
+      console.error(`[plan-harness] daemon running at ${getDaemonOrigin()} (v${daemonVersion})`);
+      resolvePromise(getDaemonOrigin());
+    });
+  });
+}
+async function stopDaemon() {
+  projectRegistry.clear();
+  if (!server) return;
+  return new Promise((resolvePromise) => {
+    server.close(() => {
+      server = null;
+      serverPort = null;
+      resolvePromise();
+    });
+  });
+}
+async function handleDaemonEndpoint(req, res, pathname) {
+  if (pathname === "/_daemon/health" && req.method === "GET") {
+    return sendJson(res, 200, { ok: true, version: daemonVersion, port: serverPort });
+  }
+  if (pathname === "/_daemon/register" && req.method === "POST") {
+    let body;
+    try {
+      body = await readJsonBody(req);
+    } catch (e) {
+      return sendJson(res, 400, { error: e.message });
+    }
+    const rootPath = body?.rootPath;
+    if (!rootPath || typeof rootPath !== "string") {
+      return sendJson(res, 400, { error: "rootPath is required" });
+    }
+    if (!rootStillExists(rootPath)) {
+      return sendJson(res, 400, { error: `rootPath does not exist: ${rootPath}` });
+    }
+    const { projectId, url: url2 } = registerProject(rootPath, body?.label);
+    return sendJson(res, 200, { projectId, url: url2 });
+  }
+  if (pathname === "/_daemon/shutdown" && req.method === "POST") {
+    sendJson(res, 200, { ok: true, stopping: true });
+    setTimeout(() => {
+      stopDaemon().catch(() => {
+      });
+    }, 20);
+    return;
+  }
+  if (pathname === "/_daemon/auth" && req.method === "POST") {
+    let body;
+    try {
+      body = await readJsonBody(req);
+    } catch (e) {
+      return sendJson(res, 400, { error: e.message });
+    }
+    try {
+      if (body?.enabled) {
+        const pw = enablePasswordProtection(body.password);
+        setStrictHost(!!body.strictHost);
+        return sendJson(res, 200, { enabled: true, password: pw });
+      }
+      disablePasswordProtection();
+      setStrictHost(false);
+      return sendJson(res, 200, { enabled: false, password: null });
+    } catch (e) {
+      return sendJson(res, 500, { error: e.message });
+    }
+  }
+  res.writeHead(404, { "Content-Type": "text/plain" });
+  res.end("Unknown daemon endpoint");
+}
+async function handleProjectRoute(req, res, parsedUrl, pathname) {
+  const m = pathname.match(/^\/p\/([^/]+)(\/.*)?$/);
+  if (!m) {
+    res.writeHead(404, { "Content-Type": "text/plain" });
+    res.end("Not Found");
+    return;
+  }
+  const projectId = decodeURIComponent(m[1]);
+  const rest = m[2] || "/";
+  const project = lookupProject(projectId);
+  if (!project) {
+    res.writeHead(404, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" });
+    res.end(
+      `<!doctype html><meta charset="utf-8"><body style="font-family:system-ui;padding:2rem"><h1>Project not registered</h1><p>No project <code>${escapeHtml(projectId)}</code> is registered with this daemon.</p><p>Open the project's directory and run <code>/plan-start</code> to register it, then return to <a href="/">the overview</a>.</p></body>`
+    );
+    return;
+  }
+  if ((rest === "/" || rest === "") && req.method === "GET") {
+    return serveProjectHome(req, res, project);
+  }
+  const docMatch = rest.match(/^\/([^_/][^/]*)\/([^/]+\.html)$/);
+  if (docMatch && req.method === "GET") {
+    const scenarioName = decodeURIComponent(docMatch[1]);
+    const docFile = decodeURIComponent(docMatch[2]);
+    if (scenarioName.includes("..") || docFile.includes("..")) {
+      res.writeHead(403, { "Content-Type": "text/plain" });
+      res.end("Path traversal not allowed");
+      return;
+    }
+    const docPath = await resolveDocPathIn(project.rootPath, scenarioName, docFile);
+    if (docPath) {
+      const fromLoopback = isLocalRequest(req);
+      return serveHtmlFile(req, res, docPath, { fromLoopback, projectRoot: project.rootPath, projectId });
+    }
+    res.writeHead(302, { Location: `/p/${projectId}/`, "Cache-Control": "no-store" });
+    res.end();
+    return;
+  }
+  if (req.method === "GET" && rest.startsWith("/_shared/") && rest.endsWith(".html")) {
+    const sharedRest = rest.slice("/_shared/".length);
+    if (sharedRest.includes("..")) {
+      res.writeHead(403, { "Content-Type": "text/plain" });
+      res.end("Path traversal not allowed");
+      return;
+    }
+    const candidate = resolve3(project.rootPath, "plan-harness", "_shared", sharedRest);
+    const fromLoopback = isLocalRequest(req);
+    return serveHtmlFile(req, res, candidate, { fromLoopback, projectRoot: project.rootPath, projectId });
+  }
+  res.writeHead(404, { "Content-Type": "text/plain" });
+  res.end("Not Found");
+}
+async function resolveDocPathIn(projectRoot, scenarioName, docFile) {
+  for (const rootName of ["plan-harness", "plans"]) {
+    const candidate = resolve3(projectRoot, rootName, scenarioName, docFile);
+    try {
+      await stat2(candidate);
+      return candidate;
+    } catch {
+    }
+  }
+  return null;
+}
+async function scanScenariosIn(projectRoot) {
+  const saved = workspaceRootPath;
+  workspaceRootPath = projectRoot;
+  try {
+    return await scanScenarios();
+  } finally {
+    workspaceRootPath = saved;
+  }
+}
+async function serveOverview(req, res) {
+  const projects = pruneRegistry();
+  const groups = [];
+  for (const p of projects) {
+    const scenarios = await scanScenariosIn(p.rootPath);
+    groups.push({ ...p, scenarios });
+  }
+  const html = generateOverview(groups, {
+    title: "Plan Dashboard",
+    subtitle: `${groups.length} project${groups.length === 1 ? "" : "s"} registered`,
+    meta: `Generated ${(/* @__PURE__ */ new Date()).toISOString().slice(0, 10)}`
+  });
+  res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-cache" });
+  res.end(html);
+}
+async function serveProjectHome(req, res, project) {
+  const scenarios = await scanScenariosIn(project.rootPath);
+  const html = generateOverview([{ ...project, scenarios }], {
+    title: project.label,
+    subtitle: "Project",
+    meta: `Generated ${(/* @__PURE__ */ new Date()).toISOString().slice(0, 10)}`
+  });
+  res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-cache" });
+  res.end(html);
+}
 function enablePasswordProtection(customPassword) {
   const pw = enable(customPassword);
   console.error(`[plan-harness] Password protection enabled.`);
@@ -17188,6 +17626,12 @@ function isPasswordProtected() {
 async function handleRequest(req, res) {
   const parsedUrl = new URL2(req.url, `http://${req.headers.host || "localhost"}`);
   const pathname = parsedUrl.pathname;
+  if (daemonMode && pathname.startsWith("/_daemon/")) {
+    return handleDaemonEndpoint(req, res, pathname);
+  }
+  if (daemonMode && pathname.startsWith("/p/")) {
+    return handleProjectRoute(req, res, parsedUrl, pathname);
+  }
   const fromLoopback = isLocalRequest(req);
   if (isEnabled() && pathname === "/_auth/login" && req.method === "POST") {
     return handleLogin(req, res);
@@ -17209,6 +17653,7 @@ async function handleRequest(req, res) {
     req.user = session;
   }
   if (pathname === "/" && req.method === "GET") {
+    if (daemonMode) return serveOverview(req, res);
     return serveDashboard(req, res);
   }
   const scenarioMatch = pathname.match(/^\/scenario\/([^/]+)$/);
@@ -17304,6 +17749,11 @@ async function handleRequest(req, res) {
   }
   const docMatch = pathname.match(/^\/([^_/][^/]*)\/([^/]+\.html)$/);
   if (docMatch && req.method === "GET") {
+    if (daemonMode) {
+      res.writeHead(302, { Location: "/", "Cache-Control": "no-store" });
+      res.end();
+      return;
+    }
     const scenarioName = decodeURIComponent(docMatch[1]);
     const docFile = decodeURIComponent(docMatch[2]);
     if (scenarioName.includes("..") || docFile.includes("..")) {
@@ -17311,15 +17761,47 @@ async function handleRequest(req, res) {
       res.end("Path traversal not allowed");
       return;
     }
-    const docPath = resolve3(workspaceRootPath, "plan-harness", scenarioName, docFile);
-    try {
-      await stat2(docPath);
+    const docPath = await resolveDocPath(scenarioName, docFile);
+    if (docPath) {
       return serveHtmlFile(req, res, docPath, { fromLoopback });
-    } catch {
     }
+    const scenarioExists = await scenarioDirExists(scenarioName);
+    const target = scenarioExists ? `/scenario/${encodeURIComponent(scenarioName)}` : "/";
+    console.error(`[plan-harness] doc not found: ${pathname} -> redirecting to ${target}`);
+    res.writeHead(302, { Location: target, "Cache-Control": "no-store" });
+    res.end();
+    return;
+  }
+  if (req.method === "GET") {
+    console.error(`[plan-harness] unrouted GET: ${pathname} -> redirecting to /`);
+    res.writeHead(302, { Location: "/", "Cache-Control": "no-store" });
+    res.end();
+    return;
   }
   res.writeHead(404, { "Content-Type": "text/plain" });
   res.end("Not Found");
+}
+async function resolveDocPath(scenarioName, docFile) {
+  for (const rootName of ["plan-harness", "plans"]) {
+    const candidate = resolve3(workspaceRootPath, rootName, scenarioName, docFile);
+    try {
+      await stat2(candidate);
+      return candidate;
+    } catch {
+    }
+  }
+  return null;
+}
+async function scenarioDirExists(scenarioName) {
+  for (const rootName of ["plan-harness", "plans"]) {
+    const candidate = resolve3(workspaceRootPath, rootName, scenarioName);
+    try {
+      const s = await stat2(candidate);
+      if (s.isDirectory()) return true;
+    } catch {
+    }
+  }
+  return false;
 }
 function resolveActor(req, fromLoopback) {
   return {
@@ -17376,7 +17858,7 @@ async function handleCommentList(req, res, { scenario, doc }) {
 }
 async function handleCommentCreate(req, res, { scenario, doc, actor }) {
   try {
-    const rate = checkRate2(rateKey(req));
+    const rate = checkRate(rateKey(req));
     if (!rate.ok) {
       res.setHeader("Retry-After", String(rate.retryAfter));
       return sendJson(res, 429, { error: "RATE_LIMITED", message: "too many comments; slow down" });
@@ -17396,7 +17878,7 @@ async function handleCommentCreate(req, res, { scenario, doc, actor }) {
 }
 async function handleCommentPatch(req, res, { scenario, doc, id, actor }) {
   try {
-    const rate = checkRate2(rateKey(req));
+    const rate = checkRate(rateKey(req));
     if (!rate.ok) {
       res.setHeader("Retry-After", String(rate.retryAfter));
       return sendJson(res, 429, { error: "RATE_LIMITED", message: "too many edits; slow down" });
@@ -17413,7 +17895,7 @@ async function handleCommentPatch(req, res, { scenario, doc, id, actor }) {
 }
 async function handleCommentDelete(req, res, { scenario, doc, id, actor }) {
   try {
-    const rate = checkRate2(rateKey(req));
+    const rate = checkRate(rateKey(req));
     if (!rate.ok) {
       res.setHeader("Retry-After", String(rate.retryAfter));
       return sendJson(res, 429, { error: "RATE_LIMITED", message: "too many deletes; slow down" });
@@ -17593,9 +18075,10 @@ async function serveHtmlFile(req, res, filePath, ctx = {}) {
     return;
   }
   const resolved = resolve3(filePath);
-  if (resolved !== workspaceRootPath && !resolved.startsWith(workspaceRootPath + sep4)) {
+  const guardRoot = ctx.projectRoot ? resolve3(ctx.projectRoot) : workspaceRootPath;
+  if (!guardRoot || resolved !== guardRoot && !resolved.startsWith(guardRoot + sep4)) {
     res.writeHead(403, { "Content-Type": "text/plain" });
-    res.end("Access denied: path is outside workspace root");
+    res.end("Access denied: path is outside the project root");
     return;
   }
   const ext = extname2(resolved).toLowerCase();
@@ -17622,9 +18105,10 @@ async function serveHtmlFile(req, res, filePath, ctx = {}) {
       siblingSet = new Set(siblingEntries.filter((e) => /\.html?$/i.test(e)));
     } catch {
     }
-    const withTabsFixed = normalizePlanTabs(raw, siblingSet, scenarioDir);
-    const isSelfContained = isScenarioDoc && /<script[^>]+id=["']meta["']/i.test(withTabsFixed);
-    const withDocChrome = isSelfContained ? withTabsFixed : normalizeServedDocChrome(withTabsFixed, resolved);
+    const withTabsFixed = normalizePlanTabs(raw, siblingSet, scenarioDir, ctx.projectId);
+    const withDocGroupFixed = normalizeDocGroup(withTabsFixed, siblingSet, scenarioDir, ctx.projectId);
+    const isSelfContained = isScenarioDoc && /<script[^>]+id=["']meta["']/i.test(withDocGroupFixed);
+    const withDocChrome = isSelfContained ? withDocGroupFixed : normalizeServedDocChrome(withDocGroupFixed, resolved);
     const withChecklistFixed = normalizeChecklistItems(withDocChrome);
     const withSectionIds = injectSectionIds(withChecklistFixed);
     const { scenarioName, docLabel } = parseScenarioFromPath(resolved);
@@ -18239,7 +18723,7 @@ function serveLoginPage(req, res) {
 }
 async function handleLogin(req, res) {
   const clientIp = req.socket?.remoteAddress || "unknown";
-  const rate = checkRate(clientIp);
+  const rate = checkRate2(clientIp);
   if (!rate.allowed) {
     const secs = Math.ceil(rate.retryAfterMs / 1e3);
     res.writeHead(302, {
@@ -18284,7 +18768,7 @@ async function handleLogin(req, res) {
   res.writeHead(302, { "Set-Cookie": cookie, Location: "/" });
   res.end();
 }
-var ICON_PATH, server, serverPort, workspaceRootPath, COOKIE_NAME, ASSET_MIME;
+var ICON_PATH, server, serverPort, workspaceRootPath, daemonMode, daemonVersion, COOKIE_NAME, DAEMON_DEFAULT_PORT, projectRegistry, ASSET_MIME;
 var init_web_server = __esm({
   "src/web-server.js"() {
     init_base();
@@ -18297,7 +18781,11 @@ var init_web_server = __esm({
     server = null;
     serverPort = null;
     workspaceRootPath = null;
+    daemonMode = false;
+    daemonVersion = "dev";
     COOKIE_NAME = "plan_session";
+    DAEMON_DEFAULT_PORT = 3100;
+    projectRegistry = /* @__PURE__ */ new Map();
     ASSET_MIME = {
       ".png": "image/png",
       ".jpg": "image/jpeg",
@@ -31103,7 +31591,7 @@ var Protocol = class {
           return;
         }
         const pollInterval = task2.pollInterval ?? this._options?.defaultTaskPollInterval ?? 1e3;
-        await new Promise((resolve4) => setTimeout(resolve4, pollInterval));
+        await new Promise((resolve5) => setTimeout(resolve5, pollInterval));
         options?.signal?.throwIfAborted();
       }
     } catch (error2) {
@@ -31120,7 +31608,7 @@ var Protocol = class {
    */
   request(request, resultSchema, options) {
     const { relatedRequestId, resumptionToken, onresumptiontoken, task, relatedTask } = options ?? {};
-    return new Promise((resolve4, reject) => {
+    return new Promise((resolve5, reject) => {
       const earlyReject = (error2) => {
         reject(error2);
       };
@@ -31198,7 +31686,7 @@ var Protocol = class {
           if (!parseResult.success) {
             reject(parseResult.error);
           } else {
-            resolve4(parseResult.data);
+            resolve5(parseResult.data);
           }
         } catch (error2) {
           reject(error2);
@@ -31459,12 +31947,12 @@ var Protocol = class {
       }
     } catch {
     }
-    return new Promise((resolve4, reject) => {
+    return new Promise((resolve5, reject) => {
       if (signal.aborted) {
         reject(new McpError(ErrorCode.InvalidRequest, "Request cancelled"));
         return;
       }
-      const timeoutId = setTimeout(resolve4, interval);
+      const timeoutId = setTimeout(resolve5, interval);
       signal.addEventListener("abort", () => {
         clearTimeout(timeoutId);
         reject(new McpError(ErrorCode.InvalidRequest, "Request cancelled"));
@@ -32334,21 +32822,22 @@ var StdioServerTransport = class {
     this.onclose?.();
   }
   send(message) {
-    return new Promise((resolve4) => {
+    return new Promise((resolve5) => {
       const json2 = serializeMessage(message);
       if (this._stdout.write(json2)) {
-        resolve4();
+        resolve5();
       } else {
-        this._stdout.once("drain", resolve4);
+        this._stdout.once("drain", resolve5);
       }
     });
   }
 };
 
 // src/index.js
-import { statSync } from "node:fs";
+import { statSync as statSync2, readFileSync as readFileSync2 } from "node:fs";
 import { fileURLToPath as fileURLToPath3 } from "node:url";
-import { dirname as dirname3, basename as basename3 } from "node:path";
+import { dirname as dirname3, basename as basename3, resolve as resolve4 } from "node:path";
+import { spawn } from "node:child_process";
 
 // src/plan-manager.js
 import { readdir, readFile, writeFile, mkdir, stat } from "node:fs/promises";
@@ -32779,7 +33268,6 @@ async function getCodebaseContext(repoRoot) {
 }
 
 // src/index.js
-var dashboardUrl = null;
 var tunnelProcess = null;
 var tunnelUrl = null;
 var tunnelMode = null;
@@ -33166,41 +33654,45 @@ ${ctx.structure.csprojFiles.map((f) => `  ${f}`).join("\n")}` : ""
       }
       // ---- plan_serve_dashboard -----------------------------------------
       case "plan_serve_dashboard": {
-        const port = args.port ?? 3847;
         try {
-          const url2 = await ensureDashboard(args.workspaceRoot, port);
-          return textResult(`Dashboard running at ${url2}`);
+          const root = args.workspaceRoot ?? process.cwd();
+          const label = basename3(resolve4(root));
+          const { projectId, url: url2 } = await ensureDaemon(root, label);
+          return textResult(
+            `Dashboard running.
+Project: ${label} (${projectId})
+Open: ${url2}
+Overview (all projects): ${DAEMON_ORIGIN}/`
+          );
         } catch (err) {
-          return textResult(`Failed to start dashboard server: ${err.message}`);
+          return textResult(`Failed to start dashboard daemon: ${err.message}`);
         }
       }
       // ---- plan_share ----------------------------------------------------
       case "plan_share": {
-        const { spawn } = await import("node:child_process");
+        let projectId, projectUrl;
         try {
-          await ensureDashboard(args.workspaceRoot, 3847);
+          const root = args.workspaceRoot ?? process.cwd();
+          const reg = await ensureDaemon(root, basename3(resolve4(root)));
+          projectId = reg.projectId;
+          projectUrl = reg.url;
         } catch (err) {
-          return textResult(`Cannot start dashboard: ${err.message}. Start it first with plan_serve_dashboard.`);
+          return textResult(`Cannot start dashboard daemon: ${err.message}. Start it first with plan_serve_dashboard.`);
         }
-        const dashPort = new URL(dashboardUrl).port || "3847";
+        const dashPort = String(DAEMON_PORT);
         let protectedPassword = null;
-        if (args.mode === "protected") {
-          try {
-            const webServerModule = await Promise.resolve().then(() => (init_web_server(), web_server_exports));
-            protectedPassword = webServerModule.enablePasswordProtection(args.password);
-            const authModule = await Promise.resolve().then(() => (init_auth(), auth_exports));
-            authModule.setStrictHost(!!args.strictHost);
-          } catch (err) {
-            return textResult(`Cannot enable password protection: ${err.message}`);
-          }
-        } else {
-          try {
-            const webServerModule = await Promise.resolve().then(() => (init_web_server(), web_server_exports));
-            webServerModule.disablePasswordProtection();
-            const authModule = await Promise.resolve().then(() => (init_auth(), auth_exports));
-            authModule.setStrictHost(false);
-          } catch {
-          }
+        try {
+          const authBody = args.mode === "protected" ? { enabled: true, password: args.password, strictHost: !!args.strictHost } : { enabled: false };
+          const r = await fetch(`${DAEMON_ORIGIN}/_daemon/auth`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(authBody)
+          });
+          if (!r.ok) throw new Error(`HTTP ${r.status}`);
+          const j = await r.json();
+          protectedPassword = j.password;
+        } catch (err) {
+          return textResult(`Cannot set daemon auth: ${err.message}`);
         }
         if (tunnelProcess) {
           try {
@@ -33210,26 +33702,27 @@ ${ctx.structure.csprojFiles.map((f) => `  ${f}`).join("\n")}` : ""
           tunnelProcess = null;
           tunnelUrl = null;
         }
+        const { spawn: spawnTunnel } = await import("node:child_process");
         const tunnelArgs = ["host", "-p", dashPort];
         if (args.mode === "public" || args.mode === "protected") {
           tunnelArgs.push("--allow-anonymous");
         }
         try {
-          const proc = spawn("devtunnel", tunnelArgs, {
+          const proc = spawnTunnel("devtunnel", tunnelArgs, {
             stdio: ["ignore", "pipe", "pipe"],
             detached: false
           });
           tunnelProcess = proc;
           tunnelMode = args.mode;
           let output = "";
-          const urlPromise = new Promise((resolve4, reject) => {
+          const urlPromise = new Promise((resolve5, reject) => {
             const timeout = setTimeout(() => reject(new Error("Timed out waiting for devtunnel URL")), 3e4);
             const onData = (chunk) => {
               output += chunk.toString();
               const urlMatch = output.match(/https:\/\/[^\s]+devtunnels\.ms[^\s]*/);
               if (urlMatch) {
                 clearTimeout(timeout);
-                resolve4(urlMatch[0]);
+                resolve5(urlMatch[0]);
               }
             };
             proc.stdout.on("data", onData);
@@ -33246,6 +33739,7 @@ ${ctx.structure.csprojFiles.map((f) => `  ${f}`).join("\n")}` : ""
             });
           });
           tunnelUrl = await urlPromise;
+          const sharedProjectUrl = `${tunnelUrl.replace(/\/$/, "")}/p/${projectId}/`;
           proc.on("exit", (code) => {
             if (tunnelProcess === proc) {
               console.error(`[plan-harness] devtunnel exited (code ${code}). It will be restarted on next plan_share call.`);
@@ -33262,8 +33756,8 @@ ${ctx.structure.csprojFiles.map((f) => `  ${f}`).join("\n")}` : ""
             `Sharing plan dashboard via devtunnel.`,
             ``,
             `  Mode:      ${args.mode} \u2014 ${modeDesc[args.mode]}`,
-            `  URL:       ${tunnelUrl}`,
-            `  Local:     ${dashboardUrl}`
+            `  URL:       ${sharedProjectUrl}`,
+            `  Local:     ${projectUrl}`
           ];
           if (args.mode === "protected") {
             lines.push(
@@ -33306,8 +33800,11 @@ ${ctx.structure.csprojFiles.map((f) => `  ${f}`).join("\n")}` : ""
         tunnelUrl = null;
         tunnelMode = null;
         try {
-          const webServerModule = await Promise.resolve().then(() => (init_web_server(), web_server_exports));
-          webServerModule.disablePasswordProtection();
+          await fetch(`${DAEMON_ORIGIN}/_daemon/auth`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ enabled: false })
+          });
         } catch {
         }
         return textResult(
@@ -33460,7 +33957,7 @@ function startStalenessWatcher() {
   }
   let startupMtime;
   try {
-    startupMtime = statSync(bundleFile).mtimeMs;
+    startupMtime = statSync2(bundleFile).mtimeMs;
   } catch {
     return;
   }
@@ -33480,7 +33977,7 @@ function startStalenessWatcher() {
   let consecutiveMisses = 0;
   const timer = setInterval(() => {
     try {
-      const m = statSync(bundleFile).mtimeMs;
+      const m = statSync2(bundleFile).mtimeMs;
       consecutiveMisses = 0;
       if (m !== startupMtime) {
         clearInterval(timer);
@@ -33504,18 +34001,82 @@ function exitForRespawn(reason) {
   console.error(`[plan-harness] exiting for respawn \u2014 ${reason}`);
   setTimeout(() => process.exit(0), 50);
 }
-async function ensureDashboard(workspaceRoot, port) {
-  const ws = await Promise.resolve().then(() => (init_web_server(), web_server_exports));
-  if (ws.isDashboardRunning()) {
-    const liveUrl = ws.getDashboardUrl();
-    if (liveUrl) dashboardUrl = liveUrl;
-    return dashboardUrl;
+var DAEMON_PORT = Number(process.env.PLAN_HARNESS_DAEMON_PORT) || 3100;
+var DAEMON_ORIGIN = `http://localhost:${DAEMON_PORT}`;
+function myPluginVersion() {
+  try {
+    const here = dirname3(fileURLToPath3(import.meta.url));
+    const manifest = resolve4(here, "..", "..", ".claude-plugin", "plugin.json");
+    return String(JSON.parse(readFileSync2(manifest, "utf-8")).version || "dev");
+  } catch {
+    return "dev";
   }
-  if (dashboardUrl) console.error(`[plan-harness] cached dashboard URL ${dashboardUrl} is stale; restarting`);
-  dashboardUrl = null;
-  const url2 = await ws.startDashboard(workspaceRoot ?? process.cwd(), port);
-  dashboardUrl = url2 ?? `http://localhost:${port}`;
-  return dashboardUrl;
+}
+async function daemonHealth(timeoutMs = 800) {
+  try {
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), timeoutMs);
+    const r = await fetch(`${DAEMON_ORIGIN}/_daemon/health`, { signal: ctrl.signal });
+    clearTimeout(t);
+    if (!r.ok) return null;
+    return await r.json();
+  } catch {
+    return null;
+  }
+}
+async function daemonRegister(rootPath, label) {
+  const r = await fetch(`${DAEMON_ORIGIN}/_daemon/register`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ rootPath, label })
+  });
+  if (!r.ok) throw new Error(`register failed: HTTP ${r.status}`);
+  return r.json();
+}
+function spawnDaemon() {
+  const here = dirname3(fileURLToPath3(import.meta.url));
+  const entry = resolve4(here, "daemon-entry.js");
+  const child = spawn(process.execPath, [entry, "--port", String(DAEMON_PORT)], {
+    detached: true,
+    stdio: "ignore",
+    env: { ...process.env, PLAN_HARNESS_DAEMON_PORT: String(DAEMON_PORT) }
+  });
+  child.unref();
+}
+async function waitForHealth(maxMs = 5e3) {
+  const start = Date.now();
+  while (Date.now() - start < maxMs) {
+    const h = await daemonHealth(400);
+    if (h?.ok) return h;
+    await new Promise((r) => setTimeout(r, 150));
+  }
+  return null;
+}
+async function ensureDaemon(rootPath, label) {
+  let health = await daemonHealth();
+  const mine = myPluginVersion();
+  if (health && health.version !== mine && mine !== "dev") {
+    console.error(`[plan-harness] daemon v${health.version} != mine v${mine}; restarting`);
+    try {
+      await fetch(`${DAEMON_ORIGIN}/_daemon/shutdown`, { method: "POST" });
+    } catch {
+    }
+    const freedBy = Date.now() + 3e3;
+    while (Date.now() < freedBy && await daemonHealth(300)) {
+      await new Promise((r) => setTimeout(r, 150));
+    }
+    health = null;
+  }
+  if (!health) {
+    spawnDaemon();
+    health = await waitForHealth();
+    if (!health) {
+      throw new Error(
+        `daemon did not come up on port ${DAEMON_PORT}. The port may be taken by another process.`
+      );
+    }
+  }
+  return daemonRegister(resolve4(rootPath ?? process.cwd()), label);
 }
 var strict = process.env.PLAN_HARNESS_STRICT === "1";
 var uncaughtCount = 0;
@@ -33561,11 +34122,11 @@ console.error("[plan-harness] MCP server running on stdio.");
 if (!process.env.PLAN_HARNESS_NO_AUTO_DASHBOARD) {
   setImmediate(async () => {
     try {
-      const port = Number(process.env.PLAN_HARNESS_DASHBOARD_PORT) || 3847;
-      const url2 = await ensureDashboard(process.cwd(), port);
-      console.error(`[plan-harness] Dashboard auto-started at ${url2}`);
+      const root = process.cwd();
+      const { projectId, url: url2 } = await ensureDaemon(root, basename3(resolve4(root)));
+      console.error(`[plan-harness] project registered: ${projectId} -> ${url2}`);
     } catch (err) {
-      console.error(`[plan-harness] Dashboard auto-start failed (non-fatal): ${err.message}`);
+      console.error(`[plan-harness] daemon auto-register failed (non-fatal): ${err.message}`);
     }
   });
 }
