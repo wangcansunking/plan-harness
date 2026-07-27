@@ -572,31 +572,33 @@ async function handleRequest(req, res) {
   const parsedUrl = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
   const pathname = parsedUrl.pathname;
 
-  // ---- Daemon control endpoints (spec PR 1) ----
-  // These are local-only management calls from the MCP layer; they sit ahead
-  // of the auth gate so registration works before any password is set.
+  // Compute loopback status up front — both the daemon-control gate below and
+  // the password gate further down depend on it. `auth.isLocalRequest` checks
+  // the socket peer AND the absence of proxy headers, so a tunnel-forwarded
+  // request (which arrives at the TCP layer as 127.0.0.1) is NOT loopback.
+  const fromLoopback = auth.isLocalRequest(req);
+
+  // ---- Daemon control endpoints (spec PR 1) — LOOPBACK ONLY ----
+  // These mutate daemon state (register projects, toggle auth, shut down). They
+  // are management calls from the local MCP layer and must NEVER be reachable
+  // through a tunnel — otherwise an external visitor could POST /_daemon/auth
+  // to disable password protection, or /_daemon/shutdown to kill the daemon.
+  // A non-loopback hit gets an opaque 404 (don't advertise the control plane).
   if (daemonMode && pathname.startsWith('/_daemon/')) {
+    if (!fromLoopback) {
+      res.writeHead(404, { 'Content-Type': 'text/plain' });
+      res.end('Not Found');
+      return;
+    }
     return handleDaemonEndpoint(req, res, pathname);
   }
 
-  // ---- Project-scoped routes: /p/<projectId>/... (spec PR 1) ----
-  // Every doc link carries its project identity, so a request resolves its
-  // root from the registry, never a process global. Unknown/vanished projects
-  // 404 with a hint — they NEVER fall through to another project's file.
-  if (daemonMode && pathname.startsWith('/p/')) {
-    return handleProjectRoute(req, res, parsedUrl, pathname);
-  }
 
   // ---- Password protection gate ----
-  // Loopback bypass: if the request came from the host machine itself AND
-  // wasn't forwarded by a tunnel/proxy, no auth is needed — local UX stays
-  // frictionless. `auth.isLocalRequest` checks BOTH the socket peer and the
-  // absence of proxy headers (X-Forwarded-*, Forwarded, X-Real-IP, ...) so
-  // that devtunnel — which proxies external visitors through localhost:3847
-  // and shows up at the TCP layer as 127.0.0.1 — doesn't slip through the
-  // gate. Pass --strict-host to plan_share to disable loopback bypass entirely.
-  const fromLoopback = auth.isLocalRequest(req);
-
+  // `fromLoopback` (computed at the top) is false for tunnel-forwarded
+  // visitors, so devtunnel traffic goes through the gate. Pass --strict-host to
+  // plan_share to disable loopback bypass entirely.
+  //
   // The login POST is the sole entry point into authentication and must be
   // reachable regardless of loopback status so the form on the login page
   // can always submit successfully.
@@ -629,6 +631,16 @@ async function handleRequest(req, res) {
 
     // Attach the authenticated reviewer to the request for downstream handlers.
     req.user = session;
+  }
+
+  // ---- Project-scoped routes: /p/<projectId>/... (spec PR 1) ----
+  // Placed AFTER the password gate so protected-mode sharing actually protects
+  // project docs (an external tunnel visitor must authenticate first). Every
+  // doc link carries its project identity, so a request resolves its root from
+  // the registry, never a process global. Unknown/vanished projects 404 with a
+  // hint — they NEVER fall through to another project's file.
+  if (daemonMode && pathname.startsWith('/p/')) {
+    return handleProjectRoute(req, res, parsedUrl, pathname);
   }
 
   // Route: GET / -> Dashboard

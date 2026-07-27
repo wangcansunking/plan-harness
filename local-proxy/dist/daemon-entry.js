@@ -10532,13 +10532,15 @@ function isPasswordProtected() {
 async function handleRequest(req, res) {
   const parsedUrl = new URL(req.url, `http://${req.headers.host || "localhost"}`);
   const pathname = parsedUrl.pathname;
+  const fromLoopback = isLocalRequest(req);
   if (daemonMode && pathname.startsWith("/_daemon/")) {
+    if (!fromLoopback) {
+      res.writeHead(404, { "Content-Type": "text/plain" });
+      res.end("Not Found");
+      return;
+    }
     return handleDaemonEndpoint(req, res, pathname);
   }
-  if (daemonMode && pathname.startsWith("/p/")) {
-    return handleProjectRoute(req, res, parsedUrl, pathname);
-  }
-  const fromLoopback = isLocalRequest(req);
   if (isEnabled() && pathname === "/_auth/login" && req.method === "POST") {
     return handleLogin(req, res);
   }
@@ -10557,6 +10559,9 @@ async function handleRequest(req, res) {
       return serveLoginPage(req, res);
     }
     req.user = session;
+  }
+  if (daemonMode && pathname.startsWith("/p/")) {
+    return handleProjectRoute(req, res, parsedUrl, pathname);
   }
   if (pathname === "/" && req.method === "GET") {
     if (daemonMode) return serveOverview(req, res);
