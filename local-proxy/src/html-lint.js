@@ -43,6 +43,16 @@ const PALETTE_LOCKED_VALUES = {
 const SHARED_LINK_LABELS = ['Context', 'Glossary', 'ADR'];
 const DIAGRAM_REQUIRED_DOCS = new Set(['design', 'state-machine']);
 
+// L3-prefer-chart scope: docs where option comparisons / tradeoffs typically
+// live. Narrow on purpose — test-report has its own KPI conventions and product
+// is mockup-driven, so neither is nudged here.
+const CHART_NUDGE_DOCS = new Set(['analysis', 'design']);
+
+// Header words that mark a table as a comparison/decision/tradeoff matrix (as
+// opposed to a plain reference table). Word-boundary anchored to avoid matching
+// substrings inside unrelated words.
+const COMPARISON_SIGNALS = /\b(compar\w*|versus|vs\.?|option[s]?|tradeoff[s]?|trade-off[s]?|alternativ\w*|pros?|cons?|recommend\w*|chosen|winner|criteri\w*)\b/;
+
 function nodeText(node) {
   return String(node?.text || '')
     .replace(/\s+/g, ' ')
@@ -326,6 +336,37 @@ export function lintHtml(html, ctx = {}) {
     } else if (mermaidCount > 0 && svgCount > 0 && mermaidCount > svgCount) {
       warnings.push({ rule: 'L3-prefer-svg', severity: 'warning',
         message: `${ctx.docName || 'doc'}.html has more Mermaid blocks (${mermaidCount}) than inline <svg> (${svgCount}) — prefer SVG for new diagrams.` });
+    }
+  }
+
+  // L3-prefer-chart — narrow nudge: on analysis/design docs, a table that reads
+  // as a comparison/tradeoff/option matrix (its header carries a comparison
+  // signal word AND it has >=3 body rows) but ships with no inline <svg> in
+  // <main> gets a warning. The project standard is to render comparisons as a
+  // chart that makes the winner obvious (see prompts/styles/quantitative-chart.md),
+  // not a plain table the reader has to parse. Deliberately narrow — only
+  // analysis/design, only comparison-signal headers, only >=3 rows — so it
+  // doesn't fire on every reference table. Warning, not error.
+  if (!skip.has('L3-prefer-chart') && CHART_NUDGE_DOCS.has(ctx.docName)) {
+    const mainScope = root.querySelector('main') || root;
+    const hasChart = mainScope.querySelectorAll('svg').length > 0;
+    if (!hasChart) {
+      const comparisonTable = mainScope.querySelectorAll('table').find((table) => {
+        // Header signal: first row (thead or first tr) mentions a comparison word.
+        const headRow = table.querySelector('thead tr') || table.querySelector('tr');
+        const headText = nodeText(headRow).toLowerCase();
+        const signalled = COMPARISON_SIGNALS.test(headText);
+        if (!signalled) return false;
+        // Body size: >=3 data rows (exclude the header row).
+        const bodyRows = (table.querySelector('tbody')
+          ? table.querySelectorAll('tbody tr')
+          : table.querySelectorAll('tr').slice(1));
+        return bodyRows.length >= 3;
+      });
+      if (comparisonTable) {
+        warnings.push({ rule: 'L3-prefer-chart', severity: 'warning',
+          message: `${ctx.docName}.html has a comparison/tradeoff table but no chart — render the comparison so the winner is obvious (see prompts/styles/quantitative-chart.md: comparison bar or decision matrix, color only the winner). Warning, not error.` });
+      }
     }
   }
 

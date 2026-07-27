@@ -181,6 +181,8 @@ Since SVG attributes do not support CSS `var()` references, use the **dark theme
 
 **For System Architecture and Integration Points diagrams**, also follow the structural rules in `prompts/styles/architecture-diagram-svg.md` — arrow z-order (draw arrows before component boxes), 40px minimum vertical gap between stacked components, legend placement outside boundary boxes, distinct dash patterns for region/cluster/security boundaries, and a component-type → semantic-color map (Frontend / Backend / Database / Cloud / Security / Bus / External). The style file uses the same hex values as the table above so the writer's `svgMap` keeps working unchanged.
 
+**For option tradeoffs, alternatives-considered tables, and any "A vs B" decision**, follow `prompts/styles/quantitative-chart.md` — render the comparison as a decision matrix or comparison bar with exactly one highlighted (recommended) option, a badge, and a one-line rationale, rather than leaving the reader to infer the winner from a plain table. Lint raises `L3-prefer-chart` on analysis/design docs that ship a comparison-signal table with no accompanying chart.
+
 ### Step 5: Identify Integration Points
 
 Document every system the new feature must integrate with:

@@ -310,6 +310,56 @@ it('fixHtml: leaves Writer-only findings as unfixed (e.g. missing mockup visuals
     'L3-ux-visuals needs real content — must remain in unfixed[]');
 });
 
+// ---- L3-prefer-chart (narrow comparison-table nudge) ----
+// Build a design doc with NO inline <svg> (strip the two VALID carries) and a
+// caller-supplied table, so the only variable is the table shape.
+function docWithTableNoSvg(tableHtml) {
+  return VALID
+    .replace(/<svg aria-label="UI mockup screen">mockup<\/svg>/, tableHtml)
+    .replace(/<svg aria-label="user-flow workflow">user flow<\/svg>/, '');
+}
+const COMPARISON_TABLE = `<table><thead><tr><th>Criterion</th><th>Polling</th><th>SSE</th></tr></thead>`
+  + `<tbody><tr><td>Latency</td><td>5s</td><td>100ms</td></tr>`
+  + `<tr><td>Complexity</td><td>Low</td><td>Low</td></tr>`
+  + `<tr><td>Deps</td><td>None</td><td>None</td></tr></tbody></table>`;
+
+it('L3-prefer-chart warns: comparison table, no chart, on a design doc', () => {
+  const r = lintHtml(docWithTableNoSvg(COMPARISON_TABLE), { docName: 'design' });
+  assert.ok(r.warnings.some(w => w.rule === 'L3-prefer-chart'),
+    'expected L3-prefer-chart on a comparison table with no svg');
+});
+
+it('L3-prefer-chart is SILENT when the same comparison has an accompanying chart', () => {
+  const withChart = COMPARISON_TABLE + '<svg role="img" aria-label="latency comparison"><rect/></svg>';
+  const r = lintHtml(docWithTableNoSvg(withChart), { docName: 'design' });
+  assert.ok(!r.warnings.some(w => w.rule === 'L3-prefer-chart'),
+    'L3-prefer-chart must NOT fire once a chart is present');
+});
+
+it('L3-prefer-chart is SILENT on a plain (non-comparison) table', () => {
+  const plain = `<table><thead><tr><th>Field</th><th>Type</th></tr></thead>`
+    + `<tbody><tr><td>id</td><td>uuid</td></tr><tr><td>name</td><td>text</td></tr>`
+    + `<tr><td>created</td><td>timestamp</td></tr></tbody></table>`;
+  const r = lintHtml(docWithTableNoSvg(plain), { docName: 'design' });
+  assert.ok(!r.warnings.some(w => w.rule === 'L3-prefer-chart'),
+    'a schema/reference table must not trip the comparison nudge');
+});
+
+it('L3-prefer-chart is SILENT when a comparison table has < 3 rows', () => {
+  const twoRow = `<table><thead><tr><th>Criterion</th><th>Option A</th><th>Option B</th></tr></thead>`
+    + `<tbody><tr><td>Cost</td><td>Low</td><td>High</td></tr>`
+    + `<tr><td>Speed</td><td>Fast</td><td>Slow</td></tr></tbody></table>`;
+  const r = lintHtml(docWithTableNoSvg(twoRow), { docName: 'design' });
+  assert.ok(!r.warnings.some(w => w.rule === 'L3-prefer-chart'),
+    'a 2-row comparison is too small to demand a chart');
+});
+
+it('L3-prefer-chart does NOT fire outside analysis/design (e.g. test-report)', () => {
+  const r = lintHtml(docWithTableNoSvg(COMPARISON_TABLE), { docName: 'test-report' });
+  assert.ok(!r.warnings.some(w => w.rule === 'L3-prefer-chart'),
+    'the chart nudge is scoped to analysis/design only');
+});
+
 process.stdout.write(`\n${passed} passed, ${failed} failed\n`);
 if (failed > 0) {
   for (const f of failures) {

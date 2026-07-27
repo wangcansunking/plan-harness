@@ -20,6 +20,7 @@ Before you write any HTML, read these files in order:
 2. **`prompts/_caveman-mixin.md`** — concise-text rules. Drop articles + filler. Fragments OK. Use arrows like `X -> Y`. Tables and diagrams beat prose for anything structural.
 3. **`skills/plan-gen/types/<doc>.md`** — per-doc contract. Tells you which meta fields belong in which section and any per-doc rules. **Default rendering for any diagram is inline `<svg>`**; Mermaid is the documented fallback for very dense graphs only.
 4. **`prompts/styles/architecture-diagram-svg.md`** (only for `design.html` + `state-machine.html` if they emit a hand-authored SVG) — arrow z-order, 40px stacking gap, legend placement, component-type color map.
+5. **`prompts/styles/quantitative-chart.md`** (for any doc with option comparisons, tradeoffs, before/after, or KPI numbers — esp. `analysis.html` + `design.html` + `test-report.html`) — seven inline-SVG chart primitives + the "color only the winner, mute the rest, badge the conclusion" rules.
 
 ---
 
@@ -51,6 +52,7 @@ Open `skills/plan-gen/types/<doc>.md`. It tells you which meta fields map to whi
 |---|---|
 | Array of records with same keys | `<table>` with `<th>` row from keys |
 | Diagram of any kind (DAG, state machine, flow, sequence, mockup, layout) | **inline `<svg>` — follow `prompts/styles/architecture-diagram-svg.md` for the conventions.** SVG renders offline, looks consistent across browsers, prints to PDF cleanly, and gives the writer pixel-level control over layout, color, and labelling. Hand-author it; the `architecture-diagram-svg.md` mixin lays out the arrow z-order, 40px stacking gap, legend, and component colour map you need. |
+| Comparison / tradeoff / before-after / KPI numbers ("A is faster than B", option matrix, +40%/−15%, coverage 72% vs 80%) | **a quantitative chart, not prose or a bare table — follow `prompts/styles/quantitative-chart.md`.** Pick the primitive (comparison bar, decision matrix, bullet, slope/dumbbell, diverging bar, stat tile, sparkline), color only the winner, mute the rest, label values directly, and state the conclusion in-frame. A comparison that doesn't make the winner obvious has failed. |
 | Diagram so complex SVG is impractical (≥6 states with crossing edges, ≥10 nodes in a DAG, deep sequence diagram) | `<pre class="mermaid">{source}</pre>` as **fallback only**. Use this when hand-authoring SVG would burn time without adding clarity. Even then, prefer to split the diagram into smaller SVG-sized chunks before reaching for Mermaid. |
 | Single decision / risk | `<div class="callout">` with `<div class="callout-title">` |
 | Bullet list of named items | `<ul>` with `<strong>name</strong>: prose` per `<li>` |
