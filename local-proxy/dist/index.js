@@ -17049,6 +17049,27 @@ function lintHtml(html, ctx = {}) {
       });
     }
   }
+  if (!skip.has("L3-prefer-chart") && CHART_NUDGE_DOCS.has(ctx.docName)) {
+    const mainScope = root.querySelector("main") || root;
+    const hasChart = mainScope.querySelectorAll("svg").length > 0;
+    if (!hasChart) {
+      const comparisonTable = mainScope.querySelectorAll("table").find((table) => {
+        const headRow = table.querySelector("thead tr") || table.querySelector("tr");
+        const headText = nodeText(headRow).toLowerCase();
+        const signalled = COMPARISON_SIGNALS.test(headText);
+        if (!signalled) return false;
+        const bodyRows = table.querySelector("tbody") ? table.querySelectorAll("tbody tr") : table.querySelectorAll("tr").slice(1);
+        return bodyRows.length >= 3;
+      });
+      if (comparisonTable) {
+        warnings.push({
+          rule: "L3-prefer-chart",
+          severity: "warning",
+          message: `${ctx.docName}.html has a comparison/tradeoff table but no chart \u2014 render the comparison so the winner is obvious (see prompts/styles/quantitative-chart.md: comparison bar or decision matrix, color only the winner). Warning, not error.`
+        });
+      }
+    }
+  }
   if (!skip.has("L3-story-flows") && ctx.docName === "state-machine") {
     const flows = Array.isArray(ctx.metaJson?.perStoryFlows) ? ctx.metaJson.perStoryFlows : null;
     if (flows !== null) {
@@ -17194,7 +17215,7 @@ function lintHtml(html, ctx = {}) {
   }
   return { errors, warnings, info };
 }
-var import_node_html_parser, SCENARIO_DOCS, LOCKED_PALETTE_VARS, PALETTE_LOCKED_VALUES, SHARED_LINK_LABELS, DIAGRAM_REQUIRED_DOCS, LOCKED_PALETTE_DEFAULTS;
+var import_node_html_parser, SCENARIO_DOCS, LOCKED_PALETTE_VARS, PALETTE_LOCKED_VALUES, SHARED_LINK_LABELS, DIAGRAM_REQUIRED_DOCS, CHART_NUDGE_DOCS, COMPARISON_SIGNALS, LOCKED_PALETTE_DEFAULTS;
 var init_html_lint = __esm({
   "src/html-lint.js"() {
     import_node_html_parser = __toESM(require_dist2(), 1);
@@ -17227,6 +17248,8 @@ var init_html_lint = __esm({
     };
     SHARED_LINK_LABELS = ["Context", "Glossary", "ADR"];
     DIAGRAM_REQUIRED_DOCS = /* @__PURE__ */ new Set(["design", "state-machine"]);
+    CHART_NUDGE_DOCS = /* @__PURE__ */ new Set(["analysis", "design"]);
+    COMPARISON_SIGNALS = /\b(compar\w*|versus|vs\.?|option[s]?|tradeoff[s]?|trade-off[s]?|alternativ\w*|pros?|cons?|recommend\w*|chosen|winner|criteri\w*)\b/;
     LOCKED_PALETTE_DEFAULTS = {
       ...PALETTE_LOCKED_VALUES,
       "--muted": "#8b949e"
