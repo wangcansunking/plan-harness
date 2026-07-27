@@ -241,6 +241,74 @@ async function main() {
       assert.equal(r.body?.password, null);
     });
 
+    // ---- SECURITY: control plane is loopback-only ----
+    // A tunnel visitor is simulated with an X-Forwarded-For header, which
+    // auth.isLocalRequest treats as non-loopback (devtunnel forwards through
+    // 127.0.0.1 but adds proxy headers). Such a request must NOT reach the
+    // daemon control endpoints — otherwise it could disable auth or kill the
+    // daemon over the public tunnel.
+    const TUNNEL = { 'X-Forwarded-For': '203.0.113.7' };
+    await it('SECURITY: /_daemon/auth from a tunnel visitor -> 404, cannot toggle auth', async () => {
+      const r = await req('/_daemon/auth', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...TUNNEL },
+        body: JSON.stringify({ enabled: false }),
+      });
+      assert.equal(r.status, 404, `control plane must be hidden from tunnel, got ${r.status}`);
+    });
+
+    await it('SECURITY: /_daemon/shutdown from a tunnel visitor -> 404, daemon stays up', async () => {
+      const r = await req('/_daemon/shutdown', { method: 'POST', headers: { ...TUNNEL } });
+      assert.equal(r.status, 404, `shutdown must be unreachable via tunnel, got ${r.status}`);
+      // Prove the daemon is still alive.
+      const h = await req('/_daemon/health');
+      assert.equal(h.status, 200, 'daemon must still be running after a rejected tunnel shutdown');
+    });
+
+    // ---- SECURITY: protected mode gates project docs for tunnel visitors ----
+    await it('SECURITY: protected mode -> tunnel visitor is challenged, not served the doc', async () => {
+      // Enable protection (loopback call — allowed).
+      const en = await req('/_daemon/auth', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled: true }),
+      });
+      assert.equal(en.body?.enabled, true);
+      try {
+        // A tunnel visitor (proxy header, no auth cookie) must NOT get the doc.
+        const r = await req(`/p/${idA}/checkout-flow/design.html`, { headers: { ...TUNNEL } });
+        assert.ok(!/PROJECT_A_MARKER/.test(String(r.body)),
+          'protected project doc must NOT be served to an unauthenticated tunnel visitor');
+        // It should be a login challenge (200 login page) or a redirect — never the doc.
+        assert.ok(/sign in|password|login/i.test(String(r.body)) || r.status === 302,
+          `expected an auth challenge, got status ${r.status}`);
+      } finally {
+        // Loopback disable so the rest of the suite is unprotected.
+        await req('/_daemon/auth', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ enabled: false }),
+        });
+      }
+    });
+
+    await it('loopback host still bypasses protection (local UX unaffected)', async () => {
+      const en = await req('/_daemon/auth', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled: true }),
+      });
+      assert.equal(en.body?.enabled, true);
+      try {
+        // No proxy header -> loopback -> host sees the doc without logging in.
+        const r = await req(`/p/${idA}/checkout-flow/design.html`);
+        assert.equal(r.status, 200);
+        assert.ok(/PROJECT_A_MARKER/.test(r.body), 'host on loopback must still see the doc');
+      } finally {
+        await req('/_daemon/auth', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ enabled: false }),
+        });
+      }
+    });
+
     // ---- Version handshake mechanism: shutdown endpoint frees the port ----
     await it('POST /_daemon/shutdown stops the daemon (respawn precondition)', async () => {
       const r = await req('/_daemon/shutdown', { method: 'POST' });
