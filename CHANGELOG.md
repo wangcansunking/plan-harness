@@ -28,6 +28,14 @@ Version fields in `.claude-plugin/plugin.json`, `.claude-plugin/marketplace.json
 
 
 
+
+## [1.12.1] — 2026-07-27
+
+- fix(security): daemon control endpoints (`/_daemon/*`) are now loopback-only — a tunnel visitor can no longer disable password protection or shut down the daemon
+- fix(security): project-scoped routes (`/p/<id>/...`) now sit behind the password gate, so `plan_share --mode protected` actually protects shared project docs
+
+([#26](https://github.com/wangcansunking/plan-harness/pull/26))
+
 ## [1.12.0] — 2026-07-27
 
 - feat: single fixed-port daemon (3100) + in-memory project registry replaces per-session dashboard servers; doc links are now project-scoped absolute URLs (`/p/<projectId>/...`) that never collide across sessions or worktrees
