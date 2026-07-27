@@ -29,6 +29,14 @@ Version fields in `.claude-plugin/plugin.json`, `.claude-plugin/marketplace.json
 
 
 
+
+## [1.13.0] — 2026-07-27
+
+- feat: new `prompts/styles/quantitative-chart.md` — a 7-primitive inline-SVG chart vocabulary (comparison bar, decision matrix, bullet, before/after, diverging bar, stat tile, sparkline) with "color only the winner, mute the rest, badge the conclusion" rules for dev-facing comparison charts
+- feat(lint): new `L3-prefer-chart` warning nudges analysis/design docs that ship a comparison/tradeoff table with no accompanying chart (narrow: comparison-signal header + ≥3 rows + no SVG)
+
+([#27](https://github.com/wangcansunking/plan-harness/pull/27))
+
 ## [1.12.1] — 2026-07-27
 
 - fix(security): daemon control endpoints (`/_daemon/*`) are now loopback-only — a tunnel visitor can no longer disable password protection or shut down the daemon
