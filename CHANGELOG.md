@@ -27,6 +27,17 @@ Version fields in `.claude-plugin/plugin.json`, `.claude-plugin/marketplace.json
 
 
 
+
+## [1.12.0] — 2026-07-27
+
+- feat: single fixed-port daemon (3100) + in-memory project registry replaces per-session dashboard servers; doc links are now project-scoped absolute URLs (`/p/<projectId>/...`) that never collide across sessions or worktrees
+- fix: generated links no longer offset — `plans/` and `plan-harness/` roots emit the same link shape
+- fix: concurrent projects/sessions no longer bleed — each request resolves its project from the URL's projectId; unknown/vanished projects 404 with a hint instead of serving another project's file
+- feat: dashboard is now a cross-project overview (project → scenario → files) with collapsible project groups; registry self-cleans when a project root (e.g. a deleted worktree) disappears
+- feat: `plan_share` now tunnels the shared daemon and shares the project-scoped URL
+
+([#25](https://github.com/wangcansunking/plan-harness/pull/25))
+
 ## [1.11.0] — 2026-05-29
 
 ### Added
