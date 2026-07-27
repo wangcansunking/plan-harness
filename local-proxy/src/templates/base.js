@@ -669,6 +669,139 @@ function filterScenarios() {
 }
 
 /**
+ * Generate the cross-project overview: one collapsible group per registered
+ * project (project → scenario → files is the dashboard hierarchy). Every
+ * scenario link is project-scoped (/p/<projectId>/...) so it carries identity.
+ * @param {Array<{projectId:string, rootPath:string, label:string, scenarios:Array}>} groups
+ * @param {object} [options]
+ * @returns {string} Full self-contained HTML page.
+ */
+export function generateOverview(groups, options = {}) {
+  const planTypes = ['product', 'analysis', 'design', 'state-machine', 'test-spec', 'implementation', 'test-report'];
+
+  const totalProjects = groups.length;
+  const totalScenarios = groups.reduce((s, g) => s + g.scenarios.length, 0);
+  const existingFiles = groups.reduce((s, g) =>
+    s + g.scenarios.reduce((t, sc) => t + (sc.files ? sc.files.filter(f => f.exists).length : 0), 0), 0);
+  const totalUnresolved = groups.reduce((s, g) =>
+    s + g.scenarios.reduce((t, sc) => t + (sc.unresolvedComments || 0), 0), 0);
+
+  const summaryCards = `
+<div class="summary-grid">
+  <div class="summary-card"><div class="summary-value">${totalProjects}</div><div class="summary-label">Projects</div></div>
+  <div class="summary-card"><div class="summary-value">${totalScenarios}</div><div class="summary-label">Scenarios</div></div>
+  <div class="summary-card"><div class="summary-value" style="color:var(--green)">${existingFiles}</div><div class="summary-label">Plan Files</div></div>
+  ${totalUnresolved > 0 ? `<div class="summary-card"><div class="summary-value" style="color:var(--accent)">${totalUnresolved}</div><div class="summary-label">Unresolved comments</div></div>` : ''}
+</div>
+`;
+
+  const scenarioCard = (projectId, sc) => {
+    const todos = sc.todos || 0;
+    const unresolved = sc.unresolvedComments || 0;
+    const fileCount = sc.files ? sc.files.length : 0;
+    const existCount = sc.files ? sc.files.filter(f => f.exists).length : 0;
+    const filePills = planTypes.map(type => {
+      const file = sc.files ? sc.files.find(f => f.type === type) : null;
+      const exists = file && file.exists;
+      const pillClass = exists ? 'badge-green' : '';
+      const pillStyle = !exists ? 'background:var(--code-bg);color:var(--muted);border:1px solid var(--border);' : '';
+      return `<span class="badge ${pillClass}" style="${pillStyle}font-size:0.7rem;">${type}</span>`;
+    }).join(' ');
+    const open = todos + unresolved;
+    const statusDot = open === 0 && existCount > 0
+      ? '<span style="color:var(--green);font-size:1.2rem;" title="No open items">&#10003;</span>'
+      : open > 0
+        ? '<span style="color:var(--yellow);font-size:1.2rem;" title="Open items">&#9679;</span>'
+        : '<span style="color:var(--muted);font-size:1.2rem;" title="No tracked items">&#9675;</span>';
+    // Link to the first existing doc so the card is clickable into content;
+    // fall back to the project-scoped scenario home marker (the scenario dir).
+    const firstDoc = sc.files ? sc.files.find(f => f.exists) : null;
+    const cardHref = firstDoc
+      ? buildDocHref(firstDoc.path, projectId)
+      : `/p/${encodeURIComponent(projectId)}/`;
+    return `
+<div class="scenario-card" style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:1.2rem;cursor:pointer;transition:box-shadow 0.15s,border-color 0.15s;" onclick="window.location.href='${escapeAttr(cardHref)}'" onmouseover="this.style.boxShadow='var(--shadow-lg)';this.style.borderColor='var(--accent)'" onmouseout="this.style.boxShadow='';this.style.borderColor='var(--border)'">
+  <div style="display:flex;align-items:center;gap:0.6rem;margin-bottom:0.6rem;">
+    ${statusDot}
+    <span style="font-size:1.05rem;font-weight:700;">${escapeHTML(sc.name)}</span>
+  </div>
+  ${sc.description ? `<p style="font-size:0.85rem;color:var(--muted);margin-bottom:0.6rem;">${escapeHTML(sc.description)}</p>` : ''}
+  <div style="margin-bottom:0.6rem;">${filePills}</div>
+  <div style="display:flex;align-items:center;gap:0.9rem;font-size:0.85rem;flex-wrap:wrap;">
+    <span style="color:var(--muted);">${existCount}/${fileCount} files</span>
+    ${todos > 0 ? `<span style="color:var(--yellow);font-weight:600;">${todos} todo</span>` : ''}
+    ${unresolved > 0 ? `<span style="color:var(--accent);font-weight:600;">${unresolved} unresolved</span>` : ''}
+  </div>
+</div>`;
+  };
+
+  const projectGroups = groups.map(g => {
+    const cards = g.scenarios.length
+      ? g.scenarios.map(sc => scenarioCard(g.projectId, sc)).join('\n')
+      : `<p style="color:var(--muted);font-size:0.9rem;">No scenarios yet — run <code>/plan-init</code> in this project.</p>`;
+    return `
+<details class="project-group" open style="margin-bottom:1.4rem;border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;">
+  <summary style="padding:0.9rem 1.1rem;cursor:pointer;background:var(--surface);font-weight:700;display:flex;align-items:center;gap:0.6rem;">
+    <span style="font-size:1.05rem;">${escapeHTML(g.label)}</span>
+    <span style="color:var(--muted);font-weight:400;font-size:0.8rem;">${escapeHTML(g.rootPath)}</span>
+    <span style="margin-left:auto;color:var(--muted);font-weight:400;font-size:0.8rem;">${g.scenarios.length} scenario${g.scenarios.length === 1 ? '' : 's'}</span>
+  </summary>
+  <div style="padding:1rem;">
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(360px,1fr));gap:1rem;">
+${cards}
+    </div>
+  </div>
+</details>`;
+  }).join('\n');
+
+  const emptyState = groups.length === 0
+    ? `<p style="color:var(--muted);">No projects registered yet. Run <code>/plan-start</code> in a project directory to register it.</p>`
+    : '';
+
+  const content = `
+${summaryCards}
+
+<h2 id="projects">Projects</h2>
+
+<div class="filter-bar" style="margin-bottom:1rem;">
+  <input type="text" id="overviewSearch" placeholder="Search projects & scenarios..." oninput="filterOverview()" style="font-family:inherit;font-size:13px;padding:6px 10px;border:1px solid var(--border);border-radius:4px;background:var(--surface);color:var(--text);width:280px;">
+</div>
+
+${projectGroups}
+${emptyState}
+`;
+
+  const scripts = `
+<script>
+function filterOverview() {
+  var query = document.getElementById('overviewSearch').value.toLowerCase();
+  document.querySelectorAll('.project-group').forEach(function(group) {
+    var anyVisible = false;
+    group.querySelectorAll('.scenario-card').forEach(function(card) {
+      var show = card.textContent.toLowerCase().includes(query);
+      card.style.display = show ? '' : 'none';
+      if (show) anyVisible = true;
+    });
+    var summaryText = group.querySelector('summary').textContent.toLowerCase();
+    group.style.display = (anyVisible || summaryText.includes(query) || !query) ? '' : 'none';
+  });
+}
+</script>
+`;
+
+  return wrapPage(content, {
+    title: options.title || 'Plan Dashboard',
+    subtitle: options.subtitle || '',
+    meta: options.meta || `Generated ${new Date().toISOString().slice(0, 10)}`,
+    tags: options.tags || [],
+    sections: [],
+    scripts,
+    storageKey: 'plan-dashboard-theme',
+    ...options,
+  });
+}
+
+/**
  * Generate a scenario detail page showing all plan files.
  * @param {object} scenario - { name, description, workItem, files: [{type, path, exists, completion}] }
  * @param {object} [options]
@@ -1422,9 +1555,43 @@ function collapseAllImpl() {
  * Anything outside `plan-harness/` falls back to `/view?path=<abs>` so legacy
  * fixtures keep working — but new docs all live under plan-harness/.
  */
-function buildDocHref(absPath) {
+/**
+ * Build a doc href from an absolute path.
+ *
+ * Daemon mode (projectId given): returns a project-scoped, root-absolute URL
+ *   /p/<projectId>/<scenario>/<doc>.html — carries project identity so a
+ *   copied link is unambiguous across sessions, and BOTH plan-harness/ and
+ *   plans/ roots yield the SAME shape (kills the v1/v2 asymmetry).
+ *
+ * Legacy mode (no projectId): the historical root-absolute form
+ *   /<scenario>/<doc>.html (under plan-harness/) or /_shared/<rest>, falling
+ *   back to /view?path=<abs> for paths outside a recognised plan root.
+ *
+ * @param {string} absPath
+ * @param {string} [projectId] - when set, emit the /p/<id>/ project-scoped form.
+ */
+function buildDocHref(absPath, projectId) {
   if (!absPath) return '';
   const normalized = String(absPath).replace(/\\/g, '/');
+
+  if (projectId) {
+    // Find the plan-root segment (plan-harness/ or plans/) and take the rest
+    // as <scenario>/<doc>. Same shape for both roots.
+    for (const rootName of ['plan-harness', 'plans']) {
+      const needle = `/${rootName}/`;
+      const idx = normalized.lastIndexOf(needle);
+      if (idx >= 0) {
+        const rest = normalized.slice(idx + needle.length);
+        const enc = rest.split('/').map(encodeURIComponent).join('/');
+        return `/p/${encodeURIComponent(projectId)}/${enc}`;
+      }
+    }
+    // Outside a recognised plan root — still keep it project-scoped by falling
+    // back to the basename (best-effort); avoids leaking /view?path=<abs>.
+    const base = normalized.split('/').pop();
+    return `/p/${encodeURIComponent(projectId)}/${encodeURIComponent(base)}`;
+  }
+
   const idx = normalized.lastIndexOf('/plan-harness/');
   if (idx < 0) return '/view?path=' + encodeURIComponent(absPath);
   const rest = normalized.slice(idx + '/plan-harness/'.length);
@@ -3323,7 +3490,7 @@ export function normalizeChecklistItems(html) {
  * @param {Set<string>} existingSiblings - set of sibling file basenames
  *   (e.g. 'test-cases.html') that exist on disk in the scenario dir.
  */
-export function normalizePlanTabs(html, existingSiblings, scenarioDir) {
+export function normalizePlanTabs(html, existingSiblings, scenarioDir, projectId) {
   if (!html || typeof html !== 'string' || !existingSiblings || existingSiblings.size === 0) return html;
   return html.replace(
     /<nav\b[^>]*class=["'][^"']*\bplan-tabs\b[^"']*["'][^>]*>([\s\S]*?)<\/nav>/gi,
@@ -3347,7 +3514,7 @@ export function normalizePlanTabs(html, existingSiblings, scenarioDir) {
           let newHref = href;
           if (scenarioDir) {
             const absPath = scenarioDir.replace(/\\/g, '/') + '/' + basename;
-            newHref = buildDocHref(absPath);
+            newHref = buildDocHref(absPath, projectId);
           }
 
           let newAttrs = attrs
@@ -3360,6 +3527,112 @@ export function normalizePlanTabs(html, existingSiblings, scenarioDir) {
       return match.replace(inner, newInner);
     }
   );
+}
+
+/**
+ * Reconcile the cross-doc nav (`nav.toc .docgroup`) against what actually
+ * exists on disk. Every generated doc bakes the FULL 7-link workflow nav
+ * (product → analysis → … → test-report) regardless of which siblings have
+ * been generated yet (see prompts/_html-base.md). In a partial plan, the
+ * links for not-yet-generated docs point at files that don't exist — clicking
+ * one used to dead-end on a 404.
+ *
+ * For every `.docgroup` anchor whose target basename is NOT in
+ * `existingSiblings`, this pass:
+ *   - strips the `href` (so it's no longer a live link)
+ *   - adds `class="missing"` + `aria-disabled="true"` + a title tooltip
+ * Links whose target exists are rewritten to the root-absolute form
+ * (`/<scenario>/<doc>.html`) so they resolve no matter how the parent was
+ * served. The active link (`class="active"`) is left as-is.
+ *
+ * Idempotent: re-running on already-normalised HTML is a no-op for existing
+ * links and re-confirms disabled ones.
+ *
+ * @param {string} html
+ * @param {Set<string>} existingSiblings - sibling basenames that exist on disk
+ *   (e.g. 'design.html') in the scenario dir.
+ * @param {string} [scenarioDir] - absolute scenario dir, used to build
+ *   root-absolute hrefs. When omitted, existing hrefs are left untouched.
+ */
+export function normalizeDocGroup(html, existingSiblings, scenarioDir, projectId) {
+  if (!html || typeof html !== 'string' || !existingSiblings) return html;
+  let disabledAny = false;
+  let out = html.replace(
+    /<div\b[^>]*class=["'][^"']*\bdocgroup\b[^"']*["'][^>]*>([\s\S]*?)<\/div>/gi,
+    function (block, inner) {
+      const newInner = inner.replace(
+        /<a\b([^>]*)>([\s\S]*?)<\/a>/gi,
+        function (aMatch, attrs, body) {
+          const hrefMatch = attrs.match(/\bhref\s*=\s*["']([^"']+)["']/i);
+          if (!hrefMatch) return aMatch;
+          const href = hrefMatch[1];
+          // Anchor-only links (#id) and external links are not doc links.
+          if (/^(https?:|mailto:|#)/i.test(href)) return aMatch;
+
+          const basename = href.split(/[\\/]/).pop().split(/[#?]/)[0];
+          if (!basename || !/\.html?$/i.test(basename)) return aMatch;
+
+          if (existingSiblings.has(basename)) {
+            // Target exists — ensure it's a live, root-absolute link and clear
+            // any stale disabled markers from a previous (partial) render.
+            let newHref = href;
+            if (scenarioDir) {
+              const absPath = scenarioDir.replace(/\\/g, '/') + '/' + basename;
+              newHref = buildDocHref(absPath, projectId);
+            }
+            let newAttrs = attrs
+              .replace(/\s+aria-disabled\s*=\s*["'][^"']*["']/gi, '')
+              .replace(/\s+title\s*=\s*["'][^"']*not generated[^"']*["']/gi, '')
+              .replace(/\bhref\s*=\s*["'][^"']+["']/i, 'href="' + newHref.replace(/"/g, '&quot;') + '"');
+            // Drop a lingering "missing" class token if present.
+            newAttrs = newAttrs.replace(
+              /\bclass\s*=\s*["']([^"']*)["']/i,
+              (m, cls) => {
+                const kept = cls.split(/\s+/).filter(c => c && c !== 'missing').join(' ');
+                return kept ? `class="${kept}"` : '';
+              }
+            );
+            return '<a' + newAttrs + '>' + body + '</a>';
+          }
+
+          // Target missing — disable the link so it can't be clicked into a
+          // redirect/404. Drop href, add markers (idempotently).
+          disabledAny = true;
+          let newAttrs = attrs.replace(/\s*\bhref\s*=\s*["'][^"']*["']/i, '');
+          if (!/\baria-disabled\s*=/i.test(newAttrs)) {
+            newAttrs += ' aria-disabled="true"';
+          }
+          if (!/\btitle\s*=/i.test(newAttrs)) {
+            newAttrs += ' title="Not generated yet"';
+          }
+          if (/\bclass\s*=\s*["']/i.test(newAttrs)) {
+            newAttrs = newAttrs.replace(
+              /\bclass\s*=\s*["']([^"']*)["']/i,
+              (m, cls) => /\bmissing\b/.test(cls) ? m : `class="${(cls + ' missing').trim()}"`
+            );
+          } else {
+            newAttrs += ' class="missing"';
+          }
+          return '<a' + newAttrs + '>' + body + '</a>';
+        }
+      );
+      return block.replace(inner, newInner);
+    }
+  );
+
+  // Inject a small idempotent style so disabled links read as muted +
+  // non-interactive on docs that bake their own CSS (self-contained docs
+  // don't ship a `.docgroup a.missing` rule). Guarded by id so re-serving is
+  // a no-op.
+  if (disabledAny && !/id=["']ph-docgroup-missing["']/i.test(out)) {
+    const style = `<style id="ph-docgroup-missing">nav.toc .docgroup a.missing,nav.toc .docgroup a[aria-disabled="true"]{opacity:.4;cursor:not-allowed;pointer-events:none;text-decoration:none;}</style>`;
+    if (/<\/head>/i.test(out)) {
+      out = out.replace(/<\/head>/i, `${style}</head>`);
+    } else {
+      out = style + out;
+    }
+  }
+  return out;
 }
 
 /**
